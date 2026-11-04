@@ -5,6 +5,7 @@ data class OperationReplay(
     val conflicts: Set<String>,
     val waiting: Set<String>,
     val rejected: Set<String>,
+    val invalid: Set<String> = emptySet(),
 )
 
 object ConflictResolver {
@@ -38,8 +39,8 @@ object ConflictResolver {
                 remaining.remove(op.id)
             }
         }
-        val allResolutions = ordered.filter { it.rejected.isNotEmpty() }
-        allResolutions.forEach { op -> require(op.rejected.all { it in ancestors.getValue(op.id) }) { "Resolution must observe rejected operations" } }
+        val invalidResolutions = ordered.filter { op -> op.rejected.any { it !in ancestors.getValue(op.id) } }.mapTo(mutableSetOf()) { it.id }
+        val allResolutions = ordered.filter { it.rejected.isNotEmpty() && it.id !in invalidResolutions }
         val resolutions = allResolutions.filter { a -> allResolutions.none { b ->
             a.id in ancestors.getValue(b.id) && a.resources.keys.any { it in b.resources }
         } }
@@ -48,7 +49,7 @@ object ConflictResolver {
                 a.resources.keys.any { it in b.resources }
         } }.mapTo(mutableSetOf()) { it.id }
         val rejected = resolutions.filter { it.id !in resolutionConflicts }.flatMapTo(mutableSetOf()) { it.rejected }
-        val conflicts = resolutionConflicts.toMutableSet()
+        val conflicts = ((resolutionConflicts + invalidResolutions) - rejected).toMutableSet()
         val candidates = ordered.filter { it.id !in rejected && it.rejected.isEmpty() }
         candidates.forEachIndexed { index, a ->
             candidates.drop(index + 1).forEach { b ->
@@ -71,6 +72,7 @@ object ConflictResolver {
             conflicts = conflicts,
             waiting = remaining.keys + (blocked - conflicts),
             rejected = rejected,
+            invalid = invalidResolutions.intersect(conflicts),
         )
     }
 

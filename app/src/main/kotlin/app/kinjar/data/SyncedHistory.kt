@@ -77,7 +77,7 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
         integrity.validate()
         baseline.baseline.forEach { projector.apply(it.record()) }
         db.syncConflictQueries.deleteAll()
-        replay.conflicts.forEach { db.syncConflictQueries.save(it, "CONCURRENT_CHANGE") }
+        replay.conflicts.forEach { db.syncConflictQueries.save(it, if (it in replay.invalid) "INVALID_FINANCIAL_CHANGE" else "CONCURRENT_CHANGE") }
         replay.waiting.forEach { db.syncConflictQueries.save(it, "WAITING_FOR_DEPENDENCY") }
         val invalid = mutableSetOf<String>()
         replay.applicable.forEach { operation ->

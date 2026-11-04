@@ -148,14 +148,14 @@ class EventStore(
         val session = requireNotNull(db.syncSessionQueries.current().executeAsOneOrNull())
         check(session.status == "ACTIVE" && session.install_id == deviceId)
         val known = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
-        val selected = known.single { it.id == id }
+        require(known.any { it.id == id })
         check(db.syncConflictQueries.all().executeAsList().any { it.operation_id == id })
         val rejected = mutableSetOf(id)
         do { val before = rejected.size; known.filter { it.parents.any(rejected::contains) }.forEach { rejected += it.id } } while (before != rejected.size)
         val resources = known.filter { it.id in rejected }.flatMap { it.resources.keys }.associateWith { app.kinjar.domain.ResourceAccess.WRITE }
         val operation = SyncOperation(familyId = session.family_id, datasetId = session.dataset_id, authorUid = session.uid,
             installId = deviceId, sequence = Math.addExact(db.syncOperationQueries.lastSequence(deviceId).executeAsOne().MAX ?: 0L, 1L),
-            parents = ConflictResolver.parentsFor(known, resources) + selected.id, resources = resources, events = emptyList(), rejected = rejected)
+            parents = ConflictResolver.parentsFor(known, resources) + rejected, resources = resources, events = emptyList(), rejected = rejected)
         db.syncOperationQueries.insert(operation.id, deviceId, operation.sequence, OperationCodec.encode(operation))
         db.syncOutboxQueries.enqueue(operation.id, session.family_id, session.dataset_id)
         synced.rebuild()

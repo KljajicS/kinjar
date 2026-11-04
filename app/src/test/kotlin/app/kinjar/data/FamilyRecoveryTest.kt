@@ -113,6 +113,23 @@ class FamilyRecoveryTest {
         assertEquals("One", db.accountQueries.active().executeAsList().single().name)
     }
 
+    @Test fun `malformed versions and invalid resolutions preserve progress and cloud recovery`() = runTest {
+        store.append(account("a")); enroll()
+        val valid = operation("one", "One")
+        val invalid = operation("two", "Ignored").copy(events = emptyList(), resources = emptyMap(), rejected = setOf("unseen:1"))
+        store.receive(listOf("{}".toByteArray(), OperationCodec.encode(invalid), OperationCodec.encode(valid)),
+            "user", "family", "dataset", 100, 0, valid.id)
+        assertEquals("One", db.accountQueries.active().executeAsList().single().name)
+        assertEquals(1, db.syncQuarantineQueries.all().executeAsList().size)
+        assertEquals(valid.id, db.syncCheckpointQueries.byDataset("dataset").executeAsOne().document_id)
+        assertEquals("INVALID_FINANCIAL_CHANGE", db.syncConflictQueries.all().executeAsList().single().reason)
+        val prepared = store.prepareCloudHistory(store.snapshot())
+        store.validateHistory(prepared)
+        assertEquals(2, prepared.operations.size)
+        store.discardConflictingChange(invalid.id)
+        assertTrue(db.syncConflictQueries.all().executeAsList().isEmpty())
+    }
+
     @Test fun `wrong account and dataset imports preserve local state`() = runTest {
         store.append(account("a")); enroll()
         val bytes = listOf(OperationCodec.encode(operation("one", "One")))

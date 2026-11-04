@@ -72,7 +72,9 @@ object OperationCodec {
         val text = bytes.toString(Charsets.UTF_8)
         require(text.toByteArray(Charsets.UTF_8).contentEquals(bytes)) { "Invalid UTF-8" }
         val root = json.parseToJsonElement(text).jsonObject
-        if (root["version"]?.jsonPrimitive?.intOrNull != 1) throw UnsupportedSyncVersion()
+        val version = root["version"]?.jsonPrimitive?.intOrNull
+        require(version != null && version > 0) { "Invalid sync version" }
+        if (version > 1) throw UnsupportedSyncVersion()
         return json.decodeFromString<SyncOperation>(text)
     }
 }

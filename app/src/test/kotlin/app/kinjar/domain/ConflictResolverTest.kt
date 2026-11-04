@@ -66,4 +66,25 @@ class ConflictResolverTest {
         assertEquals(original, OperationCodec.decode(bytes))
         assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(bytes.toString(Charsets.UTF_8).replace("\"version\":1", "\"version\":2").toByteArray()) }
     }
+
+    @Test fun `invalid resolution cannot reject unobserved commands or block independent work`() {
+        val valid = op("a")
+        val invalid = op("b", rejected = setOf(valid.id))
+        val child = op("b", 2, parents = setOf(invalid.id), resources = mapOf("transaction:other" to ResourceAccess.WRITE))
+        val result = ConflictResolver.replay(listOf(valid, invalid, child))
+        assertEquals(listOf(valid), result.applicable)
+        assertEquals(setOf(invalid.id), result.invalid)
+        assertEquals(setOf(invalid.id), result.conflicts)
+        assertEquals(setOf(child.id), result.waiting)
+        assertTrue(result.rejected.isEmpty())
+        val discard = op("c", parents = setOf(invalid.id, child.id), rejected = setOf(invalid.id, child.id))
+        assertTrue(ConflictResolver.replay(listOf(valid, invalid, child, discard)).conflicts.isEmpty())
+    }
+
+    @Test fun `missing zero and negative versions are invalid rather than upgrade required`() {
+        listOf("{}", "{\"version\":0}", "{\"version\":-1}").forEach { text ->
+            val error = assertThrows(IllegalArgumentException::class.java) { OperationCodec.decode(text.toByteArray()) }
+            assertFalse(error is UnsupportedSyncVersion)
+        }
+    }
 }
