@@ -109,7 +109,8 @@ fun PaceBar(ratio: Float, pace: Float, color: Color, height: Dp, modifier: Modif
 }
 
 @Composable
-fun FieldBox(label: String, value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, keyboardOptions: KeyboardOptions = KeyboardOptions.Default) {
+fun FieldBox(label: String, value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+             visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None) {
     val c = LocalColors.current
     OutlinedBox(modifier.fillMaxWidth().heightIn(min = 48.dp), radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)) {
         Text(label, style = CaptionStyle, color = c.muted, modifier = Modifier.clearAndSetSemantics {})
@@ -117,6 +118,7 @@ fun FieldBox(label: String, value: String, onValueChange: (String) -> Unit, modi
             value = value,
             onValueChange = onValueChange,
             keyboardOptions = keyboardOptions,
+            visualTransformation = visualTransformation,
             singleLine = true,
             textStyle = sans(14, FontWeight.Medium).copy(color = c.text),
             cursorBrush = SolidColor(c.primary),

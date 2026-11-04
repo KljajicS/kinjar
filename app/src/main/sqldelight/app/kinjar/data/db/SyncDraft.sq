@@ -14,3 +14,6 @@ INSERT INTO sync_draft VALUES (?, ?, ?, ?, ?);
 
 deleteAll:
 DELETE FROM sync_draft;
+
+deleteFamily:
+DELETE FROM sync_draft WHERE uid = ? AND family_id = ?;

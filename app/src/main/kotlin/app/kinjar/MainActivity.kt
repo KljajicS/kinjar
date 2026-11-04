@@ -272,7 +272,18 @@ fun KinjarRoot(root: RootViewModel) {
                     onAccounts = { nav.navigate(Tab.ACCOUNTS.route) { launchSingleTop = true } },
                     onRecurring = { nav.navigate(Routes.RECURRING) },
                     onRates = { nav.navigate(Routes.EXCHANGE_RATES) },
+                    onFamily = { nav.navigate(Routes.FAMILY) },
+                    onBackup = { nav.navigate(Routes.BACKUP) },
                 )
+            }
+            composable(Routes.FAMILY) {
+                app.kinjar.ui.sync.FamilyScreen(onBack = { nav.popBackStack() },
+                    onContinue = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } },
+                    onBackup = { nav.navigate(Routes.BACKUP) })
+            }
+            composable(Routes.BACKUP) {
+                app.kinjar.ui.sync.BackupScreen(onBack = { nav.popBackStack() },
+                    onContinue = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } })
             }
             composable(Routes.RECURRING) {
                 RecurringScreen(
@@ -317,7 +328,8 @@ fun KinjarRoot(root: RootViewModel) {
             composable(Routes.EDIT_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.EDIT_TRANSACTION) { AddScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.SETUP) {
-                SetupScreen(onDone = { nav.navigate(Tab.HOME.route) { popUpTo(Routes.SETUP) { inclusive = true } } })
+                SetupScreen(onDone = { nav.navigate(Tab.HOME.route) { popUpTo(Routes.SETUP) { inclusive = true } } },
+                    onFamily = { nav.navigate(Routes.FAMILY) }, onBackup = { nav.navigate(Routes.BACKUP) })
             }
             composable(
                 Routes.ADD,

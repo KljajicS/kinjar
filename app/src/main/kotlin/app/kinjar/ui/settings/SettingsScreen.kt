@@ -57,7 +57,8 @@ import app.kinjar.ui.theme.TitleStyle
 import app.kinjar.ui.theme.sans
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onCategories: () -> Unit, onAccounts: () -> Unit, onRecurring: () -> Unit, onRates: () -> Unit, vm: SettingsViewModel = hiltViewModel(), lockVm: AppLockViewModel = hiltViewModel()) {
+fun SettingsScreen(onBack: () -> Unit, onCategories: () -> Unit, onAccounts: () -> Unit, onRecurring: () -> Unit, onRates: () -> Unit,
+                   onFamily: () -> Unit, onBackup: () -> Unit, vm: SettingsViewModel = hiltViewModel(), lockVm: AppLockViewModel = hiltViewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
     val c = LocalColors.current
 
@@ -83,6 +84,8 @@ fun SettingsScreen(onBack: () -> Unit, onCategories: () -> Unit, onAccounts: () 
         SettingsRow(stringResource(R.string.settings_accounts), onAccounts)
         SettingsRow(stringResource(R.string.settings_recurring), onRecurring)
         SettingsRow(stringResource(R.string.rates_title), onRates)
+        SettingsRow(stringResource(R.string.fbs_family), onFamily)
+        SettingsRow(stringResource(R.string.fbs_backups), onBackup)
     }
 }
 

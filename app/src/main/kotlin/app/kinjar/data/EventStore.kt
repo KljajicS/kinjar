@@ -148,14 +148,14 @@ class EventStore(
 
     fun clearRemovedFamily(uid: String, familyId: String) = read {
         val session = db.syncSessionQueries.current().executeAsOneOrNull() ?: return@read
-        check(session.uid == uid && session.family_id == familyId)
+        if (session.uid != uid || session.family_id != familyId) return@read
         projector.clear()
         db.syncOutboxQueries.deleteAll()
         db.syncOperationQueries.deleteAll()
         db.syncConflictQueries.deleteAll()
         db.syncCheckpointQueries.deleteAll()
         db.syncBaselineQueries.deleteAll()
-        db.syncDraftQueries.deleteAll()
+        db.syncDraftQueries.deleteFamily(uid, familyId)
         db.restoreJournalQueries.deleteAll()
         db.eventQueries.deleteAll()
         db.syncSessionQueries.deleteAll()

@@ -44,7 +44,7 @@ import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 
 @Composable
-fun SetupScreen(onDone: () -> Unit, vm: SetupViewModel = hiltViewModel()) {
+fun SetupScreen(onDone: () -> Unit, onFamily: () -> Unit, onBackup: () -> Unit, vm: SetupViewModel = hiltViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val c = LocalColors.current
     val resources = LocalContext.current.resources
@@ -59,6 +59,8 @@ fun SetupScreen(onDone: () -> Unit, vm: SetupViewModel = hiltViewModel()) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(stringResource(R.string.setup_title), style = TitleStyle, color = c.text)
+        if (app.kinjar.BuildConfig.FIREBASE_SYNC_ENABLED) androidx.compose.material3.TextButton(onClick = onFamily) { Text(stringResource(R.string.fbs_join_or_recover)) }
+        androidx.compose.material3.TextButton(onClick = onBackup) { Text(stringResource(R.string.fbs_import)) }
         FieldBox(stringResource(R.string.setup_name_label), state.name, vm::setName)
 
         Text(stringResource(R.string.setup_accounts_title), style = SectionStyle, color = c.text, modifier = Modifier.padding(top = 6.dp))
