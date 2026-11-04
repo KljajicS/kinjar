@@ -26,6 +26,19 @@ class ReceiptRepositoryTest {
         "cat-groceries", r.date, "", r.merchant, "member", TransactionSource.RECEIPT)
     private suspend fun seed() = repo.setUp("Family", listOf(Account("cash", "Cash", Currency.RSD, AccountKind.SPENDING)))
 
+    @Test fun `receipt lookup preserves original metadata and fractional items through replay`() = runTest {
+        seed()
+        assertNull(repo.receiptForTransaction("missing"))
+        val original = receipt.copy(items = listOf(ReceiptItem("Weighted item", BigDecimal("0.345"),
+            BigDecimal("100.00"), BigDecimal("34.50"))), total = Money.of("34.50", Currency.RSD))
+        repo.addReceipt(tx(original), original)
+        assertEquals(original, repo.receiptForTransaction(original.transactionId))
+        repo.edit(tx(original).copy(merchant = "Corrected", money = Money.of("40", Currency.RSD)))
+        store.rebuild()
+        assertEquals(original, repo.receiptForTransaction(original.transactionId))
+        assertEquals("Corrected", repo.transaction(original.transactionId)?.merchant)
+    }
+
     @Test fun `concurrent confirmations store one expense and one receipt event`() = runTest {
         seed()
         val before = db.eventQueries.count().executeAsOne()
@@ -43,11 +56,13 @@ class ReceiptRepositoryTest {
     @Test fun `delete and late duplicate never resurrect receipt expense on rebuild`() = runTest {
         seed()
         repo.addReceipt(tx(), receipt)
+        assertEquals(receipt, repo.receiptForTransaction(receipt.transactionId))
         repo.delete(receipt.transactionId)
         store.applyRemote(listOf(EventRecord("remote", "two", 1, clock.now().plusSeconds(60), TransactionAdded(tx(), receipt))))
         store.rebuild()
         assertTrue(repo.transactions.first().isEmpty())
         assertTrue(repo.hasReceipt(receipt.id))
+        assertEquals(receipt, repo.receiptForTransaction(receipt.transactionId))
         assertTrue(runCatching { repo.addReceipt(tx(), receipt) }.exceptionOrNull() is DuplicateReceipt)
     }
 

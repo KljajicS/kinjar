@@ -207,6 +207,13 @@ class BudgetRepository(
         db.receiptQueries.byId(id).executeAsOneOrNull() != null
     }
 
+    suspend fun receiptForTransaction(transactionId: String): Receipt? = withContext(Dispatchers.IO) {
+        db.receiptQueries.byTransaction(transactionId).executeAsOneOrNull()?.let {
+            Receipt(it.fiscal_url, it.issuer, it.invoice_number, it.merchant, LocalDate.parse(it.date),
+                Money.of(it.total, Currency.RSD), app.kinjar.domain.EventJson.decodeFromString(it.items_json))
+        }
+    }
+
     suspend fun receiptCategory(issuer: String): String? = withContext(Dispatchers.IO) {
         db.receiptQueries.suggestCategory(issuer).executeAsOneOrNull()?.category_id
     }
