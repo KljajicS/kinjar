@@ -108,6 +108,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
     @Inject lateinit var appLock: AppLock
+    @Inject lateinit var sync: dagger.Lazy<app.kinjar.data.sync.SyncCoordinator>
     private lateinit var prompter: LockPrompter
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -118,6 +119,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (BuildConfig.FIREBASE_SYNC_ENABLED) lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { sync.get().foreground() }
+        }
         // Main.immediate collects synchronously, so FLAG_SECURE is set before the first frame.
         lifecycleScope.launch {
             appLock.state.map { it.enabled }.distinctUntilChanged().collect { secure ->

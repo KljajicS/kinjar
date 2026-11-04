@@ -1,0 +1,16 @@
+CREATE TABLE sync_draft (
+    id TEXT NOT NULL PRIMARY KEY,
+    uid TEXT NOT NULL,
+    family_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    payload BLOB NOT NULL
+);
+
+all:
+SELECT * FROM sync_draft WHERE uid = ? ORDER BY created_at DESC;
+
+save:
+INSERT INTO sync_draft VALUES (?, ?, ?, ?, ?);
+
+deleteAll:
+DELETE FROM sync_draft;

@@ -31,3 +31,6 @@ SELECT COUNT(*) FROM event WHERE device_id = ? AND seq = ?;
 
 bySequence:
 SELECT * FROM event WHERE device_id = ? AND seq = ?;
+
+deleteAll:
+DELETE FROM event;

@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, writeBatch, Bytes, Timestamp, serverTimestamp, setLogLevel } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, writeBatch, Bytes, Timestamp, serverTimestamp, setLogLevel, onSnapshot } from 'firebase/firestore';
 
 setLogLevel('silent');
 
@@ -21,6 +21,8 @@ function db(uid, provider = 'google.com') {
 const family = (members = { owner: 'm-owner' }) => ({ owner: 'owner', admins: ['owner'], members, slot: '0',
   activeDataset: 'current', otherDataset: '', generation: 1, status: 'ACTIVE', action: 'create', target: '', inviteSlot: '' });
 const state = () => ({ count: 0, bytes: 0, day: Math.floor(Date.now() / 86400000), dailyCount: 0, lastOpId: '' });
+const initialState = () => ({ ...state(), chunks: 0, chunkBytes: 0, expectedChunks: 1,
+  expectedBytes: 3, digest: '0'.repeat(64), lastChunk: '', sealed: false });
 async function seed(members, overrides = {}) {
   await env.withSecurityRulesDisabled(async context => {
     const d = context.firestore();
@@ -137,7 +139,7 @@ test('family creation reserves one public slot and links account atomically', as
   await assertFails(create('out-of-range', '10'));
   await assertSucceeds(create('family', '0'));
   await assertFails(create('second', '1'));
-  await assertSucceeds(setDoc(doc(d, 'families/family/datasets/current'), state()));
+  await assertSucceeds(setDoc(doc(d, 'families/family/datasets/current'), initialState()));
 });
 test('ordinary users cannot claim a slot or forge family reference separately', async () => {
   const d = db('owner');
@@ -176,4 +178,62 @@ test('invitation creation is bounded and cannot name another inviter', async () 
   await assertFails(setDoc(doc(d, 'families/family/invites/6'), invite));
   await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, inviter: 'stranger' }));
   await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, expiresAt: Timestamp.fromMillis(Date.now() + 9 * 86400000) }));
+});
+
+test('bootstrap requires complete immutable chunks before activation', async () => {
+  await seed(undefined, { status: 'INITIALIZING' });
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), initialState()));
+  const d = db('owner');
+  const stateRef = doc(d, 'families/family/datasets/current');
+  const chunkRef = doc(d, 'families/family/datasets/current/chunks/0');
+  const payload = Bytes.fromUint8Array(new Uint8Array([1, 2, 3]));
+  const activate = () => {
+    const b = writeBatch(d);
+    b.update(stateRef, { sealed: true });
+    b.update(doc(d, 'families/family'), { status: 'ACTIVE', action: 'activate' });
+    return b.commit();
+  };
+  await assertFails(activate());
+  await assertFails(setDoc(chunkRef, { payload }));
+  await assertFails(updateDoc(stateRef, { chunks: 1, chunkBytes: 3, lastChunk: '0' }));
+  const b = writeBatch(d);
+  b.set(chunkRef, { payload });
+  b.update(stateRef, { chunks: 1, chunkBytes: 3, lastChunk: '0' });
+  await assertSucceeds(b.commit());
+  await assertFails(setDoc(chunkRef, { payload }));
+  await assertSucceeds(activate());
+  await assertFails(updateDoc(stateRef, { sealed: false }));
+  await assertSucceeds(upload(d).commit());
+  await assertFails(upload(d, { state: { chunkBytes: 0 } }).commit());
+});
+
+test('live membership listener reports removal while finance listener loses access', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  const wife = db('wife');
+  const unsubscribers = [];
+  let start;
+  const started = new Promise(resolve => { start = resolve; });
+  const revoked = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Listener revocation timed out')), 10000);
+    unsubscribers.push(onSnapshot(doc(wife, 'families/family/datasets/current'), () => start(), error => {
+      clearTimeout(timeout);
+      error.code === 'permission-denied' ? resolve() : reject(error);
+    }));
+  });
+  const removed = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Removal proof timed out')), 10000);
+    unsubscribers.push(onSnapshot(doc(wife, 'users/wife'), snapshot => {
+      if (snapshot.data()?.status === 'REMOVED') { clearTimeout(timeout); resolve(); }
+    }, reject));
+  });
+  try {
+    await started;
+    const owner = db('owner');
+    const batch = writeBatch(owner);
+    batch.update(doc(owner, 'families/family'), { members: { owner: 'm-owner' }, action: 'remove', target: 'wife' });
+    batch.update(doc(owner, 'users/wife'), { status: 'REMOVED' });
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(upload(owner).commit());
+    await Promise.all([revoked, removed]);
+  } finally { unsubscribers.forEach(unsubscribe => unsubscribe()); }
 });

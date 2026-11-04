@@ -111,7 +111,14 @@ service cloud.firestore {
           && request.resource.data.action in ['roles', 'transfer']
           && (request.resource.data.owner == resource.data.owner || request.resource.data.action == 'transfer');
       }
-      allow update: if signedIn() && familyShape(request.resource.data) && (joining() || removing() || roles());
+      function activateInitial() {
+        let state = getAfter(statePath(fid, resource.data.activeDataset)).data;
+        return request.auth.uid == resource.data.owner && resource.data.status == 'INITIALIZING'
+          && request.resource.data.status == 'ACTIVE' && request.resource.data.action == 'activate'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action'])
+          && state.sealed == true && state.chunks == state.expectedChunks && state.chunkBytes == state.expectedBytes;
+      }
+      allow update: if signedIn() && familyShape(request.resource.data) && (joining() || removing() || roles() || activateInitial());
 
       match /invites/{sid} {
         allow get, list: if signedIn() && (resource.data.email == request.auth.token.email || admin(fid));
@@ -146,9 +153,10 @@ service cloud.firestore {
       match /datasets/{did} {
         allow get: if member(fid);
         function stateShape(d) {
-          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId'])
+          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId', 'chunks', 'chunkBytes', 'expectedChunks', 'expectedBytes', 'digest', 'lastChunk', 'sealed'])
             && d.count is int && d.count >= 0 && d.count <= 1000
             && d.bytes is int && d.bytes >= 0 && d.bytes <= 10485760
+            && d.bytes + d.get('chunkBytes', 0) <= 10485760
             && d.day is int && d.dailyCount is int && d.dailyCount >= 0 && d.dailyCount <= 200
             && d.lastOpId is string && d.lastOpId.size() <= 160;
         }
@@ -160,17 +168,56 @@ service cloud.firestore {
         function increment(before, after, oid, payload) {
           return stateShape(after) && after.count == before.count + 1 && after.bytes == before.bytes + payload.size()
             && after.day == day() && after.dailyCount == (before.day == day() ? before.dailyCount + 1 : 1)
-            && after.lastOpId == oid;
+            && after.lastOpId == oid
+            && after.diff(before).affectedKeys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId']);
+        }
+        function manifest(d) {
+          return d.expectedChunks is int && d.expectedChunks >= 1 && d.expectedChunks <= 20
+            && d.expectedBytes is int && d.expectedBytes > 0 && d.expectedBytes <= 10485760
+            && d.digest is string && d.digest.matches('[0-9a-f]{64}')
+            && d.chunks is int && d.chunks >= 0 && d.chunks <= d.expectedChunks
+            && d.chunkBytes is int && d.chunkBytes >= 0 && d.chunkBytes <= d.expectedBytes
+            && d.lastChunk is string && d.lastChunk.size() <= 2 && d.sealed is bool;
+        }
+        function initializing() {
+          let f = get(familyPath(fid)).data;
+          return signedIn() && request.auth.uid == f.owner && f.status == 'INITIALIZING' && f.activeDataset == did;
+        }
+        function chunkIncrement(before, after, cid, payload) {
+          return manifest(after) && stateShape(after) && before.sealed == false && after.sealed == false
+            && after.chunks == before.chunks + 1 && after.chunkBytes == before.chunkBytes + payload.size()
+            && after.lastChunk == cid
+            && after.diff(before).affectedKeys().hasOnly(['chunks', 'chunkBytes', 'lastChunk']);
+        }
+        function sealing() {
+          return resource.data.sealed == false && request.resource.data.sealed == true
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sealed'])
+            && resource.data.chunks == resource.data.expectedChunks && resource.data.chunkBytes == resource.data.expectedBytes
+            && getAfter(familyPath(fid)).data.status == 'ACTIVE';
         }
         allow create: if admin(fid) && get(familyPath(fid)).data.status == 'INITIALIZING'
           && get(familyPath(fid)).data.activeDataset == did && stateShape(request.resource.data)
           && request.resource.data.count == 0 && request.resource.data.bytes == 0
           && request.resource.data.dailyCount == 0 && request.resource.data.day == day()
-          && request.resource.data.lastOpId == '';
+          && request.resource.data.lastOpId == '' && manifest(request.resource.data)
+          && request.resource.data.chunks == 0 && request.resource.data.chunkBytes == 0 && request.resource.data.sealed == false;
         allow update: if writable() && stateShape(request.resource.data)
           && !exists(opPath(fid, did, request.resource.data.lastOpId))
           && increment(resource.data, request.resource.data, request.resource.data.lastOpId,
-            getAfter(opPath(fid, did, request.resource.data.lastOpId)).data.payload);
+            getAfter(opPath(fid, did, request.resource.data.lastOpId)).data.payload)
+          || (initializing() && (sealing() ||
+            (!exists(/databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk))
+              && chunkIncrement(resource.data, request.resource.data, request.resource.data.lastChunk,
+                getAfter(/databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk)).data.payload))));
+
+        match /chunks/{cid} {
+          allow get, list: if member(fid) && get(familyPath(fid)).data.activeDataset == did;
+          allow create: if initializing() && cid.matches('[0-9]{1,2}') && string(int(cid)) == cid
+            && request.resource.data.keys().hasOnly(['payload']) && request.resource.data.payload is bytes
+            && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
+            && int(cid) < get(statePath(fid, did)).data.expectedChunks
+            && chunkIncrement(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, cid, request.resource.data.payload);
+        }
 
         match /operations/{oid} {
           allow get, list: if member(fid) && get(familyPath(fid)).data.activeDataset == did;

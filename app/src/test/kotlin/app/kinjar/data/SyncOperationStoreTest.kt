@@ -27,7 +27,7 @@ class SyncOperationStoreTest {
         assertEquals(saved.id, queued.id)
         assertArrayEquals(saved.payload, queued.payload)
         val reopened = EventStore(db, "device", clock, Projector(db))
-        reopened.append(account("c"))
+        reopened.append(AccountUpdated(Account("a", "Renamed", Currency.RSD, AccountKind.SPENDING)))
         val next = OperationCodec.decode(db.syncOperationQueries.all().executeAsList().last().payload)
         assertEquals(2L, next.sequence)
         assertEquals(setOf("device:1"), next.parents)

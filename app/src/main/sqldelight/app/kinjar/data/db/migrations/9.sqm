@@ -1,0 +1,11 @@
+CREATE TABLE sync_baseline (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton = 1),
+    payload BLOB NOT NULL
+);
+CREATE TABLE sync_draft (
+    id TEXT NOT NULL PRIMARY KEY,
+    uid TEXT NOT NULL,
+    family_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    payload BLOB NOT NULL
+);

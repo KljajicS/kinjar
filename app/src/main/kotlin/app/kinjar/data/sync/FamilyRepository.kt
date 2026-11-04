@@ -33,13 +33,13 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
 
     suspend fun info(familyId: String): FamilyInfo = decode(family(familyId).get(Source.SERVER).await())
 
-    suspend fun create(memberId: String): FamilyInfo {
+    suspend fun create(memberId: String, id: String, dataset: String): FamilyInfo {
         val user = uid()
-        val id = newId()
-        val dataset = newId()
         db.runTransaction { transaction ->
+            check(uid() == user)
             val userRef = db.collection("users").document(user)
             val existing = transaction.get(userRef)
+            if (existing.getString("familyId") == id && existing.getString("status") == "ACTIVE") return@runTransaction
             check(!existing.exists() || existing.getString("status") == "REMOVED") { "Account already belongs to a family" }
             val slots = (0..9).map { db.collection("slots").document(it.toString()) }
             val slot = slots.zip(slots.map { transaction.get(it) }).firstOrNull { !it.second.exists() }?.first

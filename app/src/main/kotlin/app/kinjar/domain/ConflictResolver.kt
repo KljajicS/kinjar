@@ -8,6 +8,20 @@ data class OperationReplay(
 )
 
 object ConflictResolver {
+    fun parentsFor(operations: List<SyncOperation>, resources: Map<String, ResourceAccess>): Set<String> {
+        val nodes = operations.associateBy { it.id }
+        val relevant = operations.filter { op -> resources.any { (key, mode) ->
+            op.resources[key]?.let { mode == ResourceAccess.WRITE || it == ResourceAccess.WRITE } == true
+        } }.mapTo(mutableSetOf()) { it.id }
+        val ancestors = mutableSetOf<String>()
+        val pending = ArrayDeque(relevant.flatMap { nodes.getValue(it).parents })
+        while (pending.isNotEmpty()) {
+            val id = pending.removeFirst()
+            if (ancestors.add(id)) nodes[id]?.parents?.let(pending::addAll)
+        }
+        return relevant - ancestors
+    }
+
     fun replay(operations: Collection<SyncOperation>): OperationReplay {
         val nodes = operations.associateBy { it.id }
         require(nodes.size == operations.size) { "Duplicate operation" }

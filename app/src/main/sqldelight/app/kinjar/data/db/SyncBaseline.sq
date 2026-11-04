@@ -1,0 +1,13 @@
+CREATE TABLE sync_baseline (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton = 1),
+    payload BLOB NOT NULL
+);
+
+current:
+SELECT payload FROM sync_baseline WHERE singleton = 1;
+
+save:
+INSERT OR REPLACE INTO sync_baseline VALUES (1, ?);
+
+deleteAll:
+DELETE FROM sync_baseline;
