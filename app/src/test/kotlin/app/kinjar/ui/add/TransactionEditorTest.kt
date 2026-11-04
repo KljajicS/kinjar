@@ -47,7 +47,8 @@ class TransactionEditorTest {
     private val dispatcher = StandardTestDispatcher()
     private val clock = FixedClock(Instant.parse("2026-10-14T10:00:00Z"), ZoneId.of("Europe/Belgrade"))
     private val db = testDb()
-    private val repo = BudgetRepository(db, EventStore(db, "dev-1", clock, Projector(db)), clock, "dev-1")
+    private val store = EventStore(db, "dev-1", clock, Projector(db))
+    private val repo = BudgetRepository(db, store, clock, "dev-1")
     private val remembered = mutableMapOf<TransactionType, String>()
     private val accountStore = TransactionAccountStore(remembered::get) { type, id -> remembered[type] = id }
     private fun rsd(v: String) = Money.of(v, Currency.RSD)
@@ -71,6 +72,7 @@ class TransactionEditorTest {
         repo.add(tx("t"))
         val vm = editor("t")
         val s = vm.state.value
+        assertNull(s.savedReceipt)
         assertEquals("100", s.amount.text)
         assertEquals("cash", s.accountId)
         assertEquals(clock.today().minusDays(2), s.date)
@@ -127,15 +129,64 @@ class TransactionEditorTest {
         val receipt = Receipt("https://suf.purs.gov.rs/v/?vl=x", "1", "INV-1", "Shop", clock.today(), rsd("100"), emptyList())
         repo.addReceipt(tx(receipt.transactionId, TransactionSource.RECEIPT), receipt)
         val vm = editor(receipt.transactionId)
+        assertEquals(receipt, vm.state.value.savedReceipt)
+        assertNull(vm.state.value.receipt)
         vm.setType(TransactionType.INCOME)
         assertEquals(TransactionType.EXPENSE, vm.state.value.type)
         vm.setAccount("eur")
         assertFalse(vm.state.value.canSave)
         vm.setAccount("card")
+        vm.press('5')
+        vm.setMerchant("Corrected merchant")
         vm.save()
         vm.state.first { it.saved }
         assertEquals(receipt.transactionId, repo.transactions.first().single().id)
         assertEquals(TransactionSource.RECEIPT, repo.transactions.first().single().source)
+        assertEquals(rsd("1005"), repo.transactions.first().single().money)
+        assertEquals(receipt, repo.receiptForTransaction(receipt.transactionId))
+        assertEquals(receipt, editor(receipt.transactionId).state.value.savedReceipt)
+    }
+
+    @Test fun `failed receipt load and retry cannot create a new transaction`() = runTest(dispatcher) {
+        seed()
+        val receipt = Receipt("https://suf.purs.gov.rs/v/?vl=x", "1", "INV-1", "Shop", clock.today(), rsd("100"), emptyList())
+        val original = tx(receipt.transactionId, TransactionSource.RECEIPT)
+        repo.addReceipt(original, receipt)
+        db.receiptQueries.deleteAll()
+        db.receiptQueries.insert(receipt.id, receipt.transactionId, receipt.issuer, receipt.invoiceNumber,
+            receipt.fiscalUrl, receipt.merchant, receipt.date.toString(), "100.00", "broken")
+        val handle = SavedStateHandle(mapOf("id" to receipt.transactionId))
+        val vm = AddViewModel(repo, clock, handle, accountStore).also { models += it }
+        assertTrue(vm.state.value.loading)
+        assertFalse(vm.state.value.canSave)
+        vm.state.first { it.loadFailed }
+        vm.press('5')
+        vm.setAccount("cash")
+        vm.save()
+        vm.delete()
+        advanceUntilIdle()
+        assertEquals(listOf(original), repo.transactions.first())
+        assertFalse(vm.state.value.canSave)
+        assertTrue(handle.keys().none { it.startsWith("draft.") })
+
+        store.rebuild()
+        vm.retryLoad()
+        assertTrue(vm.state.value.loading)
+        vm.save()
+        vm.delete()
+        vm.state.first { !it.loading && it.editing != null }
+        assertEquals(receipt, vm.state.value.savedReceipt)
+        assertEquals("100", vm.state.value.amount.text)
+        val loaded = vm.state.value
+        assertTrue(loaded.canSave)
+        assertFalse(loaded.copy(loading = true).canSave)
+        assertFalse(loaded.copy(loadFailed = true).canSave)
+        vm.setMerchant("Corrected")
+        vm.save()
+        vm.state.first { it.saved }
+        assertEquals(listOf(original.copy(merchant = "Corrected")), repo.transactions.first())
+        assertEquals(receipt, repo.receiptForTransaction(receipt.transactionId))
+        assertTrue(handle.keys().none { handle.get<Any>(it) == receipt.fiscalUrl })
     }
 
     @Test fun `paid bill cannot move into the future and deleting it reopens the bill`() = runTest(dispatcher) {

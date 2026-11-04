@@ -50,6 +50,7 @@ data class AddState(
     val saving: Boolean = false,
     @StringRes val saveError: Int? = null,
     val receipt: Receipt? = null,
+    val savedReceipt: Receipt? = null,
     val paidByName: String = "",
     val bill: Bill? = null,
     /** The stored transaction being corrected; its id, source, payer and note survive the edit. */
@@ -57,13 +58,14 @@ data class AddState(
     val missing: Boolean = false,
     val loanLocked: Boolean = false,
     val loadFailed: Boolean = false,
+    val loading: Boolean = false,
     val today: LocalDate = date,
 ) {
     val typeLocked: Boolean get() = bill != null || receipt != null || (editing != null && editing.source != TransactionSource.MANUAL)
     val rsdOnly: Boolean get() = receipt != null || editing?.source == TransactionSource.RECEIPT
     val billInFuture: Boolean get() = editing?.source == TransactionSource.RECURRING && date > today
 
-    val canSave: Boolean get() = !saving && !saved && !missing && !loanLocked && amount.value != null && accountId != null && error == null &&
+    val canSave: Boolean get() = !loading && !loadFailed && !saving && !saved && !missing && !loanLocked && amount.value != null && accountId != null && error == null &&
         accounts.any { it.id == accountId && !it.archived && it.currency == currency } &&
         (!rsdOnly || currency == Currency.RSD) && !billInFuture &&
         (type != TransactionType.EXPENSE || categoryId == null || categories.any { it.id == categoryId }) &&
@@ -77,7 +79,7 @@ class AddViewModel @Inject constructor(
     private val savedState: SavedStateHandle,
     private val transactionAccounts: TransactionAccountStore = TransactionAccountStore({ null }, { _, _ -> }),
 ) : ViewModel() {
-    private val _state = MutableStateFlow(AddState(date = clock.today()))
+    private val _state = MutableStateFlow(AddState(date = clock.today(), loading = true))
     val state: StateFlow<AddState> = _state
     private val accountChoices = mutableMapOf<TransactionType, String>()
     private var prefilled = false
@@ -89,7 +91,7 @@ class AddViewModel @Inject constructor(
 
     fun retryLoad() {
         if (!_state.value.loadFailed) return
-        _state.update { it.copy(loadFailed = false) }
+        _state.update { it.copy(loadFailed = false, loading = true) }
         load()
     }
 
@@ -106,13 +108,13 @@ class AddViewModel @Inject constructor(
                 _state.update { s ->
                     val keepCategory = s.receipt != null || s.bill != null || s.editing != null || s.categoryId == null || categories.any { it.id == s.categoryId }
                     selectAccount(s.copy(categoryId = if (keepCategory) s.categoryId else sortedCategories.firstOrNull()?.id,
-                        paidByName = memberName, accounts = accounts, categories = sortedCategories))
+                        paidByName = memberName, accounts = accounts, categories = sortedCategories, loading = false))
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            _state.update { it.copy(loadFailed = true) }
+            _state.update { it.copy(loadFailed = true, loading = false) }
         }
     }
 
@@ -125,11 +127,12 @@ class AddViewModel @Inject constructor(
                 return
             }
             val locked = t.type == TransactionType.LOAN_RECEIPT || repo.isLoanLinked(t.id)
+            val savedReceipt = repo.receiptForTransaction(t.id)
             _state.update {
                 it.copy(
                     type = t.type, amount = AmountInput(t.money.amount.stripTrailingZeros().toPlainString()), currency = t.money.currency,
                     categoryId = t.categoryId, accountId = t.accountId, toAccountId = t.toAccountId, date = t.date, merchant = t.merchant,
-                    editing = t, loanLocked = locked,
+                    editing = t, loanLocked = locked, savedReceipt = savedReceipt,
                 )
             }
             return
@@ -156,6 +159,7 @@ class AddViewModel @Inject constructor(
 
     /** Receipts are never persisted: the scan screen re-reads them, and the fiscal URL should not sit in saved state. */
     private fun persist(s: AddState) {
+        if (s.loading || s.loadFailed) return
         if (s.receipt != null || s.missing || s.loanLocked || s.saved) {
             DRAFT_KEYS.forEach { savedState.remove<Any>(it) }
             return
@@ -214,7 +218,7 @@ class AddViewModel @Inject constructor(
     }
 
     fun skip() {
-        if (_state.value.saving || _state.value.saved) return
+        if (_state.value.loading || _state.value.loadFailed || _state.value.saving || _state.value.saved) return
         val bill = _state.value.bill ?: return
         _state.update { it.copy(saving = true, saveError = null) }
         viewModelScope.launch {
@@ -309,7 +313,7 @@ class AddViewModel @Inject constructor(
     fun delete() {
         val s = _state.value
         val original = s.editing ?: return
-        if (s.saving || s.saved || s.loanLocked) return
+        if (s.loading || s.loadFailed || s.saving || s.saved || s.loanLocked) return
         _state.update { it.copy(saving = true, saveError = null) }
         viewModelScope.launch {
             try {

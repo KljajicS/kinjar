@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -95,7 +97,7 @@ fun AddContent(
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
     val separator = DecimalFormatSymbols(locale).decimalSeparator
-    val readOnly = s.missing || s.loanLocked
+    val readOnly = s.missing || s.loanLocked || s.loading || s.loadFailed
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
     Column(
@@ -120,6 +122,8 @@ fun AddContent(
                 TextButton(onClick = onRetry) { Text(stringResource(R.string.audit_finance_retry)) }
             }
             when {
+                s.loading -> CircularProgressIndicator(color = c.primary)
+                s.loadFailed -> Unit
                 s.missing -> Text(stringResource(R.string.audit_finance_missing), style = sans(15), color = c.orange)
                 s.loanLocked -> Text(stringResource(R.string.audit_finance_loan_locked), style = sans(15), color = c.orange)
                 else -> Fields(s, locale, separator, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip) { confirmDelete = true }
@@ -189,20 +193,39 @@ private fun Fields(
     }
 
     FieldBox(stringResource(R.string.add_merchant), s.merchant, onMerchant)
-    s.receipt?.let { receipt ->
+    (s.receipt ?: s.savedReceipt)?.let { receipt ->
         Text(stringResource(R.string.scan_original, formatAmount(receipt.total, locale = locale), receipt.items.size), style = sans(12), color = c.muted)
     }
+    s.savedReceipt?.let { app.kinjar.ui.scan.ReceiptDetails(it) }
     if (s.bill != null) {
         app.kinjar.ui.theme.DangerLink(stringResource(R.string.add_skip_bill), onClick = onSkip)
     }
     if (s.editing != null) {
-        app.kinjar.ui.theme.DangerLink(stringResource(R.string.audit_finance_delete), enabled = !s.saving, onClick = onDelete)
+        app.kinjar.ui.theme.DangerLink(stringResource(if (s.editing.source == TransactionSource.RECEIPT) R.string.receipt_delete else R.string.audit_finance_delete), enabled = !s.saving, onClick = onDelete)
     }
 }
 
 @Composable
 private fun DeleteDialog(source: TransactionSource, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val c = LocalColors.current
+    if (source == TransactionSource.RECEIPT) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) onDismiss() },
+            containerColor = c.bg,
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = c.orange) },
+            title = { Text(stringResource(R.string.receipt_delete_title), style = sans(18, FontWeight.SemiBold), color = c.text) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.receipt_warning), style = sans(16, FontWeight.SemiBold), color = c.orange)
+                    Text(stringResource(R.string.audit_finance_delete_receipt), style = sans(14), color = c.text)
+                    Text(stringResource(R.string.audit_finance_delete_body), style = sans(13), color = c.muted)
+                }
+            },
+            confirmButton = { TextButton(onClick = onConfirm, enabled = !busy) { Text(stringResource(R.string.receipt_delete), color = if (busy) c.muted else c.orange) } },
+            dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.receipt_keep), color = c.text) } },
+        )
+        return
+    }
     val body = listOfNotNull(
         stringResource(R.string.audit_finance_delete_body),
         when (source) {

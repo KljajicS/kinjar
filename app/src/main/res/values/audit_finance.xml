@@ -6,7 +6,7 @@
     <string name="audit_finance_delete_title">Delete this transaction?</string>
     <string name="audit_finance_delete_body">Balances, totals and reports change right away. This cannot be undone.</string>
     <string name="audit_finance_delete_bill">The bill will show as unpaid again.</string>
-    <string name="audit_finance_delete_receipt">The receipt stays recorded, so it cannot be scanned again.</string>
+    <string name="audit_finance_delete_receipt">Deleting this expense removes access to its receipt details.\n\nYou cannot scan this receipt again.\n\nSave the official receipt first if you need it.</string>
     <string name="audit_finance_delete_failed">Could not delete. Please try again.</string>
     <string name="audit_finance_loan_locked">This transaction belongs to a loan. Change it from the loan in Accounts.</string>
     <string name="audit_finance_missing">This transaction no longer exists.</string>

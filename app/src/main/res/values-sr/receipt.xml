@@ -1,0 +1,15 @@
+<resources>
+    <string name="receipt_details">Detalji računa</string>
+    <string name="receipt_hide">Sakrij detalje računa</string>
+    <string name="receipt_identity">PIB: %1$s\nBroj računa: %2$s\nDatum: %3$s</string>
+    <string name="receipt_item">%1$s × %2$s RSD</string>
+    <string name="receipt_money">%1$s RSD</string>
+    <string name="receipt_total">Izvorni iznos: %1$s RSD</string>
+    <string name="receipt_open">Otvori zvanični račun</string>
+    <string name="receipt_open_failed">Pregledač nije dostupan. Označi i kopiraj link računa iznad.</string>
+    <string name="receipt_invalid_link">Sačuvani link računa nije ispravan i ne može da se otvori.</string>
+    <string name="receipt_delete">Obriši trošak</string>
+    <string name="receipt_delete_title">Obrisati trošak?</string>
+    <string name="receipt_keep">Zadrži trošak</string>
+    <string name="receipt_warning">UPOZORENJE</string>
+</resources>
