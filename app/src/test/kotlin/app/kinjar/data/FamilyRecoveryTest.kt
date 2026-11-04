@@ -40,6 +40,20 @@ class FamilyRecoveryTest {
         assertNull(db.syncBaselineQueries.current().executeAsOneOrNull())
     }
 
+    @Test fun `local restore retains later offline edits in subsequent backups and rebuilds`() = runTest {
+        store.append(account("a"))
+        val history = store.snapshot()
+        store.restoreLocal(history, digest())
+        store.append(AccountUpdated(Account("a", "Changed", Currency.RSD)))
+        val updated = store.snapshot()
+        assertEquals(1, updated.operations.size)
+        assertTrue(db.syncOutboxQueries.pending("local", "local").executeAsList().isEmpty())
+        store.rebuild()
+        assertEquals("Changed", db.accountQueries.active().executeAsList().single().name)
+        store.restoreLocal(updated, digest())
+        assertEquals("Changed", db.accountQueries.active().executeAsList().single().name)
+    }
+
     @Test fun `interrupted creation freezes initial source until resumed`() = runTest {
         store.append(account("a"))
         db.restoreJournalQueries.save("user", "family", "", "dataset", "token", "CREATE", byteArrayOf(1))

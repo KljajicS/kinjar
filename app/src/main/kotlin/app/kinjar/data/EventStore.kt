@@ -34,14 +34,15 @@ class EventStore(
             db.transactionWithResult {
                 if (skipIf()) return@transactionWithResult emptyList()
                 validate()
-                check(db.restoreJournalQueries.current().executeAsOneOrNull()?.phase != "CREATE") { "Finish family setup before editing finances" }
+                check(db.restoreJournalQueries.current().executeAsOneOrNull()?.phase !in setOf("CREATE", "RESTORE")) { "Finish family setup or restore before editing finances" }
                 val session = db.syncSessionQueries.current().executeAsOneOrNull()
                 if (session != null) {
                     check(session.install_id == deviceId) { "Installation must recover its session" }
                     check(session.status == "ACTIVE") { "Family data is not writable" }
                 }
-                val resources = if (session == null) emptyMap() else operationResources(events, db)
-                val known = if (session == null) emptyList() else db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
+                val tracked = session != null || db.syncBaselineQueries.current().executeAsOneOrNull() != null
+                val resources = if (!tracked) emptyMap() else operationResources(events, db)
+                val known = if (!tracked) emptyList() else db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
                 val parents = ConflictResolver.parentsFor(known, resources)
                 val blocked = db.syncConflictQueries.all().executeAsList().map { it.operation_id }.toSet()
                 check(parents.none { it in blocked }) { "Resolve related changes first" }
@@ -55,15 +56,15 @@ class EventStore(
                     projector.apply(record)
                     record
                 }
-                if (session != null && records.isNotEmpty()) {
+                if (tracked && records.isNotEmpty()) {
                     val operation = SyncOperation(
-                        familyId = session.family_id, datasetId = session.dataset_id,
-                        authorUid = session.uid, installId = deviceId,
+                        familyId = session?.family_id ?: "local", datasetId = session?.dataset_id ?: "local",
+                        authorUid = session?.uid ?: "local", installId = deviceId,
                         sequence = Math.addExact(db.syncOperationQueries.lastSequence(deviceId).executeAsOneOrNull()?.MAX ?: 0L, 1L),
                         parents = parents, resources = resources, events = records.map(OperationEvent::from),
                     )
                     db.syncOperationQueries.insert(operation.id, deviceId, operation.sequence, OperationCodec.encode(operation))
-                    db.syncOutboxQueries.enqueue(operation.id, session.family_id, session.dataset_id)
+                    if (session != null) db.syncOutboxQueries.enqueue(operation.id, session.family_id, session.dataset_id)
                 }
                 records
             }
@@ -96,6 +97,14 @@ class EventStore(
             synced.replace(history)
             rollback()
         }
+    }
+
+    fun restoreLocal(history: FamilyHistory, expectedLocalDigest: String) = read {
+        require(db.syncSessionQueries.current().executeAsOneOrNull() == null) { "Restore shared family data while signed in" }
+        val before = HistoryCodec.encode(synced.snapshot())
+        require(HistoryCodec.digest(before) == expectedLocalDigest) { "Local data changed; confirm again" }
+        db.syncDraftQueries.save(newId(), "local", "", clock.now().toEpochMilli(), before)
+        synced.replace(history)
     }
 
     fun activate(uid: String, familyId: String, datasetId: String, memberId: String, generation: Long,

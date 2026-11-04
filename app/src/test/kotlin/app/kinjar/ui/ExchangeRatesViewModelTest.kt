@@ -33,6 +33,8 @@ import java.time.ZoneId
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ExchangeRatesViewModelTest {
+    private val viewModels = mutableListOf<androidx.lifecycle.ViewModel>()
+    private fun <T : androidx.lifecycle.ViewModel> owned(viewModel: T): T = viewModel.also { viewModels += it }
     private val dispatcher = StandardTestDispatcher()
     private val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
     private val db = KinjarDb(driver).also { KinjarDb.Schema.create(driver) }
@@ -41,7 +43,11 @@ class ExchangeRatesViewModelTest {
     private val rates = repo.exchangeRates
 
     @Before fun setup() = Dispatchers.setMain(dispatcher)
-    @After fun cleanup() = Dispatchers.resetMain()
+    @After fun cleanup() = runTest(dispatcher) {
+        viewModels.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+        driver.close()
+        Dispatchers.resetMain()
+    }
 
     @Test fun `stale warning starts at seven days and manual overrides exempt only their currency`() = runTest(dispatcher) {
         rates.cache(mapOf(Currency.EUR to BigDecimal("117"), Currency.USD to BigDecimal("105")), clock.today())
@@ -72,10 +78,10 @@ class ExchangeRatesViewModelTest {
         repo.setRule(RecurringRule("bill", "Bill", Money.of("20", Currency.EUR), "spend", "cat-bills", Cadence.MONTHLY, clock.today().plusDays(5)))
         repo.setGoal(Goal("goal", "Goal", Money.of("2000", Currency.RSD)))
         val original = db.txQueries.all().executeAsList()
-        val home = HomeViewModel(repo, clock)
-        val accounts = AccountsViewModel(repo)
-        val goals = GoalsViewModel(repo, clock)
-        val insights = InsightsViewModel(repo, clock)
+        val home = owned(HomeViewModel(repo, clock))
+        val accounts = owned(AccountsViewModel(repo))
+        val goals = owned(GoalsViewModel(repo, clock))
+        val insights = owned(InsightsViewModel(repo, clock))
         fun <T : Any> observe(state: StateFlow<T?>, verify: (T) -> Unit): Channel<T> {
             val channel = Channel<T>(Channel.UNLIMITED)
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -128,7 +134,7 @@ class ExchangeRatesViewModelTest {
     @Test fun `failed manual write retains draft and double tap writes once on retry`() = runTest(dispatcher) {
         val attempts = object : RateAttempts { override var lastAttempt: Instant? = null }
         val refresh = RateRefresh(rates, RateLookup { error("offline") }, attempts, clock)
-        val vm = ExchangeRatesViewModel(rates, refresh)
+        val vm = owned(ExchangeRatesViewModel(rates, refresh))
         vm.setInput(Currency.EUR, "117,12345678")
         driver.execute(null, "CREATE TRIGGER fail_rate BEFORE INSERT ON exchange_rate_override BEGIN SELECT RAISE(ABORT, 'disk full'); END", 0)
         vm.save(Currency.EUR)
@@ -151,7 +157,7 @@ class ExchangeRatesViewModelTest {
         rates.setOverride(Currency.EUR, "117")
         driver.execute(null, "UPDATE exchange_rate_override SET rate = 'invalid'", 0)
         val attempts = object : RateAttempts { override var lastAttempt: Instant? = null }
-        val vm = ExchangeRatesViewModel(rates, RateRefresh(rates, RateLookup { error("offline") }, attempts, clock))
+        val vm = owned(ExchangeRatesViewModel(rates, RateRefresh(rates, RateLookup { error("offline") }, attempts, clock)))
         val subscription = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.snapshot.collect() }
         try {
             vm.setInput(Currency.EUR, "118,5")

@@ -74,7 +74,16 @@ object ConflictResolver {
         )
     }
 
-    private fun collides(a: SyncOperation, b: SyncOperation): Boolean = a.resources.any { (key, mode) ->
-        b.resources[key]?.let { mode == ResourceAccess.WRITE || it == ResourceAccess.WRITE } == true
+    private fun collides(a: SyncOperation, b: SyncOperation): Boolean {
+        if (a.events.size == 1 && b.events.size == 1) {
+            val first = a.events.single().event
+            val second = b.events.single().event
+            if (first is MemberCreated && second is MemberCreated && first.member.id == second.member.id) return false
+            if (first is AccountsReordered && second is AccountsReordered) return false
+            if (first is GoalsReordered && second is GoalsReordered) return false
+        }
+        return a.resources.any { (key, mode) ->
+            b.resources[key]?.let { mode == ResourceAccess.WRITE || it == ResourceAccess.WRITE } == true
+        }
     }
 }

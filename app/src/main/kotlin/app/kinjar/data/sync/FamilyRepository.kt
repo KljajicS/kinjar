@@ -17,7 +17,8 @@ data class FamilyInfo(
     val id: String, val owner: String, val admins: List<String>, val members: Map<String, String>,
     val activeDataset: String, val generation: Long, val status: String,
 )
-data class FamilyInvitation(val familyId: String, val slot: String, val expiresAt: Instant)
+data class FamilyInvitation(val familyId: String, val slot: String, val expiresAt: Instant, val inviterEmail: String)
+data class FamilyDevice(val slot: String, val uid: String, val installId: String, val name: String)
 
 @Singleton
 class FamilyRepository @Inject constructor(private val services: FirebaseServices) {
@@ -60,7 +61,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             .get(Source.SERVER).await().documents.mapNotNull { document ->
                 val expires = document.getTimestamp("expiresAt")?.toDate()?.toInstant() ?: return@mapNotNull null
                 if (expires <= Instant.now()) return@mapNotNull null
-                FamilyInvitation(requireNotNull(document.getString("familyId")), document.id, expires)
+                FamilyInvitation(requireNotNull(document.getString("familyId")), document.id, expires, requireNotNull(document.getString("inviterEmail")))
             }
     }
 
@@ -77,6 +78,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             check(saved.none { it.getString("email") == normalized && it.getString("status") == "PENDING" }) { "Invitation already pending" }
             val target = slots.zip(saved).firstOrNull { !it.second.exists() }?.first ?: error("Invitation capacity reached")
             transaction.set(target, mapOf("familyId" to familyId, "email" to normalized, "inviter" to user,
+                "inviterEmail" to requireNotNull(services.auth.currentUser?.email),
                 "expiresAt" to Timestamp(Date.from(Instant.now().plusSeconds(6 * 86400))), "status" to "PENDING", "uid" to ""))
         }.await()
     }
@@ -123,6 +125,61 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             transaction.update(root, mapOf("members" to (current.members - targetUid), "admins" to (current.admins - targetUid), "action" to "remove", "target" to targetUid))
             transaction.update(db.collection("users").document(targetUid), "status", "REMOVED")
         }.await()
+    }
+
+    suspend fun beginDeletion(familyId: String) {
+        val user = uid()
+        db.runTransaction { tx ->
+            check(uid() == user)
+            val root = family(familyId)
+            val current = decode(tx.get(root))
+            require(current.owner == user)
+            if (current.status != "DELETING") {
+                tx.update(root, mapOf("status" to "DELETING", "action" to "delete", "deletionPhase" to 0L))
+                current.members.keys.forEach { tx.update(db.collection("users").document(it), "status", "REMOVED") }
+            }
+        }.await()
+    }
+
+    suspend fun transferOwnership(familyId: String, targetUid: String) {
+        val user = uid()
+        db.runTransaction { tx ->
+            check(uid() == user)
+            val root = family(familyId)
+            val document = tx.get(root)
+            val current = decode(document)
+            require(current.owner == user && targetUid in current.admins && current.status == "ACTIVE")
+            tx.update(root, mapOf("owner" to targetUid, "action" to "transfer"))
+            tx.update(db.collection("slots").document(requireNotNull(document.getString("slot"))), "owner", targetUid)
+        }.await()
+    }
+
+    suspend fun cancelInvitations(familyId: String) {
+        val user = uid()
+        for (slot in 0..5) {
+            val ref = family(familyId).collection("invites").document(slot.toString())
+            db.runTransaction { tx ->
+                check(uid() == user)
+                val invite = tx.get(ref)
+                if (invite.getString("status") == "PENDING") tx.update(ref, "status", "CANCELLED")
+            }.await()
+            db.runTransaction { tx ->
+                check(uid() == user)
+                val invite = tx.get(ref)
+                if (invite.exists() && invite.getString("status") != "PENDING") tx.delete(ref)
+            }.await()
+        }
+    }
+
+    suspend fun devices(familyId: String): List<FamilyDevice> = family(familyId).collection("installs").get(Source.SERVER).await().documents.map {
+        FamilyDevice(it.id, requireNotNull(it.getString("uid")), requireNotNull(it.getString("installId")), it.getString("name") ?: "Android")
+    }
+
+    suspend fun removeDevice(familyId: String, slot: String) {
+        val user = uid()
+        require(slot in (0..5).map(Int::toString))
+        val ref = family(familyId).collection("installs").document(slot)
+        db.runTransaction { tx -> check(uid() == user); if (tx.get(ref).exists()) tx.delete(ref) }.await()
     }
 
     private fun decode(document: DocumentSnapshot): FamilyInfo {

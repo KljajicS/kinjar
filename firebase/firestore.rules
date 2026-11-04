@@ -14,6 +14,9 @@ service cloud.firestore {
         && get(familyPath(fid)).data.status != 'DELETING';
     }
     function admin(fid) { return member(fid) && request.auth.uid in get(familyPath(fid)).data.admins; }
+    function deletingOwner(fid) {
+      return signedIn() && get(familyPath(fid)).data.owner == request.auth.uid && get(familyPath(fid)).data.status == 'DELETING';
+    }
     function invitedAt(fid, sid) {
       let path = /databases/$(database)/documents/families/$(fid)/invites/$(sid);
       return signedIn() && exists(path) && get(path).data.status == 'PENDING'
@@ -27,7 +30,7 @@ service cloud.firestore {
     function slot(id) { return id.matches('[0-9]'); }
     function smallSlot(id) { return id.matches('[0-5]'); }
     function familyShape(d) {
-      return d.keys().hasOnly(['owner', 'admins', 'members', 'slot', 'activeDataset', 'otherDataset', 'generation', 'status', 'action', 'target', 'inviteSlot'])
+      return d.keys().hasOnly(['owner', 'admins', 'members', 'slot', 'activeDataset', 'otherDataset', 'generation', 'status', 'action', 'target', 'inviteSlot', 'restoreToken', 'restoreUid', 'restoreExpires', 'deletionPhase'])
         && identifier(d.owner) && d.admins is list && d.admins.size() >= 1 && d.admins.size() <= 6
         && d.admins.toSet().size() == d.admins.size() && d.owner in d.admins
         && d.members is map && d.members.size() >= 1 && d.members.size() <= 6
@@ -36,7 +39,12 @@ service cloud.firestore {
         && d.generation is int && d.generation >= 1 && d.generation <= 2147483647
         && d.status in ['INITIALIZING', 'ACTIVE', 'RESTORING', 'DELETING']
         && d.action is string && d.action.size() <= 16 && d.target is string && d.target.size() <= 128
-        && d.inviteSlot is string && d.inviteSlot.size() <= 1;
+        && d.inviteSlot is string && d.inviteSlot.size() <= 1
+        && (!('restoreToken' in d) || identifier(d.restoreToken))
+        && (!('restoreUid' in d) || identifier(d.restoreUid))
+        && (!('restoreExpires' in d) || d.restoreExpires is timestamp)
+        && (!('deletionPhase' in d) || (d.deletionPhase is int && d.deletionPhase >= 0 && d.deletionPhase <= 2))
+        && (d.status != 'RESTORING' || (identifier(d.restoreToken) && identifier(d.restoreUid) && d.restoreExpires is timestamp));
     }
     function linkedAfter(uid, fid) {
       return getAfter(userPath(uid)).data.familyId == fid && getAfter(userPath(uid)).data.status == 'ACTIVE'
@@ -53,6 +61,12 @@ service cloud.firestore {
         && !exists(familyPath(request.resource.data.familyId))
         && getAfter(familyPath(request.resource.data.familyId)).data.slot == id
         && getAfter(familyPath(request.resource.data.familyId)).data.owner == request.auth.uid;
+      allow delete: if deletingOwner(resource.data.familyId) && resource.data.owner == request.auth.uid
+        && !existsAfter(familyPath(resource.data.familyId));
+      allow update: if signedIn() && resource.data.owner == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner'])
+        && get(familyPath(resource.data.familyId)).data.owner == request.auth.uid
+        && getAfter(familyPath(resource.data.familyId)).data.owner == request.resource.data.owner;
     }
 
     match /users/{uid} {
@@ -67,11 +81,12 @@ service cloud.firestore {
             && request.resource.data.familyId == resource.data.familyId
             && request.resource.data.memberId == resource.data.memberId
             && admin(resource.data.familyId)
-            && !(uid in getAfter(familyPath(resource.data.familyId)).data.members)));
+            && (!(uid in getAfter(familyPath(resource.data.familyId)).data.members)
+              || getAfter(familyPath(resource.data.familyId)).data.status == 'DELETING')));
     }
 
     match /families/{fid} {
-      allow get: if member(fid) || invited(fid);
+      allow get: if member(fid) || deletingOwner(fid) || invited(fid);
       allow create: if signedIn() && identifier(fid) && familyShape(request.resource.data) && noFamily(request.auth.uid)
         && request.resource.data.owner == request.auth.uid && request.resource.data.admins == [request.auth.uid]
         && request.resource.data.members.keys().hasOnly([request.auth.uid])
@@ -106,10 +121,11 @@ service cloud.firestore {
           && getAfter(userPath(target)).data.familyId == fid;
       }
       function roles() {
-        return request.auth.uid == resource.data.owner
+        return request.auth.uid == resource.data.owner && resource.data.status == 'ACTIVE'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner', 'admins', 'action'])
           && request.resource.data.action in ['roles', 'transfer']
-          && (request.resource.data.owner == resource.data.owner || request.resource.data.action == 'transfer');
+          && (request.resource.data.owner == resource.data.owner || (request.resource.data.action == 'transfer'
+            && getAfter(/databases/$(database)/documents/slots/$(resource.data.slot)).data.owner == request.resource.data.owner));
       }
       function activateInitial() {
         let state = getAfter(statePath(fid, resource.data.activeDataset)).data;
@@ -118,16 +134,88 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action'])
           && state.sealed == true && state.chunks == state.expectedChunks && state.chunkBytes == state.expectedBytes;
       }
-      allow update: if signedIn() && familyShape(request.resource.data) && (joining() || removing() || roles() || activateInitial());
+      function beginRestore() {
+        let after = request.resource.data;
+        return admin(fid) && resource.data.status == 'ACTIVE' && resource.data.otherDataset == ''
+          && after.status == 'RESTORING' && after.action == 'restore'
+          && after.generation == resource.data.generation + 1 && identifier(after.otherDataset)
+          && after.otherDataset != resource.data.activeDataset && !exists(statePath(fid, after.otherDataset))
+          && after.restoreUid == request.auth.uid && after.restoreExpires > request.time
+          && after.restoreExpires <= request.time + duration.value(30, 'm')
+          && after.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'generation', 'otherDataset', 'restoreToken', 'restoreUid', 'restoreExpires']);
+      }
+      function finishRestore() {
+        let after = request.resource.data;
+        let state = getAfter(statePath(fid, resource.data.otherDataset)).data;
+        return admin(fid) && resource.data.status == 'RESTORING' && resource.data.restoreUid == request.auth.uid
+          && resource.data.restoreExpires > request.time && after.status == 'ACTIVE' && after.action == 'restored'
+          && after.activeDataset == resource.data.otherDataset && after.otherDataset == resource.data.activeDataset
+          && state.restoreToken == resource.data.restoreToken && state.sealed == true
+          && state.chunks == state.expectedChunks && state.chunkBytes == state.expectedBytes
+          && after.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'activeDataset', 'otherDataset', 'restoreToken', 'restoreUid', 'restoreExpires']);
+      }
+      function cancelRestore() {
+        return admin(fid) && resource.data.status == 'RESTORING'
+          && (resource.data.restoreUid == request.auth.uid || resource.data.restoreExpires <= request.time)
+          && request.resource.data.status == 'ACTIVE' && request.resource.data.action == 'cancelRestore'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'restoreToken', 'restoreUid', 'restoreExpires']);
+      }
+      function cleaned() {
+        return admin(fid) && resource.data.status == 'ACTIVE' && resource.data.otherDataset != ''
+          && request.resource.data.otherDataset == '' && !existsAfter(statePath(fid, resource.data.otherDataset))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['otherDataset', 'action'])
+          && request.resource.data.action == 'cleaned';
+      }
+      function removedAfter(uid) {
+        return getAfter(userPath(uid)).data.status == 'REMOVED' && getAfter(userPath(uid)).data.familyId == fid;
+      }
+      function beginDelete() {
+        let users = resource.data.members.keys();
+        return request.auth.uid == resource.data.owner && resource.data.status != 'DELETING'
+          && request.resource.data.status == 'DELETING' && request.resource.data.deletionPhase == 0 && request.resource.data.action == 'delete'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'deletionPhase'])
+          && removedAfter(users[0]) && (users.size() < 2 || removedAfter(users[1]))
+          && (users.size() < 3 || removedAfter(users[2])) && (users.size() < 4 || removedAfter(users[3]))
+          && (users.size() < 5 || removedAfter(users[4])) && (users.size() < 6 || removedAfter(users[5]));
+      }
+      function absent(collection, slot) {
+        return !existsAfter(/databases/$(database)/documents/families/$(fid)/$(collection)/$(slot));
+      }
+      function clearedSlots(collection) {
+        return absent(collection, '0') && absent(collection, '1') && absent(collection, '2')
+          && absent(collection, '3') && absent(collection, '4') && absent(collection, '5');
+      }
+      function deletionProgress() {
+        return deletingOwner(fid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletionPhase', 'action'])
+          && ((resource.data.deletionPhase == 0 && request.resource.data.deletionPhase == 1 && clearedSlots('invites'))
+            || (resource.data.deletionPhase == 1 && request.resource.data.deletionPhase == 2 && clearedSlots('installs')));
+      }
+      allow update: if signedIn() && familyShape(request.resource.data)
+        && ((request.resource.data.action == 'join' && joining())
+          || (request.resource.data.action == 'remove' && removing())
+          || (request.resource.data.action in ['roles', 'transfer'] && roles())
+          || (request.resource.data.action == 'activate' && activateInitial())
+          || (request.resource.data.action == 'restore' && beginRestore())
+          || (request.resource.data.action == 'restored' && finishRestore())
+          || (request.resource.data.action == 'cancelRestore' && cancelRestore())
+          || (request.resource.data.action == 'cleaned' && cleaned())
+          || (request.resource.data.action == 'delete' && beginDelete())
+          || (request.resource.data.action == 'deleteSlots' && deletionProgress()));
+      allow delete: if deletingOwner(fid) && resource.data.deletionPhase == 2
+        && !exists(statePath(fid, resource.data.activeDataset))
+        && (resource.data.otherDataset == '' || !exists(statePath(fid, resource.data.otherDataset)))
+        && !existsAfter(/databases/$(database)/documents/slots/$(resource.data.slot));
 
       match /invites/{sid} {
-        allow get, list: if signedIn() && (resource.data.email == request.auth.token.email || admin(fid));
+        allow get, list: if signedIn() && (resource.data.email == request.auth.token.email || admin(fid) || deletingOwner(fid));
         function shape(d) {
-          return smallSlot(sid) && d.keys().hasOnly(['familyId', 'email', 'inviter', 'expiresAt', 'status', 'uid'])
+          return smallSlot(sid) && d.keys().hasOnly(['familyId', 'email', 'inviter', 'inviterEmail', 'expiresAt', 'status', 'uid'])
             && d.familyId == fid && d.email is string && d.email.size() >= 3 && d.email.size() <= 254
-            && identifier(d.inviter) && d.expiresAt is timestamp && d.uid is string && d.uid.size() <= 128;
+            && identifier(d.inviter) && d.inviterEmail is string && d.inviterEmail.size() <= 254
+            && d.expiresAt is timestamp && d.uid is string && d.uid.size() <= 128;
         }
         allow create: if admin(fid) && shape(request.resource.data) && request.resource.data.inviter == request.auth.uid
+          && request.resource.data.inviterEmail == request.auth.token.email
           && request.resource.data.status == 'PENDING' && request.resource.data.uid == ''
           && request.resource.data.expiresAt > request.time
           && request.resource.data.expiresAt <= request.time + duration.value(7, 'd');
@@ -139,21 +227,22 @@ service cloud.firestore {
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'uid'])
               && linkedAfter(request.auth.uid, fid)));
-        allow delete: if admin(fid) && resource.data.status != 'PENDING';
+        allow delete: if deletingOwner(fid) || (admin(fid) && resource.data.status != 'PENDING');
       }
 
       match /installs/{sid} {
-        allow get, list: if member(fid);
+        allow get, list: if member(fid) || deletingOwner(fid);
         allow create: if member(fid) && smallSlot(sid)
-          && request.resource.data.keys().hasOnly(['uid', 'installId'])
-          && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId);
-        allow delete: if admin(fid) || (member(fid) && resource.data.uid == request.auth.uid);
+          && request.resource.data.keys().hasOnly(['uid', 'installId', 'name', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId)
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80 && request.resource.data.createdAt == request.time;
+        allow delete: if deletingOwner(fid) || admin(fid) || (member(fid) && resource.data.uid == request.auth.uid);
       }
 
       match /datasets/{did} {
-        allow get: if member(fid);
+        allow get: if member(fid) || deletingOwner(fid);
         function stateShape(d) {
-          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId', 'chunks', 'chunkBytes', 'expectedChunks', 'expectedBytes', 'digest', 'lastChunk', 'sealed'])
+          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId', 'chunks', 'chunkBytes', 'expectedChunks', 'expectedBytes', 'digest', 'lastChunk', 'sealed', 'restoreToken'])
             && d.count is int && d.count >= 0 && d.count <= 1000
             && d.bytes is int && d.bytes >= 0 && d.bytes <= 10485760
             && d.bytes + d.get('chunkBytes', 0) <= 10485760
@@ -181,7 +270,13 @@ service cloud.firestore {
         }
         function initializing() {
           let f = get(familyPath(fid)).data;
-          return signedIn() && request.auth.uid == f.owner && f.status == 'INITIALIZING' && f.activeDataset == did;
+          return signedIn() && ((request.auth.uid == f.owner && f.status == 'INITIALIZING' && f.activeDataset == did)
+            || (admin(fid) && f.status == 'RESTORING' && f.otherDataset == did
+              && f.restoreUid == request.auth.uid && f.restoreExpires > request.time));
+        }
+        function retired() {
+          let f = get(familyPath(fid)).data;
+          return deletingOwner(fid) || (admin(fid) && f.status == 'ACTIVE' && f.otherDataset == did && f.activeDataset != did);
         }
         function chunkIncrement(before, after, cid, payload) {
           return manifest(after) && stateShape(after) && before.sealed == false && after.sealed == false
@@ -193,10 +288,11 @@ service cloud.firestore {
           return resource.data.sealed == false && request.resource.data.sealed == true
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sealed'])
             && resource.data.chunks == resource.data.expectedChunks && resource.data.chunkBytes == resource.data.expectedBytes
-            && getAfter(familyPath(fid)).data.status == 'ACTIVE';
+            && getAfter(familyPath(fid)).data.status == 'ACTIVE'
+            && getAfter(familyPath(fid)).data.activeDataset == did;
         }
-        allow create: if admin(fid) && get(familyPath(fid)).data.status == 'INITIALIZING'
-          && get(familyPath(fid)).data.activeDataset == did && stateShape(request.resource.data)
+        allow create: if initializing() && stateShape(request.resource.data)
+          && request.resource.data.get('restoreToken', '') == get(familyPath(fid)).data.get('restoreToken', '')
           && request.resource.data.count == 0 && request.resource.data.bytes == 0
           && request.resource.data.dailyCount == 0 && request.resource.data.day == day()
           && request.resource.data.lastOpId == '' && manifest(request.resource.data)
@@ -208,19 +304,43 @@ service cloud.firestore {
           || (initializing() && (sealing() ||
             (!exists(/databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk))
               && chunkIncrement(resource.data, request.resource.data, request.resource.data.lastChunk,
-                getAfter(/databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk)).data.payload))));
+                getAfter(/databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk)).data.payload))))
+          || (retired() && (removingOperation() || removingChunk()));
+
+        function decrement(before, after, payload) {
+          return stateShape(after) && after.count == before.count - 1 && after.bytes == before.bytes - payload.size()
+            && after.diff(before).affectedKeys().hasOnly(['count', 'bytes', 'lastOpId']);
+        }
+        function decrementChunk(before, after, payload) {
+          return stateShape(after) && after.chunks == before.chunks - 1 && after.chunkBytes == before.chunkBytes - payload.size()
+            && after.chunks >= 0 && after.chunkBytes >= 0
+            && after.diff(before).affectedKeys().hasOnly(['chunks', 'chunkBytes', 'lastChunk']);
+        }
+        function removingOperation() {
+          let path = opPath(fid, did, request.resource.data.lastOpId);
+          return exists(path) && !existsAfter(path) && decrement(resource.data, request.resource.data, get(path).data.payload);
+        }
+        function removingChunk() {
+          let path = /databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk);
+          return exists(path) && !existsAfter(path) && decrementChunk(resource.data, request.resource.data, get(path).data.payload);
+        }
+        allow delete: if retired() && resource.data.count == 0 && resource.data.bytes == 0
+          && resource.data.chunks == 0 && resource.data.chunkBytes == 0
+          && (deletingOwner(fid) || getAfter(familyPath(fid)).data.otherDataset == '');
 
         match /chunks/{cid} {
-          allow get, list: if member(fid) && get(familyPath(fid)).data.activeDataset == did;
+          allow get, list: if deletingOwner(fid) || (member(fid) && (get(familyPath(fid)).data.activeDataset == did || admin(fid)));
           allow create: if initializing() && cid.matches('[0-9]{1,2}') && string(int(cid)) == cid
             && request.resource.data.keys().hasOnly(['payload']) && request.resource.data.payload is bytes
             && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
             && int(cid) < get(statePath(fid, did)).data.expectedChunks
             && chunkIncrement(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, cid, request.resource.data.payload);
+          allow delete: if retired() && getAfter(statePath(fid, did)).data.lastChunk == cid
+            && decrementChunk(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, resource.data.payload);
         }
 
         match /operations/{oid} {
-          allow get, list: if member(fid) && get(familyPath(fid)).data.activeDataset == did;
+          allow get, list: if deletingOwner(fid) || (member(fid) && (get(familyPath(fid)).data.activeDataset == did || admin(fid)));
           allow create: if writable()
             && request.resource.data.keys().hasOnly(['uid', 'installId', 'installSlot', 'sequence', 'payload', 'createdAt'])
             && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId)
@@ -233,6 +353,8 @@ service cloud.firestore {
             && request.resource.data.payload is bytes && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
             && request.resource.data.createdAt == request.time
             && increment(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, oid, request.resource.data.payload);
+          allow delete: if retired() && getAfter(statePath(fid, did)).data.lastOpId == oid
+            && decrement(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, resource.data.payload);
         }
       }
     }
