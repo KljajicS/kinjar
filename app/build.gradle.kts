@@ -21,10 +21,12 @@ android {
         targetSdk = 36
         versionCode = 6
         versionName = "0.3.3"
-        buildConfigField("boolean", "FIREBASE_SYNC_ENABLED", providers.gradleProperty("firebaseSyncEnabled").orElse("false").get().toBoolean().toString())
+        val syncEnabled = providers.gradleProperty("firebaseSyncEnabled").orElse("false").get().toBooleanStrict()
+        buildConfigField("boolean", "FIREBASE_SYNC_ENABLED", syncEnabled.toString())
         listOf("PROJECT_ID", "APP_ID", "API_KEY", "WEB_CLIENT_ID").forEach { key ->
             val value = providers.environmentVariable("KINJAR_FIREBASE_$key").orElse("").get()
             require(value.none { it == '\n' || it == '\r' }) { "Invalid Firebase configuration" }
+            require(!syncEnabled || value.isNotBlank()) { "KINJAR_FIREBASE_$key is required when Firebase sync is enabled" }
             buildConfigField("String", "FIREBASE_$key", "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         }
     }
@@ -83,6 +85,7 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.appcheck)
+    debugImplementation(libs.firebase.appcheck.debug)
     implementation(libs.credentials)
     implementation(libs.credentials.play)
     implementation(libs.googleid)

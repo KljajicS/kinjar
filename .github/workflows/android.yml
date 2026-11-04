@@ -4,7 +4,27 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+env:
+  ORG_GRADLE_PROJECT_firebaseSyncEnabled: ${{ vars.KINJAR_FIREBASE_SYNC_ENABLED || 'false' }}
+  KINJAR_FIREBASE_PROJECT_ID: ${{ vars.KINJAR_FIREBASE_PROJECT_ID }}
+  KINJAR_FIREBASE_APP_ID: ${{ vars.KINJAR_FIREBASE_APP_ID }}
+  KINJAR_FIREBASE_API_KEY: ${{ vars.KINJAR_FIREBASE_API_KEY }}
+  KINJAR_FIREBASE_WEB_CLIENT_ID: ${{ vars.KINJAR_FIREBASE_WEB_CLIENT_ID }}
 jobs:
+  sync-rules:
+    if: github.event.created
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm --prefix firebase install --ignore-scripts --no-package-lock
+      - run: make lint-sync test-sync
   build:
     if: github.event.created
     runs-on: ubuntu-latest
@@ -18,7 +38,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - run: make lint test build
   release:
-    needs: build
+    needs: [build, sync-rules]
     if: github.event_name == 'push' && github.event.created && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

@@ -2,7 +2,7 @@
 
 # kinjar
 
-Privacy-first Android app for family finances. Track spending, see savings and plan goals, with financial data stored on your device.
+Offline-first Android app for family finances. Track spending, see savings and plan goals. Optional family sync uses Firebase.
 
 [Download APK](https://github.com/KljajicS/kinjar/releases) · [Roadmap](docs/plans/roadmap.md) · [Report an issue](https://github.com/KljajicS/kinjar/issues)
 
@@ -24,6 +24,8 @@ Screenshots use demo data.
 - Monthly insights, spending categories and transaction history.
 - Serbian fiscal receipt QR scanning and manual loan repayment tracking.
 - English and Serbian Latin, selectable in Settings, with light, dark and AMOLED themes.
+- Password-protected backup files, with preview and confirmation before restoring.
+- Optional Google sign-in, family invitations and recovery on a new phone in configured builds.
 
 ## Privacy and status
 
@@ -31,7 +33,7 @@ Core tracking works offline, without an app account or dedicated backend. Receip
 
 Optional app lock asks for a fingerprint or the phone screen lock to open the app. It gates access only: data stays in an unencrypted local database protected by the Android app sandbox. See [security](docs/security.md).
 
-Under active development. Family synchronization, end-to-end encrypted sync, and data export/recovery are not available yet. Bank statement import is planned beyond the MVP.
+Sync is an experimental, capacity-limited beta and is disabled in ordinary builds. Configured builds upload family finances to Firebase without end-to-end encryption: Google and authorized project administrators can read them. Shared free capacity can run out; pending changes remain on the phone. See [setup and acceptance](docs/firebase-sync.md) before enabling it. Signed two-device acceptance is still pending. Bank statement import is deferred.
 
 kinjar was previously called Family Budget Tracker. Releases up to 0.3.3 use application ID `rs.budget`; kinjar installs as a separate app and does not migrate their data.
 

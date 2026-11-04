@@ -1,4 +1,4 @@
-.PHONY: check lint lint-workflows test build release run shot emu
+.PHONY: check lint lint-sync lint-workflows test test-sync build release run shot emu
 
 check: lint test
 

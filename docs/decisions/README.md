@@ -16,3 +16,5 @@ One file per decision, numbered, never edited after acceptance. A reversed decis
 | [0010](0010-receipt-scanning.md) | Serbian receipt scanning with local QR decoding |
 | [0011](0011-exchange-rates.md) | Cached NBS rates and event-backed manual overrides |
 | [0012](0012-simplified-finances.md) | All-account savings, ordered goals and simplified screens |
+| [0013](0013-manual-loans.md) | Manual loans and repayments |
+| [0014](0014-firebase-family-sync.md) | Optional Firebase sync and password-protected recovery |

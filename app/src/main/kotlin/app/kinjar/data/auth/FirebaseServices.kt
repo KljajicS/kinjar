@@ -5,7 +5,6 @@ import app.kinjar.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
@@ -28,7 +27,7 @@ class FirebaseServices @Inject constructor(@ApplicationContext private val conte
             .setApplicationId(BuildConfig.FIREBASE_APP_ID)
             .setApiKey(BuildConfig.FIREBASE_API_KEY).build(), "kinjar-sync").also {
             it.setDataCollectionDefaultEnabled(false)
-            FirebaseAppCheck.getInstance(it).installAppCheckProviderFactory(PlayIntegrityAppCheckProviderFactory.getInstance())
+            FirebaseAppCheck.getInstance(it).installAppCheckProviderFactory(FirebaseAttestation.provider())
         }
     }
     val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance(app) }

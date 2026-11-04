@@ -25,7 +25,25 @@ App lock is an access gate for the user interface. It is not encryption.
 - Anyone who knows the phone PIN, pattern or password can unlock the app.
 - Rooted or otherwise compromised devices, debuggable builds, ADB access with root, and forensic extraction of an unlocked phone are outside the scope of app lock.
 - In split screen or freeform windows the app stays visible while another window has focus. It locks only when the activity stops.
-- The app opts out of Android backups with `allowBackup="false"`. Device-to-device transfer behavior can vary by manufacturer.
+- The app opts out of Android backup and framework device transfer using explicit exclusions. Vendor cloning tools outside the Android backup framework are not covered. Installation identity is stored separately in `noBackupFilesDir`.
+
+## Optional family sync
+
+Google sign-in identifies a family member. Firestore rules restrict access to active members and administrator actions to administrators. A Google account compromise can expose that member's family data. Cloud data is encrypted in transit and at rest by the provider, but is not end-to-end encrypted. Google and authorized project administrators can read it.
+
+SQLDelight stores local finances and pending operations. Firestore uses memory-only caching. Signing out pauses cloud access; it does not erase the local financial copy. App lock remains optional. Confirmed online removal clears that family's local data; an offline phone or exported copy cannot be remotely erased. Permission errors alone never trigger deletion.
+
+Creator-authorized family deletion first removes member access, then deletes remote content. Cleanup runs in the client and can resume after interruption. Closing every client can leave a deletion unfinished; the project owner must finish abandoned cleanup. Removing a device slot only frees capacity: an authorized member can connect that phone again.
+
+Release builds use Play Integrity App Check. Debug builds use the debug provider and must never be distributed as production releases. Enforcement requires verification with the actual signed sideloaded APK; see [setup](firebase-sync.md). App Check supplements membership rules and does not prevent every form of quota abuse.
+
+## Backup files
+
+Backups contain financial history, including receipts and pending changes. They exclude Google credentials, family authorization, reusable installation credentials, app lock and appearance settings. Historical author identifiers remain for attribution and deduplication; importing them does not grant cloud membership.
+
+Files use a versioned envelope, random salt and nonce, PBKDF2-HMAC-SHA256 with 600,000 iterations, and AES-256-GCM. The envelope header is authenticated. Passwords require at least 12 characters; a long unique passphrase is recommended. There is no password reset for an encrypted file. Keep the password separately, for example in a password manager.
+
+Import checks authentication, size, format and financial consistency before replacement. Local exports may lack changes still on another phone. An administrator's family restore replaces shared finances while preserving membership. Other phones retain their previous local copy for separate export and require confirmation before adopting the replacement. Retained copies remain sensitive local data.
 
 ### Phone acceptance steps
 
