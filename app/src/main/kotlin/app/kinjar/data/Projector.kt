@@ -79,10 +79,14 @@ class Projector(private val db: KinjarDb) {
             is TransactionAdded -> with(e.transaction) {
                 e.receipt?.let { receipt ->
                     require(id == receipt.transactionId && source == app.kinjar.domain.TransactionSource.RECEIPT)
-                    if (db.receiptQueries.byId(receipt.id).executeAsOneOrNull() != null) return
-                    db.receiptQueries.insert(receipt.id, id, receipt.issuer, receipt.invoiceNumber,
-                        receipt.fiscalUrl, receipt.merchant, receipt.date.toString(),
-                        receipt.total.amount.toPlainString(), EventJson.encodeToString(receipt.items))
+                    if (db.receiptQueries.byId(receipt.id).executeAsOneOrNull() != null) {
+                        if (db.receiptQueries.activeById(receipt.id).executeAsOneOrNull() != null ||
+                            e.receiptDeletionId == null || e.receiptDeletionId != latestReceiptDeletion(db, id, record)) return
+                    } else {
+                        db.receiptQueries.insert(receipt.id, id, receipt.issuer, receipt.invoiceNumber,
+                            receipt.fiscalUrl, receipt.merchant, receipt.date.toString(),
+                            receipt.total.amount.toPlainString(), EventJson.encodeToString(receipt.items))
+                    }
                 }
                 db.txQueries.insertIgnore(
                     id, type.name, money.amount.toPlainString(), money.currency.name, accountId, toAccountId, categoryId,
@@ -144,6 +148,12 @@ class Projector(private val db: KinjarDb) {
 
     companion object {
         /** Bump when a projector change must reach existing installs; the app rebuilds once on mismatch. */
-        const val VERSION = 6
+        const val VERSION = 7
     }
 }
+
+internal fun latestReceiptDeletion(db: KinjarDb, transactionId: String, before: EventRecord? = null): String? =
+    db.eventQueries.deletionsBefore(before?.occurredAt?.toEpochMilli() ?: Long.MAX_VALUE,
+        before?.deviceId.orEmpty(), before?.seq ?: 0L).executeAsList().firstOrNull {
+        (runCatching { EventJson.decodeFromString<app.kinjar.domain.Event>(it.payload) }.getOrNull() as? TransactionDeleted)?.transactionId == transactionId
+    }?.id

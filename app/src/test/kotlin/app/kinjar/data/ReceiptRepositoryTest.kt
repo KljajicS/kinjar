@@ -61,9 +61,47 @@ class ReceiptRepositoryTest {
         store.applyRemote(listOf(EventRecord("remote", "two", 1, clock.now().plusSeconds(60), TransactionAdded(tx(), receipt))))
         store.rebuild()
         assertTrue(repo.transactions.first().isEmpty())
+        assertFalse(repo.hasReceipt(receipt.id))
+        assertEquals(receipt, repo.receiptForTransaction(receipt.transactionId))
+        repo.addReceipt(tx().copy(merchant = "Rescanned"), receipt)
         assertTrue(repo.hasReceipt(receipt.id))
+        assertEquals("Rescanned", repo.transactions.first().single().merchant)
+        store.rebuild()
+        assertEquals("Rescanned", repo.transactions.first().single().merchant)
         assertEquals(receipt, repo.receiptForTransaction(receipt.transactionId))
         assertTrue(runCatching { repo.addReceipt(tx(), receipt) }.exceptionOrNull() is DuplicateReceipt)
+    }
+
+    @Test fun `concurrent rescans after deletion restore only one expense`() = runTest {
+        seed()
+        repo.addReceipt(tx(), receipt)
+        repo.delete(receipt.transactionId)
+        val results = List(2) { async(Dispatchers.IO) { runCatching { repo.addReceipt(tx(), receipt) } } }.awaitAll()
+        assertEquals(1, results.count { it.isSuccess })
+        assertTrue(results.single { it.isFailure }.exceptionOrNull() is DuplicateReceipt)
+        store.rebuild()
+        assertEquals(listOf(tx()), repo.transactions.first())
+    }
+
+    @Test fun `stale restoration cannot undo a later deletion in any arrival order`() {
+        val records = listOf(
+            EventRecord("add", "one", 1, clock.now(), TransactionAdded(tx(), receipt)),
+            EventRecord("delete-one", "one", 2, clock.now().plusSeconds(1), TransactionDeleted(receipt.transactionId)),
+            EventRecord("restore-one", "one", 3, clock.now().plusSeconds(2), TransactionAdded(tx(), receipt, "delete-one")),
+            EventRecord("delete-two", "one", 4, clock.now().plusSeconds(3), TransactionDeleted(receipt.transactionId)),
+            EventRecord("stale-restore", "two", 1, clock.now().plusSeconds(4), TransactionAdded(tx(), receipt, "delete-one")),
+        )
+        listOf(records, records.reversed()).forEach { order ->
+            val d = testDb()
+            val s = EventStore(d, "local", clock, Projector(d))
+            order.forEach { s.applyRemote(listOf(it)) }
+            s.rebuild()
+            assertTrue(d.txQueries.all().executeAsList().isEmpty())
+            val restored = tx().copy(merchant = "Second rescan")
+            s.applyRemote(listOf(EventRecord("restore-two", "one", 5, clock.now().plusSeconds(5), TransactionAdded(restored, receipt, "delete-two"))))
+            assertEquals("Second rescan", d.txQueries.all().executeAsList().single().merchant)
+            assertEquals(receipt.merchant, d.receiptQueries.byId(receipt.id).executeAsOne().merchant)
+        }
     }
 
     @Test fun `failed validation writes neither event nor receipt`() = runTest {

@@ -1,5 +1,6 @@
 package app.kinjar.ui.add
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -78,12 +79,17 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Serves new entries, bill payments and, on the edit route, corrections of an existing transaction. */
 @Composable
 fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
+    var editing by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(s.saved) { if (s.saved) onClose() }
-    AddContent(s, onClose, vm::setType, vm::press, vm::setCategory, vm::setAccount,
+    BackHandler(enabled = editing) { if (!s.saving) editing = false }
+    if (s.editing != null && !s.loading && !s.loadFailed && !editing) {
+        TransactionDetails(s, onClose, onEdit = { editing = true })
+        return
+    }
+    AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::press, vm::setCategory, vm::setAccount,
         vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad)
 }
 
@@ -163,7 +169,10 @@ private fun Fields(
         }
     }
 
-    if (s.type == TransactionType.EXPENSE) CategoryGrid(s.categories, s.categoryId, onCategory)
+    if (s.type == TransactionType.EXPENSE) {
+        if (s.editing != null) CategoryBox(s.categories, s.categoryId, onCategory)
+        else CategoryGrid(s.categories, s.categoryId, onCategory)
+    }
 
     if (s.type == TransactionType.TRANSFER) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -218,7 +227,6 @@ private fun DeleteDialog(source: TransactionSource, busy: Boolean, onDismiss: ()
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.receipt_warning), style = sans(16, FontWeight.SemiBold), color = c.orange)
                     Text(stringResource(R.string.audit_finance_delete_receipt), style = sans(14), color = c.text)
-                    Text(stringResource(R.string.audit_finance_delete_body), style = sans(13), color = c.muted)
                 }
             },
             confirmButton = { TextButton(onClick = onConfirm, enabled = !busy) { Text(stringResource(R.string.receipt_delete), color = if (busy) c.muted else c.orange) } },
@@ -257,6 +265,37 @@ private fun TypeSwitch(selected: TransactionType, onSelect: (TransactionType) ->
                     stringResource(t.label()), style = sans(14, FontWeight.Medium), color = if (active) c.text else c.muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryBox(categories: List<app.kinjar.domain.Category>, selectedId: String?, onSelect: (String?) -> Unit) {
+    val c = LocalColors.current
+    var open by remember { mutableStateOf(false) }
+    val selected = categories.firstOrNull { it.id == selectedId }
+    val label = stringResource(R.string.scan_category)
+    val value = selected?.let { categoryDisplayName(it.id, it.name) }
+        ?: stringResource(if (selectedId == null) R.string.loan_uncategorized else R.string.scan_category_changed)
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedBox(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = "$label, $value" },
+            radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp), onClick = { open = true }) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(label, style = CaptionStyle, color = c.muted)
+                    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        selected?.let { Box(Modifier.size(8.dp).background(colorOf(it.color), CircleShape)) }
+                        Text(value, style = sans(14, FontWeight.Medium), color = c.text)
+                    }
+                }
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = c.muted)
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.loan_uncategorized), style = sans(14)) }, onClick = { onSelect(null); open = false })
+            categories.forEach { category ->
+                DropdownMenuItem(text = { Text(categoryDisplayName(category.id, category.name), style = sans(14)) }, onClick = { onSelect(category.id); open = false })
             }
         }
     }

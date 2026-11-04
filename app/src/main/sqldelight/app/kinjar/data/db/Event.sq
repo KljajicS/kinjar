@@ -26,5 +26,11 @@ SELECT MAX(occurred_at) AS max_at FROM event;
 allInOrder:
 SELECT * FROM event ORDER BY occurred_at, device_id, seq;
 
+deletionsBefore:
+SELECT * FROM event WHERE type = 'TransactionDeleted'
+AND (occurred_at < :at OR (occurred_at = :at AND device_id < :device)
+    OR (occurred_at = :at AND device_id = :device AND seq < :sequence))
+ORDER BY occurred_at DESC, device_id DESC, seq DESC;
+
 countFor:
 SELECT COUNT(*) FROM event WHERE device_id = ? AND seq = ?;

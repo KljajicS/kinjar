@@ -1,4 +1,7 @@
 <resources>
+    <string name="transaction_details">Transaction details</string>
+    <string name="transaction_edit">Edit</string>
+    <string name="transaction_unavailable">Unavailable</string>
     <string name="receipt_details">Receipt details</string>
     <string name="receipt_hide">Hide receipt details</string>
     <string name="receipt_identity">PIB: %1$s\nInvoice: %2$s\nDate: %3$s</string>

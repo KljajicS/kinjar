@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -39,17 +41,15 @@ import app.kinjar.ui.formatAmount
 import app.kinjar.ui.formatDate
 import app.kinjar.ui.theme.LocalColors
 import app.kinjar.ui.theme.OutlinedBox
+import app.kinjar.ui.theme.PrimaryButton
 import app.kinjar.ui.theme.sans
 import java.text.NumberFormat
 
 @Composable
-internal fun ReceiptDetails(receipt: Receipt) {
+internal fun ReceiptDetails(receipt: Receipt, initiallyExpanded: Boolean = false, showOpenAction: Boolean = true) {
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
-    val uriHandler = LocalUriHandler.current
-    var expanded by remember(receipt) { mutableStateOf(false) }
-    var openFailed by remember(receipt.fiscalUrl) { mutableStateOf(false) }
-    val validUrl = remember(receipt.fiscalUrl) { runCatching { FiscalUrl.parse(receipt.fiscalUrl) }.isSuccess }
+    var expanded by remember(receipt) { mutableStateOf(initiallyExpanded) }
     val quantityFormat = remember(locale) { NumberFormat.getNumberInstance(locale).apply { maximumFractionDigits = 340 } }
     OutlinedBox(Modifier.fillMaxWidth(), radius = 14, padding = PaddingValues(0.dp)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -57,6 +57,11 @@ internal fun ReceiptDetails(receipt: Receipt) {
             .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.receipt_details), style = sans(14, FontWeight.SemiBold), color = c.text, modifier = Modifier.weight(1f))
             Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, contentDescription = null, tint = c.muted)
+        }
+        if (showOpenAction) {
+            Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
+                ReceiptOpenAction(receipt)
+            }
         }
         if (expanded) {
             HorizontalDivider(color = c.border)
@@ -80,25 +85,42 @@ internal fun ReceiptDetails(receipt: Receipt) {
                         Text(stringResource(R.string.receipt_total, formatAmount(receipt.total, locale = locale)), style = sans(14, FontWeight.SemiBold), color = c.text)
                     }
                 }
-                TextButton(enabled = validUrl, onClick = {
-                    openFailed = false
-                    try {
-                        uriHandler.openUri(receipt.fiscalUrl)
-                    } catch (_: ActivityNotFoundException) {
-                        openFailed = true
-                    } catch (_: IllegalArgumentException) {
-                        openFailed = true
-                    } catch (_: SecurityException) {
-                        openFailed = true
-                    }
-                }) { Text(stringResource(R.string.receipt_open), color = if (validUrl) c.primary else c.muted) }
-                if (!validUrl) Text(stringResource(R.string.receipt_invalid_link), style = sans(12), color = c.orange)
-                if (validUrl && !openFailed) Text("suf.purs.gov.rs", style = sans(12), color = c.muted)
-                if (openFailed) {
-                    SelectionContainer { Text(receipt.fiscalUrl, style = sans(12), color = c.muted) }
-                    Text(stringResource(R.string.receipt_open_failed), style = sans(12), color = c.orange)
-                }
             }
+        }
+    }
+}
+
+@Composable
+internal fun ReceiptOpenAction(receipt: Receipt, primary: Boolean = false) {
+    val c = LocalColors.current
+    val uriHandler = LocalUriHandler.current
+    var openFailed by remember(receipt.fiscalUrl) { mutableStateOf(false) }
+    val validUrl = remember(receipt.fiscalUrl) { runCatching { FiscalUrl.parse(receipt.fiscalUrl) }.isSuccess }
+    val open = {
+        openFailed = false
+        try {
+            uriHandler.openUri(receipt.fiscalUrl)
+        } catch (_: ActivityNotFoundException) {
+            openFailed = true
+        } catch (_: IllegalArgumentException) {
+            openFailed = true
+        } catch (_: SecurityException) {
+            openFailed = true
+        }
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!validUrl) Text(stringResource(R.string.receipt_invalid_link), style = sans(12), color = c.orange)
+        if (validUrl && !openFailed) Text("suf.purs.gov.rs", style = sans(12), color = c.muted)
+        if (openFailed) {
+            SelectionContainer {
+                Text(receipt.fiscalUrl, style = sans(12), color = c.muted,
+                    modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()))
+            }
+            Text(stringResource(R.string.receipt_open_failed), style = sans(12), color = c.orange)
+        }
+        if (primary) PrimaryButton(stringResource(R.string.receipt_open), enabled = validUrl, onClick = open)
+        else TextButton(enabled = validUrl, onClick = open) {
+            Text(stringResource(R.string.receipt_open), color = if (validUrl) c.primary else c.muted)
         }
     }
 }

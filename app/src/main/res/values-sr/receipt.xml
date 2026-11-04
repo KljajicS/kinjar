@@ -1,4 +1,7 @@
 <resources>
+    <string name="transaction_details">Detalji transakcije</string>
+    <string name="transaction_edit">Izmeni</string>
+    <string name="transaction_unavailable">Nedostupno</string>
     <string name="receipt_details">Detalji računa</string>
     <string name="receipt_hide">Sakrij detalje računa</string>
     <string name="receipt_identity">PIB: %1$s\nBroj računa: %2$s\nDatum: %3$s</string>

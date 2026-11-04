@@ -6,7 +6,7 @@
     <string name="audit_finance_delete_title">Obrisati ovu transakciju?</string>
     <string name="audit_finance_delete_body">Stanja, zbirovi i izveštaji se odmah menjaju. Ovo ne može da se poništi.</string>
     <string name="audit_finance_delete_bill">Račun će ponovo biti prikazan kao neplaćen.</string>
-    <string name="audit_finance_delete_receipt">Brisanjem ovog troška gubiš pristup detaljima fiskalnog računa.\n\nOvaj račun ne možeš ponovo da skeniraš.\n\nPrvo sačuvaj zvanični račun ako ti je potreban.</string>
+    <string name="audit_finance_delete_receipt">Trošak će biti obrisan. Možeš ponovo skenirati račun da ga vratiš.</string>
     <string name="audit_finance_delete_failed">Brisanje nije uspelo. Pokušaj ponovo.</string>
     <string name="audit_finance_loan_locked">Ova transakcija pripada kreditu. Izmeni je preko kredita u Računima.</string>
     <string name="audit_finance_missing">Ova transakcija više ne postoji.</string>
@@ -15,5 +15,5 @@
     <string name="audit_finance_show_older">Prikaži starije</string>
     <string name="audit_finance_load_failed">Učitavanje podataka nije uspelo.</string>
     <string name="audit_finance_retry">Pokušaj ponovo</string>
-    <string name="audit_finance_edit_hint">Dodirni za izmenu</string>
+    <string name="audit_finance_edit_hint">Dodirni za detalje</string>
 </resources>

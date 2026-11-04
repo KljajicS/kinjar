@@ -58,7 +58,11 @@ data class AccountUpdated(val account: Account) : Event
 data class MemberRenamed(val memberId: String, val displayName: String) : Event
 
 @Serializable @SerialName("TransactionAdded")
-data class TransactionAdded(val transaction: Transaction, val receipt: Receipt? = null) : Event
+data class TransactionAdded(
+    val transaction: Transaction,
+    val receipt: Receipt? = null,
+    val receiptDeletionId: String? = null,
+) : Event
 
 @Serializable @SerialName("TransactionEdited")
 data class TransactionEdited(val transaction: Transaction) : Event
