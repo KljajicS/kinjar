@@ -10,6 +10,9 @@ import app.kinjar.domain.Event
 import app.kinjar.domain.EventJson
 import app.kinjar.domain.EventRecord
 import app.kinjar.domain.newId
+import app.kinjar.domain.OperationCodec
+import app.kinjar.domain.OperationEvent
+import app.kinjar.domain.SyncOperation
 import java.time.Instant
 
 class EventStore(
@@ -27,7 +30,13 @@ class EventStore(
             db.transactionWithResult {
                 if (skipIf()) return@transactionWithResult emptyList()
                 validate()
-                events.map { event ->
+                val session = db.syncSessionQueries.current().executeAsOneOrNull()
+                if (session != null) {
+                    check(session.install_id == deviceId) { "Installation must recover its session" }
+                    check(session.status == "ACTIVE") { "Family data is not writable" }
+                }
+                val resources = if (session == null) emptyMap() else operationResources(events, db)
+                val records = events.map { event ->
                     val seq = (db.eventQueries.lastSeq(deviceId).executeAsOne().max_seq ?: 0L) + 1
                     // Logical clock preserves causality when a device clock moves backwards.
                     val last = db.eventQueries.lastOccurredAt().executeAsOne().max_at ?: 0L
@@ -37,6 +46,20 @@ class EventStore(
                     projector.apply(record)
                     record
                 }
+                if (session != null && records.isNotEmpty()) {
+                    val known = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
+                    val parentIds = known.flatMapTo(mutableSetOf()) { it.parents }
+                    val heads = known.map { it.id }.filterTo(mutableSetOf()) { it !in parentIds }
+                    val operation = SyncOperation(
+                        familyId = session.family_id, datasetId = session.dataset_id,
+                        authorUid = session.uid, installId = deviceId,
+                        sequence = Math.addExact(db.syncOperationQueries.lastSequence(deviceId).executeAsOneOrNull()?.MAX ?: 0L, 1L),
+                        parents = heads, resources = resources, events = records.map(OperationEvent::from),
+                    )
+                    db.syncOperationQueries.insert(operation.id, deviceId, operation.sequence, OperationCodec.encode(operation))
+                    db.syncOutboxQueries.enqueue(operation.id, session.family_id, session.dataset_id)
+                }
+                records
             }
         }
     }
@@ -46,13 +69,19 @@ class EventStore(
             require(duplicates.all { it == duplicates.first() }) { "Conflicting event sequence" }
             duplicates.first()
         }
-        val fresh = unique.filter { db.eventQueries.countFor(it.deviceId, it.seq).executeAsOne() == 0L }
+        val fresh = unique.filter { record ->
+            val existing = db.eventQueries.bySequence(record.deviceId, record.seq).executeAsOneOrNull()
+            if (existing != null) require(toRecord(existing) == record) { "Conflicting stored event sequence" }
+            existing == null
+        }
         if (fresh.isEmpty()) return@transaction
         fresh.forEach(::insert)
         rebuildInTransaction()
     } }
 
     fun rebuild() = synchronized(writeLock) { db.transaction { rebuildInTransaction() } }
+
+    fun <T> read(block: () -> T): T = synchronized(writeLock) { db.transactionWithResult { block() } }
 
     private fun rebuildInTransaction() {
         projector.clear()

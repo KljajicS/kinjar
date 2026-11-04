@@ -1,0 +1,19 @@
+CREATE TABLE restore_journal (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton = 1),
+    uid TEXT NOT NULL,
+    family_id TEXT NOT NULL,
+    source_dataset TEXT NOT NULL,
+    target_dataset TEXT NOT NULL,
+    token TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    manifest BLOB NOT NULL
+);
+
+current:
+SELECT * FROM restore_journal WHERE singleton = 1;
+
+save:
+INSERT OR REPLACE INTO restore_journal VALUES (1, ?, ?, ?, ?, ?, ?, ?);
+
+deleteAll:
+DELETE FROM restore_journal;

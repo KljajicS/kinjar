@@ -95,8 +95,7 @@ class ReceiptRepositoryTest {
         javaClass.getResource("/schema-v4.sql")!!.readText().split(';').filter { it.isNotBlank() }
             .forEach { driver.execute(null, it, 0) }
         val old = KinjarDb(driver)
-        val oldStore = EventStore(old, "old", clock, Projector(old))
-        oldStore.append(TransactionAdded(tx().copy(id = "old", source = TransactionSource.MANUAL)))
+        seedLegacyEvents(old, listOf(TransactionAdded(tx().copy(id = "old", source = TransactionSource.MANUAL))), clock.now())
         KinjarDb.Schema.migrate(driver, 4, 5)
         assertEquals("120.00", old.txQueries.all().executeAsList().single().amount)
         assertEquals(1L, old.eventQueries.count().executeAsOne())

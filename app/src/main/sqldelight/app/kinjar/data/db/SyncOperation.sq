@@ -1,0 +1,22 @@
+CREATE TABLE sync_operation (
+    id TEXT NOT NULL PRIMARY KEY,
+    install_id TEXT NOT NULL,
+    operation_seq INTEGER NOT NULL,
+    payload BLOB NOT NULL,
+    UNIQUE(install_id, operation_seq)
+);
+
+all:
+SELECT * FROM sync_operation ORDER BY install_id, operation_seq;
+
+byId:
+SELECT * FROM sync_operation WHERE id = ?;
+
+lastSequence:
+SELECT MAX(operation_seq) FROM sync_operation WHERE install_id = ?;
+
+insert:
+INSERT INTO sync_operation(id, install_id, operation_seq, payload) VALUES (?, ?, ?, ?);
+
+deleteAll:
+DELETE FROM sync_operation;

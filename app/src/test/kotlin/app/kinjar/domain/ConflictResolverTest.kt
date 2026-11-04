@@ -1,0 +1,69 @@
+package app.kinjar.domain
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class ConflictResolverTest {
+    private fun op(device: String, seq: Long = 1, parents: Set<String> = emptySet(),
+                   resources: Map<String, ResourceAccess> = mapOf("transaction:t" to ResourceAccess.WRITE),
+                   rejected: Set<String> = emptySet()): SyncOperation = SyncOperation(
+        familyId = "family", datasetId = "dataset", authorUid = device, installId = device,
+        sequence = seq, parents = parents, resources = resources,
+        events = if (rejected.isNotEmpty()) emptyList() else listOf(OperationEvent("$device-$seq", device, seq, seq, TransactionDeleted("t"))),
+        rejected = rejected,
+    )
+
+    @Test fun `concurrent financial edits hold both commands in every delivery order`() {
+        val a = op("a")
+        val b = op("b")
+        val independent = op("c", resources = mapOf("transaction:other" to ResourceAccess.WRITE))
+        val dependent = op("a", 2, setOf(a.id))
+        val expected = ConflictResolver.replay(listOf(a, b, independent, dependent))
+        assertEquals(setOf(a.id, b.id), expected.conflicts)
+        assertEquals(setOf(dependent.id), expected.waiting)
+        assertEquals(listOf(independent), expected.applicable)
+        repeat(20) { assertEquals(expected, ConflictResolver.replay(listOf(a, b, independent, dependent).shuffled(java.util.Random(it.toLong())))) }
+    }
+
+    @Test fun `independent transactions may read the same account`() {
+        val a = op("a", resources = mapOf("transaction:a" to ResourceAccess.WRITE, "account:cash" to ResourceAccess.READ))
+        val b = op("b", resources = mapOf("transaction:b" to ResourceAccess.WRITE, "account:cash" to ResourceAccess.READ))
+        assertEquals(2, ConflictResolver.replay(listOf(a, b)).applicable.size)
+        val changedCurrency = op("c", resources = mapOf("account:cash" to ResourceAccess.WRITE))
+        assertEquals(setOf(a.id, b.id, changedCurrency.id), ConflictResolver.replay(listOf(a, b, changedCurrency)).conflicts)
+    }
+
+    @Test fun `resolution selects one whole operation without allowing stale descendants`() {
+        val a = op("a")
+        val b = op("b")
+        val resolve = op("a", 2, setOf(a.id, b.id), rejected = setOf(b.id))
+        val result = ConflictResolver.replay(listOf(a, b, resolve))
+        assertTrue(result.conflicts.isEmpty())
+        assertEquals(listOf(a, resolve), result.applicable)
+        assertEquals(setOf(b.id), result.rejected)
+    }
+
+    @Test fun `missing parent waits and sequential edit does not conflict`() {
+        val a = op("a")
+        val next = op("a", 2, setOf(a.id))
+        assertEquals(setOf(next.id), ConflictResolver.replay(listOf(next)).waiting)
+        assertEquals(listOf(a, next), ConflictResolver.replay(listOf(next, a)).applicable)
+    }
+
+    @Test fun `concurrent choices must be resolved again`() {
+        val a = op("a")
+        val b = op("b")
+        val r1 = op("a", 2, setOf(a.id, b.id), rejected = setOf(b.id))
+        val r2 = op("b", 2, setOf(a.id, b.id), rejected = setOf(a.id))
+        val result = ConflictResolver.replay(listOf(a, b, r1, r2))
+        assertTrue(result.conflicts.containsAll(listOf(a.id, b.id, r1.id, r2.id)))
+        assertTrue(result.applicable.isEmpty())
+    }
+
+    @Test fun `unknown version is upgrade required and raw operation round trips`() {
+        val original = op("a")
+        val bytes = OperationCodec.encode(original)
+        assertEquals(original, OperationCodec.decode(bytes))
+        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(bytes.toString(Charsets.UTF_8).replace("\"version\":1", "\"version\":2").toByteArray()) }
+    }
+}

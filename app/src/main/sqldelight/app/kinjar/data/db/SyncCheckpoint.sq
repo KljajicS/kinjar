@@ -1,0 +1,15 @@
+CREATE TABLE sync_checkpoint (
+    dataset_id TEXT NOT NULL PRIMARY KEY,
+    seconds INTEGER NOT NULL,
+    nanos INTEGER NOT NULL,
+    document_id TEXT NOT NULL
+);
+
+byDataset:
+SELECT * FROM sync_checkpoint WHERE dataset_id = ?;
+
+save:
+INSERT OR REPLACE INTO sync_checkpoint VALUES (?, ?, ?, ?);
+
+deleteAll:
+DELETE FROM sync_checkpoint;

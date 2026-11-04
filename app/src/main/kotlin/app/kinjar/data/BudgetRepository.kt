@@ -164,6 +164,9 @@ class BudgetRepository(
     suspend fun skipBill(ruleId: String, period: String) { store.append(BillSkipped(ruleId, period)) }
 
     suspend fun currentMember(): Member? = withContext(Dispatchers.IO) {
+        db.syncSessionQueries.current().executeAsOneOrNull()?.let { session ->
+            return@withContext db.memberQueries.all().executeAsList().find { it.id == session.member_id }?.toDomain()
+        }
         db.memberQueries.byDevice(deviceId).executeAsOneOrNull()?.toDomain()
             ?: db.memberQueries.all().executeAsList().firstOrNull()?.toDomain()
     }

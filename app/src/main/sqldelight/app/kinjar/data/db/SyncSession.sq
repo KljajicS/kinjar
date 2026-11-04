@@ -1,0 +1,19 @@
+CREATE TABLE sync_session (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton = 1),
+    uid TEXT NOT NULL,
+    family_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    install_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    status TEXT NOT NULL
+);
+
+current:
+SELECT * FROM sync_session WHERE singleton = 1;
+
+save:
+INSERT OR REPLACE INTO sync_session VALUES (1, ?, ?, ?, ?, ?, ?, ?);
+
+deleteAll:
+DELETE FROM sync_session;

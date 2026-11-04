@@ -1,0 +1,13 @@
+CREATE TABLE sync_conflict (
+    operation_id TEXT NOT NULL PRIMARY KEY,
+    reason TEXT NOT NULL
+);
+
+all:
+SELECT * FROM sync_conflict ORDER BY operation_id;
+
+save:
+INSERT OR REPLACE INTO sync_conflict VALUES (?, ?);
+
+deleteAll:
+DELETE FROM sync_conflict;

@@ -1,0 +1,18 @@
+CREATE TABLE sync_outbox (
+    operation_id TEXT NOT NULL PRIMARY KEY REFERENCES sync_operation(id),
+    family_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL
+);
+
+pending:
+SELECT sync_operation.* FROM sync_outbox JOIN sync_operation ON sync_operation.id = operation_id
+WHERE family_id = ? AND dataset_id = ? ORDER BY install_id, operation_seq;
+
+enqueue:
+INSERT INTO sync_outbox(operation_id, family_id, dataset_id) VALUES (?, ?, ?);
+
+acknowledge:
+DELETE FROM sync_outbox WHERE operation_id = ? AND family_id = ? AND dataset_id = ?;
+
+deleteAll:
+DELETE FROM sync_outbox;

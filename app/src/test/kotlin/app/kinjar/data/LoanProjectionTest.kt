@@ -36,14 +36,13 @@ class LoanProjectionTest {
         javaClass.getResource("/schema-v5.sql")!!.readText().split(';').filter { it.isNotBlank() }.forEach { driver.execute(null, it, 0) }
         KinjarDb.Schema.migrate(driver, 5, 7)
         val oldDb = KinjarDb(driver)
-        val oldStore = EventStore(oldDb, "old", clock, Projector(oldDb))
         fun rsd(value: String) = Money.of(value, Currency.RSD)
         val income = Transaction("income", TransactionType.INCOME, rsd("1000"), "a", null, null, clock.today(), "", "", "m", TransactionSource.MANUAL)
         val events = listOf(AccountCreated(Account("a", "Cash", Currency.RSD)), TransactionAdded(income),
             TransactionAdded(income.copy(id = "expense", type = TransactionType.EXPENSE, money = rsd("250"))),
             GoalSet(Goal("g", "Reserve", rsd("1000"))),
             RecurringRuleSet(RecurringRule("r", "Bill", rsd("100"), "a", "c", Cadence.MONTHLY, clock.today())))
-        oldStore.appendAll(events)
+        seedLegacyEvents(oldDb, events, clock.now())
         KinjarDb.Schema.migrate(driver, 7, KinjarDb.Schema.version)
         val db = KinjarDb(driver)
         assertEquals("Cash", db.accountQueries.byId("a").executeAsOne().name)

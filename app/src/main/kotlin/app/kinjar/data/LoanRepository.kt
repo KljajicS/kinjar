@@ -41,7 +41,7 @@ class LoanRepository(private val db: KinjarDb, private val store: EventStore, pr
         db.transactionWithResult { readBook() }
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun <T> read(block: () -> T): T = withContext(Dispatchers.IO) { db.transactionWithResult { block() } }
+    private suspend fun <T> read(block: () -> T): T = withContext(Dispatchers.IO) { store.read(block) }
 
     private fun readBook() = LoanBook(
         db.loanQueries.all().executeAsList().map { EventJson.decodeFromString<Loan>(it.payload).copy(archived = it.archived != 0L) },

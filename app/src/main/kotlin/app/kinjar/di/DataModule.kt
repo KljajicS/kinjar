@@ -69,14 +69,17 @@ object DataModule {
     fun transactionAccountStore(@ApplicationContext context: Context): TransactionAccountStore = TransactionAccountStore.fromPreferences(context)
 
     @Provides @Singleton
-    fun repository(@ApplicationContext context: Context, db: KinjarDb, clock: Clock): BudgetRepository {
-        val id = deviceId(context)
-        val store = EventStore(db, id, clock, Projector(db))
+    fun eventStore(@ApplicationContext context: Context, db: KinjarDb, clock: Clock): EventStore {
+        val store = EventStore(db, deviceId(context), clock, Projector(db))
         val prefs = context.getSharedPreferences("projection", Context.MODE_PRIVATE)
         if (prefs.getInt("version", 0) != Projector.VERSION) {
             store.rebuild()
             prefs.edit { putInt("version", Projector.VERSION) }
         }
-        return BudgetRepository(db, store, clock, id, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+        return store
     }
+
+    @Provides @Singleton
+    fun repository(@ApplicationContext context: Context, db: KinjarDb, clock: Clock, store: EventStore): BudgetRepository =
+        BudgetRepository(db, store, clock, deviceId(context), CoroutineScope(SupervisorJob() + Dispatchers.Default))
 }
