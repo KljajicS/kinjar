@@ -1,4 +1,10 @@
 <resources>
+    <string name="fbs_backup_failed">Backup action could not finish. Check the passphrase, file and connection, then try again.</string>
+    <string name="fbs_action_failed">Action could not finish. Check your account, connection and family status, then try again.</string>
+    <string name="fbs_join_warning">Join this family with your Google account? Membership starts now. Replacing local finances requires a separate confirmation. An administrator can remove you if you change your mind.</string>
+    <string name="fbs_abandon">Stop recovery on this phone</string>
+    <string name="fbs_abandon_warning">Keep current local finances and allow editing again. This does not cancel changes already made in the cloud. Reconnect to recover the active family data, or have an administrator cancel an unfinished shared restore. An unfinished family setup can be deleted by its creator.</string>
+    <string name="fbs_quarantined">%1$d invalid changes are held separately and included in backups. Other changes can sync. Ask an administrator to review or restore the family if dependent changes remain blocked.</string>
     <string name="fbs_family">Family</string>
     <string name="fbs_backups">Backup and restore</string>
     <string name="fbs_optional">Optional family sync</string>

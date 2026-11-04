@@ -99,7 +99,20 @@ class EventStore(
         }
     }
 
+    fun prepareCloudHistory(history: FamilyHistory): FamilyHistory = synchronized(writeLock) {
+        var prepared: FamilyHistory? = null
+        db.transaction { synced.replace(history, quarantineInvalid = true); prepared = synced.snapshot(); rollback() }
+        requireNotNull(prepared)
+    }
+
+    fun abandonRecovery(uid: String) = read {
+        val journal = db.restoreJournalQueries.current().executeAsOneOrNull() ?: return@read
+        require(journal.uid == uid)
+        db.restoreJournalQueries.deleteAll()
+    }
+
     fun restoreLocal(history: FamilyHistory, expectedLocalDigest: String) = read {
+        require(db.restoreJournalQueries.current().executeAsOneOrNull() == null) { "Cancel pending recovery before restoring a file" }
         require(db.syncSessionQueries.current().executeAsOneOrNull() == null) { "Restore shared family data while signed in" }
         val before = HistoryCodec.encode(synced.snapshot())
         require(HistoryCodec.digest(before) == expectedLocalDigest) { "Local data changed; confirm again" }
@@ -121,10 +134,12 @@ class EventStore(
     }
 
     fun receive(operations: List<ByteArray>, uid: String, familyId: String, datasetId: String,
-                checkpointSeconds: Long, checkpointNanos: Long, checkpointId: String) = read {
+                checkpointSeconds: Long, checkpointNanos: Long, checkpointId: String,
+                quarantine: List<app.kinjar.domain.QuarantinedOperation> = emptyList()) = read {
         val session = requireNotNull(db.syncSessionQueries.current().executeAsOneOrNull())
         check(session.uid == uid && session.family_id == familyId && session.dataset_id == datasetId && session.status == "ACTIVE")
         synced.receive(operations, familyId, datasetId)
+        quarantine.forEach(synced::quarantine)
         synced.rebuild()
         db.syncCheckpointQueries.save(datasetId, checkpointSeconds, checkpointNanos, checkpointId)
     }
@@ -155,6 +170,7 @@ class EventStore(
         db.syncConflictQueries.deleteAll()
         db.syncCheckpointQueries.deleteAll()
         db.syncBaselineQueries.deleteAll()
+        db.syncQuarantineQueries.deleteAll()
         db.syncDraftQueries.deleteFamily(uid, familyId)
         db.restoreJournalQueries.deleteAll()
         db.eventQueries.deleteAll()

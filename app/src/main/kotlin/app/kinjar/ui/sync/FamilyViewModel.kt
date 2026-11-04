@@ -39,6 +39,7 @@ data class FamilyScreenState(
     val hasLocalMember: Boolean = false,
     val backupDate: Instant? = null,
     val savedBackup: Boolean = false,
+    val quarantined: Int = 0,
 )
 
 @HiltViewModel
@@ -69,7 +70,7 @@ class FamilyViewModel @Inject constructor(
     fun refresh() = run { load() }
     fun signIn(activity: Activity) = run { auth.signIn(activity); load() }
     fun signOut(activity: Activity) = run { auth.signOut(activity); load() }
-    fun synchronize() = run { sync.synchronize(); load() }
+    fun synchronize() = run { sync.synchronize(reconcile = true); load() }
     fun create() = run {
         val account = requireNotNull(auth.current())
         val member = repository.currentMember() ?: Member(newId(), account.displayName.ifBlank { account.email.substringBefore('@') }, account.uid)
@@ -80,6 +81,7 @@ class FamilyViewModel @Inject constructor(
     fun stage(invitation: FamilyInvitation? = null) = run { sync.stageRecovery(invitation); load() }
     fun confirmReplacement() = run { sync.confirmReplacement(); load() }
     fun cancelReplacement() = run { sync.cancelReplacement(); loadLocal() }
+    fun abandonRecovery() = run { sync.abandonRecovery(); loadLocal() }
     fun invite(email: String) = run { families.invite(requireFamily(), email); load() }
     fun cancelInvitations() = run { families.cancelInvitations(requireFamily()); load() }
     fun administrator(uid: String, value: Boolean) = run { families.setAdministrator(requireFamily(), uid, value); load() }
@@ -168,7 +170,8 @@ class FamilyViewModel @Inject constructor(
         val uid = auth.current()?.uid ?: "local"
         val copies = db.syncDraftQueries.all(uid).executeAsList().map { RetainedCopy(it.id, Instant.ofEpochMilli(it.created_at)) }
         mutableState.update { it.copy(names = members.associate { m -> m.id to m.display_name }, conflicts = conflicts, copies = copies,
-            journalPhase = db.restoreJournalQueries.current().executeAsOneOrNull()?.takeIf { j -> j.uid == uid }?.phase,
+            quarantined = db.syncQuarantineQueries.all().executeAsList().size,
+            journalPhase = db.restoreJournalQueries.current().executeAsOneOrNull()?.phase,
             enrolled = session != null, hasLocalMember = members.isNotEmpty()) }
     }
 

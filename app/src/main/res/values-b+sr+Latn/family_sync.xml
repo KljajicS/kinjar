@@ -1,4 +1,10 @@
 <resources>
+    <string name="fbs_backup_failed">Radnja sa rezervnom kopijom nije završena. Proveri lozinku, datoteku i vezu, pa pokušaj ponovo.</string>
+    <string name="fbs_action_failed">Radnja nije završena. Proveri nalog, vezu i stanje porodice, pa pokušaj ponovo.</string>
+    <string name="fbs_join_warning">Pridruži se ovoj porodici pomoću Google naloga? Članstvo počinje odmah. Zamena lokalnih finansija zahteva posebnu potvrdu. Administrator može da te ukloni ako se predomisliš.</string>
+    <string name="fbs_abandon">Zaustavi oporavak na ovom telefonu</string>
+    <string name="fbs_abandon_warning">Zadrži trenutne lokalne finansije i ponovo omogući izmene. Ovo ne poništava promene već napravljene u oblaku. Ponovo se poveži da preuzmeš aktivne porodične podatke ili zamoli administratora da otkaže nedovršeno zajedničko vraćanje. Nedovršeno podešavanje porodice može da obriše njen osnivač.</string>
+    <string name="fbs_quarantined">Neispravne promene (%1$d) čuvaju se zasebno i uključene su u rezervne kopije. Ostale promene mogu da se usklade. Zamoli administratora da proveri ili vrati porodicu ako zavisne promene ostanu blokirane.</string>
     <string name="fbs_family">Porodica</string>
     <string name="fbs_backups">Rezervna kopija i vraćanje</string>
     <string name="fbs_optional">Opciona sinhronizacija porodice</string>

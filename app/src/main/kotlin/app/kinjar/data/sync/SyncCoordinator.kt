@@ -41,6 +41,7 @@ class SyncCoordinator @Inject constructor(
     private val transport: FirestoreTransport,
     private val db: KinjarDb,
     private val store: EventStore,
+    private val scheduler: SyncScheduler,
 ) {
     private val install = deviceId(context)
     private val mutex = Mutex()
@@ -121,22 +122,25 @@ class SyncCoordinator @Inject constructor(
         val member = requireNotNull(family.members[uid])
         val baseline = transport.downloadBaseline(uid, family.id, family.activeDataset)
         val operations = baseline.operations.toMutableList()
-        val ids = baseline.decodedOperations().associateBy { it.id }.toMutableMap()
+        val quarantine = baseline.quarantine.toMutableList()
+        val ids = baseline.operations.associateBy { OperationCodec.decode(Base64.getDecoder().decode(it)).id }.toMutableMap()
         var cursor: CloudCursor? = null
         do {
             val page = transport.download(uid, family.id, family.activeDataset, cursor)
+            quarantine += page.quarantine
             page.operations.forEach { bytes ->
                 val op = OperationCodec.decode(bytes)
-                require(op.id !in ids) { "Cloud operation repeats bootstrap identity" }
-                ids[op.id] = op
-                operations += Base64.getEncoder().encodeToString(bytes)
+                val encoded = Base64.getEncoder().encodeToString(bytes)
+                val prior = ids[op.id]
+                if (prior == null) { ids[op.id] = encoded; operations += encoded }
+                else if (prior != encoded) quarantine += QuarantinedOperation.from(bytes, "IDENTITY_MISMATCH")
             }
             cursor = page.cursor
         } while (page.hasMore)
         checkUser(uid)
         val latest = families.info(family.id)
         require(latest.activeDataset == family.activeDataset && latest.generation == family.generation && latest.status == "ACTIVE") { "Family changed during download" }
-        val history = baseline.copy(operations = operations)
+        val history = store.prepareCloudHistory(baseline.copy(operations = operations, quarantine = quarantine))
         HistoryCodec.encode(history)
         store.validateHistory(history)
         store.read {
@@ -165,13 +169,19 @@ class SyncCoordinator @Inject constructor(
         if (journal?.phase == "REPLACE") db.restoreJournalQueries.deleteAll()
     }
 
-    suspend fun synchronize() = action {
+    suspend fun abandonRecovery() = action {
+        val journal = store.read { db.restoreJournalQueries.current().executeAsOneOrNull() }
+        if (journal != null) store.abandonRecovery(journal.uid)
+        mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.REPLACEMENT_REQUIRED)
+    }
+
+    suspend fun synchronize(reconcile: Boolean = false) = action {
         if (!configured) { mutableStatus.value = SyncStatus(); return@action }
         if (services.auth.currentUser == null) {
             mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.SIGNED_OUT)
             return@action
         }
-        syncLocked(user())
+        syncLocked(user(), reconcile)
     }
 
     suspend fun restoreFamily(history: FamilyHistory, expectedLocalDigest: String) = action {
@@ -242,12 +252,7 @@ class SyncCoordinator @Inject constructor(
         mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.READY)
     }
 
-    private suspend fun syncLocked(uid: String) {
-        val journal = store.read { db.restoreJournalQueries.current().executeAsOneOrNull() }
-        if (journal?.uid == uid && journal.phase == "RESTORE") {
-            mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.RESTORING)
-            return
-        }
+    private suspend fun syncLocked(uid: String, reconcile: Boolean = false) {
         val session = store.read { db.syncSessionQueries.current().executeAsOneOrNull() }
         if (session == null || session.uid != uid || session.install_id != install) {
             mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.REPLACEMENT_REQUIRED)
@@ -263,6 +268,11 @@ class SyncCoordinator @Inject constructor(
         require(membership != null && membership.familyId == session.family_id && !membership.removed) { "Family membership changed" }
         val family = families.info(session.family_id)
         checkUser(uid)
+        val journal = store.read { db.restoreJournalQueries.current().executeAsOneOrNull() }
+        if (journal?.uid == uid && journal.phase == "RESTORE") {
+            mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.RESTORING)
+            return
+        }
         if (family.activeDataset != session.dataset_id || family.status != "ACTIVE") {
             mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.REPLACEMENT_REQUIRED)
             return
@@ -270,16 +280,15 @@ class SyncCoordinator @Inject constructor(
         if (family.generation != session.generation) store.read {
             db.syncSessionQueries.save(uid, family.id, session.dataset_id, session.member_id, install, family.generation, "ACTIVE")
         }
-        val slot = transport.register(uid, family.id, install)
-        SyncWorker.schedule(context)
-        val saved = store.read { db.syncCheckpointQueries.byDataset(session.dataset_id).executeAsOneOrNull() }
+        scheduler.schedule()
+        val saved = if (reconcile) null else store.read { db.syncCheckpointQueries.byDataset(session.dataset_id).executeAsOneOrNull() }
         var cursor = saved?.let { CloudCursor(it.seconds, it.nanos.toInt(), it.document_id) }
         var overlap = true
         do {
             val page = transport.download(uid, family.id, session.dataset_id, cursor, overlap)
             checkUser(uid)
             cursor = page.cursor
-            cursor?.let { store.receive(page.operations, uid, family.id, session.dataset_id, it.seconds, it.nanos.toLong(), it.id) }
+            cursor?.let { store.receive(page.operations, uid, family.id, session.dataset_id, it.seconds, it.nanos.toLong(), it.id, page.quarantine) }
             overlap = false
         } while (page.hasMore)
         require(family.members[uid] == session.member_id)
@@ -287,9 +296,10 @@ class SyncCoordinator @Inject constructor(
             store.append(MemberCreated(Member(session.member_id, services.auth.currentUser?.displayName?.take(80) ?: "Member", uid)))
         }
         val pending = store.read { db.syncOutboxQueries.pending(family.id, session.dataset_id).executeAsList() }
+        val slot = if (pending.isEmpty()) null else transport.register(uid, family.id, install)
         mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.RUNNING, pending = pending.size)
         pending.forEach { operation ->
-            transport.upload(uid, family.id, session.dataset_id, slot, operation.payload)
+            transport.upload(uid, family.id, session.dataset_id, requireNotNull(slot), operation.payload)
             checkUser(uid)
             store.read { db.syncOutboxQueries.acknowledge(operation.id, family.id, session.dataset_id) }
         }

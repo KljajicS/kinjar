@@ -5,6 +5,7 @@ import app.kinjar.domain.newId
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.Source
+import com.google.firebase.firestore.FieldValue
 import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.util.Date
@@ -59,8 +60,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
         val email = requireNotNull(services.auth.currentUser?.email)
         return db.collectionGroup("invites").whereEqualTo("email", email).whereEqualTo("status", "PENDING")
             .get(Source.SERVER).await().documents.mapNotNull { document ->
-                val expires = document.getTimestamp("expiresAt")?.toDate()?.toInstant() ?: return@mapNotNull null
-                if (expires <= Instant.now()) return@mapNotNull null
+                val expires = document.getTimestamp("createdAt")?.toDate()?.toInstant()?.plusSeconds(6 * 86400) ?: return@mapNotNull null
                 FamilyInvitation(requireNotNull(document.getString("familyId")), document.id, expires, requireNotNull(document.getString("inviterEmail")))
             }
     }
@@ -79,7 +79,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             val target = slots.zip(saved).firstOrNull { !it.second.exists() }?.first ?: error("Invitation capacity reached")
             transaction.set(target, mapOf("familyId" to familyId, "email" to normalized, "inviter" to user,
                 "inviterEmail" to requireNotNull(services.auth.currentUser?.email),
-                "expiresAt" to Timestamp(Date.from(Instant.now().plusSeconds(6 * 86400))), "status" to "PENDING", "uid" to ""))
+                "createdAt" to FieldValue.serverTimestamp(), "status" to "PENDING", "uid" to ""))
         }.await()
     }
 
@@ -95,7 +95,6 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             check(!existing.exists() || existing.getString("status") == "REMOVED")
             check(current.status == "ACTIVE" && current.members.size < 6)
             check(saved.getString("email") == services.auth.currentUser?.email && saved.getString("status") == "PENDING")
-            check(requireNotNull(saved.getTimestamp("expiresAt")).toDate().toInstant() > Instant.now())
             transaction.update(root, mapOf("members" to (current.members + (user to memberId)), "action" to "join", "target" to user, "inviteSlot" to invitation.slot))
             transaction.update(ref, mapOf("status" to "ACCEPTED", "uid" to user))
             transaction.set(userRef, mapOf("familyId" to invitation.familyId, "memberId" to memberId, "status" to "ACTIVE"))
@@ -122,8 +121,11 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             val current = decode(transaction.get(root))
             check(user in current.admins && targetUid != current.owner && targetUid in current.members)
             check(targetUid !in current.admins || user == current.owner)
+            val installs = (0..5).map { root.collection("installs").document(it.toString()) }
+            val removed = installs.filter { transaction.get(it).getString("uid") == targetUid }
             transaction.update(root, mapOf("members" to (current.members - targetUid), "admins" to (current.admins - targetUid), "action" to "remove", "target" to targetUid))
             transaction.update(db.collection("users").document(targetUid), "status", "REMOVED")
+            removed.forEach(transaction::delete)
         }.await()
     }
 

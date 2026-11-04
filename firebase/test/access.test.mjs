@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, writeBatch, Bytes, Timestamp, serverTimestamp, setLogLevel, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch, Bytes, Timestamp, serverTimestamp, setLogLevel, onSnapshot } from 'firebase/firestore';
 
 setLogLevel('silent');
 
@@ -20,7 +20,7 @@ function db(uid, provider = 'google.com') {
 }
 const family = (members = { owner: 'm-owner' }) => ({ owner: 'owner', admins: ['owner'], members, slot: '0',
   activeDataset: 'current', otherDataset: '', generation: 1, status: 'ACTIVE', action: 'create', target: '', inviteSlot: '' });
-const state = () => ({ count: 0, bytes: 0, day: Math.floor(Date.now() / 86400000), dailyCount: 0, lastOpId: '' });
+const state = () => ({ count: 0, bytes: 0, day: serverTimestamp(), dailyCount: 0, lastOpId: '' });
 const initialState = () => ({ ...state(), chunks: 0, chunkBytes: 0, expectedChunks: 1,
   expectedBytes: 3, digest: '0'.repeat(64), lastChunk: '', sealed: false });
 async function seed(members, overrides = {}) {
@@ -93,7 +93,7 @@ test('invited account can read family metadata in last invitation slot but not f
   await seed();
   await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/5'), {
     familyId: 'family', email: 'wife@example.com', inviter: 'owner', inviterEmail: 'owner@example.com', status: 'PENDING', uid: '',
-    expiresAt: Timestamp.fromMillis(Date.now() + 3600000),
+    createdAt: Timestamp.fromMillis(Date.now()),
   }));
   await assertSucceeds(getDoc(doc(db('wife'), 'families/family')));
   await assertFails(getDoc(doc(db('wife'), 'families/family/datasets/current')));
@@ -102,7 +102,7 @@ test('invitation acceptance requires membership and user reference in same commi
   await seed();
   await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/0'), {
     familyId: 'family', email: 'wife@example.com', inviter: 'owner', inviterEmail: 'owner@example.com', status: 'PENDING', uid: '',
-    expiresAt: Timestamp.fromMillis(Date.now() + 3600000),
+    createdAt: Timestamp.fromMillis(Date.now()),
   }));
   const d = db('wife');
   const batch = writeBatch(d);
@@ -169,7 +169,7 @@ test('state caps bound both document count and payload bytes', async () => {
 });
 test('daily usage resets only on server day change', async () => {
   await seed();
-  const yesterday = state().day - 1;
+  const yesterday = Timestamp.fromMillis(Date.now() - 86400000);
   await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), day: yesterday, dailyCount: 200 }));
   await assertFails(upload(db('owner'), { state: { day: yesterday, dailyCount: 1 } }).commit());
   await assertSucceeds(upload(db('owner')).commit());
@@ -178,11 +178,51 @@ test('invitation creation is bounded and cannot name another inviter', async () 
   await seed();
   const d = db('owner');
   const invite = { familyId: 'family', email: 'wife@example.com', inviter: 'owner', inviterEmail: 'owner@example.com', status: 'PENDING', uid: '',
-    expiresAt: Timestamp.fromMillis(Date.now() + 3600000) };
+    createdAt: serverTimestamp() };
   await assertSucceeds(setDoc(doc(d, 'families/family/invites/0'), invite));
   await assertFails(setDoc(doc(d, 'families/family/invites/6'), invite));
   await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, inviter: 'stranger' }));
-  await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, expiresAt: Timestamp.fromMillis(Date.now() + 9 * 86400000) }));
+  await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, createdAt: Timestamp.fromMillis(Date.now() + 9 * 86400000) }));
+});
+
+test('cancelled invitation cannot grant membership and can be deleted by admin', async () => {
+  await seed();
+  const owner = db('owner');
+  const ref = doc(owner, 'families/family/invites/0');
+  await setDoc(ref, { familyId: 'family', email: 'wife@example.com', inviter: 'owner', inviterEmail: 'owner@example.com',
+    createdAt: serverTimestamp(), status: 'PENDING', uid: '' });
+  await assertFails(deleteDoc(ref));
+  await assertSucceeds(updateDoc(ref, { status: 'CANCELLED' }));
+  const wife = db('wife');
+  const join = writeBatch(wife);
+  join.update(doc(wife, 'families/family'), { members: { owner: 'm-owner', wife: 'm-wife' }, action: 'join', target: 'wife', inviteSlot: '0' });
+  join.update(doc(wife, 'families/family/invites/0'), { status: 'ACCEPTED', uid: 'wife' });
+  join.set(doc(wife, 'users/wife'), { familyId: 'family', memberId: 'm-wife', status: 'ACTIVE' });
+  await assertFails(join.commit());
+  await assertSucceeds(deleteDoc(ref));
+});
+
+test('racing administrator role edits cannot remove creator or elevate a member', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife', child: 'm-child' }, { admins: ['owner', 'wife'] });
+  await Promise.all([
+    assertSucceeds(updateDoc(doc(db('owner'), 'families/family'), { admins: ['owner'], action: 'roles' })),
+    assertFails(updateDoc(doc(db('wife'), 'families/family'), { admins: ['wife', 'child'], action: 'roles' })),
+  ]);
+  assert.deepEqual((await getDoc(doc(db('owner'), 'families/family'))).data().admins, ['owner']);
+});
+
+test('member removal and all six device slots fit atomic access limits', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  await env.withSecurityRulesDisabled(async c => {
+    for (let i = 0; i < 6; i++) await setDoc(doc(c.firestore(), `families/family/installs/${i}`), { uid: 'wife', installId: `device${i}` });
+  });
+  const d = db('owner');
+  const remove = writeBatch(d);
+  remove.update(doc(d, 'families/family'), { members: { owner: 'm-owner' }, action: 'remove', target: 'wife' });
+  remove.update(doc(d, 'users/wife'), { status: 'REMOVED' });
+  for (let i = 0; i < 6; i++) remove.delete(doc(d, `families/family/installs/${i}`));
+  await assertSucceeds(remove.commit());
+  for (let i = 0; i < 6; i++) assert.equal((await getDoc(doc(d, `families/family/installs/${i}`))).exists(), false);
 });
 
 test('bootstrap requires complete immutable chunks before activation', async () => {
@@ -245,7 +285,7 @@ test('live membership listener reports removal while finance listener loses acce
 
 async function startRestore(d, target = 'replacement', token = 'restore-token') {
   return updateDoc(doc(d, 'families/family'), { status: 'RESTORING', action: 'restore', generation: 2,
-    otherDataset: target, restoreToken: token, restoreUid: 'owner', restoreExpires: Timestamp.fromMillis(Date.now() + 600000) });
+    otherDataset: target, restoreToken: token, restoreUid: 'owner', restoreStartedAt: serverTimestamp() });
 }
 async function stageRestore(d) {
   const stateRef = doc(d, 'families/family/datasets/replacement');
@@ -280,7 +320,7 @@ test('expired restore cannot activate and administrators can cancel it', async (
   const d = db('owner');
   await assertSucceeds(startRestore(d));
   await assertSucceeds(stageRestore(d));
-  await env.withSecurityRulesDisabled(async c => updateDoc(doc(c.firestore(), 'families/family'), { restoreExpires: Timestamp.fromMillis(0) }));
+  await env.withSecurityRulesDisabled(async c => updateDoc(doc(c.firestore(), 'families/family'), { restoreStartedAt: Timestamp.fromMillis(0) }));
   await assertFails(activateRestore(d));
   await assertSucceeds(updateDoc(doc(d, 'families/family'), { status: 'ACTIVE', action: 'cancelRestore' }));
   await assertFails(activateRestore(d));
@@ -291,7 +331,7 @@ test('retired cleanup cannot delete active data or move counters without deletio
   const d = db('owner');
   await assertSucceeds(startRestore(d));
   await assertSucceeds(stageRestore(d));
-  await env.withSecurityRulesDisabled(async c => updateDoc(doc(c.firestore(), 'families/family'), { restoreExpires: Timestamp.fromMillis(0) }));
+  await env.withSecurityRulesDisabled(async c => updateDoc(doc(c.firestore(), 'families/family'), { restoreStartedAt: Timestamp.fromMillis(0) }));
   await assertSucceeds(updateDoc(doc(d, 'families/family'), { status: 'ACTIVE', action: 'cancelRestore' }));
   const stateRef = doc(d, 'families/family/datasets/replacement');
   const chunkRef = doc(d, 'families/family/datasets/replacement/chunks/0');

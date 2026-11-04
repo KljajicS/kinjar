@@ -1,0 +1,14 @@
+CREATE TABLE sync_quarantine (
+    digest TEXT NOT NULL PRIMARY KEY,
+    payload BLOB NOT NULL,
+    reason TEXT NOT NULL
+);
+
+all:
+SELECT * FROM sync_quarantine ORDER BY digest;
+
+save:
+INSERT OR IGNORE INTO sync_quarantine VALUES (?, ?, ?);
+
+deleteAll:
+DELETE FROM sync_quarantine;

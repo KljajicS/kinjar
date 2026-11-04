@@ -60,6 +60,10 @@ class FamilyRecoveryTest {
         val reopened = EventStore(db, "local", clock, Projector(db))
         assertThrows(IllegalStateException::class.java) { kotlinx.coroutines.runBlocking { reopened.append(account("b")) } }
         assertEquals(1L, db.eventQueries.count().executeAsOne())
+        assertThrows(IllegalArgumentException::class.java) { reopened.restoreLocal(reopened.snapshot(), digest()) }
+        reopened.abandonRecovery("user")
+        reopened.append(account("b"))
+        assertEquals(2L, db.eventQueries.count().executeAsOne())
     }
 
     @Test fun `invalid restored history rolls back financial data session and retained draft`() = runTest {
@@ -99,14 +103,13 @@ class FamilyRecoveryTest {
         assertTrue(db.syncConflictQueries.all().executeAsList().isEmpty())
     }
 
-    @Test fun `duplicate import is idempotent but changed bytes cannot advance checkpoint`() = runTest {
+    @Test fun `duplicate import is idempotent and changed bytes are quarantined`() = runTest {
         store.append(account("a")); enroll()
         val a = operation("one", "One")
         receive(a); receive(a)
         assertEquals(1, db.syncOperationQueries.all().executeAsList().size)
-        val before = db.syncCheckpointQueries.byDataset("dataset").executeAsOne()
-        assertThrows(IllegalArgumentException::class.java) { receive(operation("one", "Forged")) }
-        assertEquals(before, db.syncCheckpointQueries.byDataset("dataset").executeAsOne())
+        receive(operation("one", "Forged"))
+        assertEquals(1, db.syncQuarantineQueries.all().executeAsList().size)
         assertEquals("One", db.accountQueries.active().executeAsList().single().name)
     }
 
@@ -146,9 +149,52 @@ class FamilyRecoveryTest {
     @Test fun `forged resource claims cannot hide conflicting financial changes`() = runTest {
         store.append(account("a")); enroll()
         val bad = operation("one", "Forged").copy(resources = emptyMap())
-        assertThrows(IllegalArgumentException::class.java) { receive(bad) }
+        receive(bad)
         assertEquals("a", db.accountQueries.active().executeAsList().single().name)
-        assertNull(db.syncCheckpointQueries.byDataset("dataset").executeAsOneOrNull())
+        assertNotNull(db.syncCheckpointQueries.byDataset("dataset").executeAsOneOrNull())
+        assertEquals(1, db.syncQuarantineQueries.all().executeAsList().size)
+    }
+
+    @Test fun `malformed and colliding events do not block independent imports or backup recovery`() = runTest {
+        store.append(account("a")); enroll()
+        val valid = operation("valid", "Valid")
+        val collision = operation("collision", "Collision").let { it.copy(events = listOf(it.events.single().copy(id = valid.events.single().id))) }
+        store.receive(listOf("{\"version\":1}".toByteArray(), OperationCodec.encode(valid), OperationCodec.encode(collision)),
+            "user", "family", "dataset", 200, 0, collision.id)
+        assertEquals("Valid", db.accountQueries.active().executeAsList().single().name)
+        assertEquals(2, db.syncQuarantineQueries.all().executeAsList().size)
+        val backup = store.snapshot()
+        assertEquals(2, backup.quarantine.size)
+        store.validateHistory(HistoryCodec.decode(HistoryCodec.encode(backup)))
+        val reopened = EventStore(db, "local", clock, Projector(db))
+        reopened.append(account("independent"))
+        assertEquals(1, db.syncOutboxQueries.pending("family", "dataset").executeAsList().size)
+        assertEquals(200L, db.syncCheckpointQueries.byDataset("dataset").executeAsOne().seconds)
+    }
+
+    @Test fun `cloud recovery quarantines resource forgery without touching current local data`() = runTest {
+        store.append(account("a"))
+        val before = store.snapshot()
+        val bad = operation("bad", "Bad").copy(resources = emptyMap())
+        val good = operation("good", "Good")
+        val candidate = before.copy(operations = listOf(bad, good).map { java.util.Base64.getEncoder().encodeToString(OperationCodec.encode(it)) })
+        val prepared = store.prepareCloudHistory(candidate)
+        assertEquals(before, store.snapshot())
+        assertEquals(1, prepared.operations.size)
+        assertEquals(1, prepared.quarantine.size)
+        enroll(prepared)
+        assertEquals("Good", db.accountQueries.active().executeAsList().single().name)
+    }
+
+    @Test fun `removed family clears a pending restore and only its retained copies`() = runTest {
+        store.append(account("a")); enroll()
+        db.syncDraftQueries.save("other", "different-user", "different-family", 1, HistoryCodec.encode(store.snapshot()))
+        db.restoreJournalQueries.save("user", "family", "dataset", "replacement", "token", "RESTORE", byteArrayOf(1))
+        store.clearRemovedFamily("user", "family")
+        assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
+        assertEquals(1, db.syncDraftQueries.all("different-user").executeAsList().size)
+        store.append(account("new"))
+        assertEquals(1, db.accountQueries.active().executeAsList().size)
     }
 
     @Test fun `unsupported operation leaves entire import and checkpoint unchanged`() = runTest {

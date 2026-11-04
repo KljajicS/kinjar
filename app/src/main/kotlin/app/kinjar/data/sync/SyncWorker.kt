@@ -36,7 +36,7 @@ class SyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWork
 
     companion object {
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork("family-sync", ExistingPeriodicWorkPolicy.KEEP, request)
         }

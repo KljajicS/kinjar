@@ -60,6 +60,7 @@ coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutin
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqliteJdbc" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+mockito = { module = "org.mockito:mockito-core", version = "5.24.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

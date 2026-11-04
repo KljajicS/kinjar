@@ -20,7 +20,7 @@ service cloud.firestore {
     function invitedAt(fid, sid) {
       let path = /databases/$(database)/documents/families/$(fid)/invites/$(sid);
       return signedIn() && exists(path) && get(path).data.status == 'PENDING'
-        && get(path).data.email == request.auth.token.email && get(path).data.expiresAt > request.time;
+        && get(path).data.email == request.auth.token.email && get(path).data.createdAt + duration.value(6, 'd') > request.time;
     }
     function invited(fid) {
       return invitedAt(fid, '0') || invitedAt(fid, '1') || invitedAt(fid, '2')
@@ -30,7 +30,7 @@ service cloud.firestore {
     function slot(id) { return id.matches('[0-9]'); }
     function smallSlot(id) { return id.matches('[0-5]'); }
     function familyShape(d) {
-      return d.keys().hasOnly(['owner', 'admins', 'members', 'slot', 'activeDataset', 'otherDataset', 'generation', 'status', 'action', 'target', 'inviteSlot', 'restoreToken', 'restoreUid', 'restoreExpires', 'deletionPhase'])
+      return d.keys().hasOnly(['owner', 'admins', 'members', 'slot', 'activeDataset', 'otherDataset', 'generation', 'status', 'action', 'target', 'inviteSlot', 'restoreToken', 'restoreUid', 'restoreStartedAt', 'deletionPhase'])
         && identifier(d.owner) && d.admins is list && d.admins.size() >= 1 && d.admins.size() <= 6
         && d.admins.toSet().size() == d.admins.size() && d.owner in d.admins
         && d.members is map && d.members.size() >= 1 && d.members.size() <= 6
@@ -42,9 +42,9 @@ service cloud.firestore {
         && d.inviteSlot is string && d.inviteSlot.size() <= 1
         && (!('restoreToken' in d) || identifier(d.restoreToken))
         && (!('restoreUid' in d) || identifier(d.restoreUid))
-        && (!('restoreExpires' in d) || d.restoreExpires is timestamp)
+        && (!('restoreStartedAt' in d) || d.restoreStartedAt is timestamp)
         && (!('deletionPhase' in d) || (d.deletionPhase is int && d.deletionPhase >= 0 && d.deletionPhase <= 2))
-        && (d.status != 'RESTORING' || (identifier(d.restoreToken) && identifier(d.restoreUid) && d.restoreExpires is timestamp));
+        && (d.status != 'RESTORING' || (identifier(d.restoreToken) && identifier(d.restoreUid) && d.restoreStartedAt is timestamp));
     }
     function linkedAfter(uid, fid) {
       return getAfter(userPath(uid)).data.familyId == fid && getAfter(userPath(uid)).data.status == 'ACTIVE'
@@ -105,7 +105,7 @@ service cloud.firestore {
           && request.resource.data.action == 'join' && request.resource.data.target == request.auth.uid
           && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
           && !(request.auth.uid in resource.data.members) && identifier(request.resource.data.members[request.auth.uid])
-          && invite.status == 'PENDING' && invite.email == request.auth.token.email && invite.expiresAt > request.time
+          && invite.status == 'PENDING' && invite.email == request.auth.token.email && invite.createdAt + duration.value(6, 'd') > request.time
           && after.status == 'ACCEPTED' && after.uid == request.auth.uid && linkedAfter(request.auth.uid, fid);
       }
       function removing() {
@@ -140,25 +140,24 @@ service cloud.firestore {
           && after.status == 'RESTORING' && after.action == 'restore'
           && after.generation == resource.data.generation + 1 && identifier(after.otherDataset)
           && after.otherDataset != resource.data.activeDataset && !exists(statePath(fid, after.otherDataset))
-          && after.restoreUid == request.auth.uid && after.restoreExpires > request.time
-          && after.restoreExpires <= request.time + duration.value(30, 'm')
-          && after.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'generation', 'otherDataset', 'restoreToken', 'restoreUid', 'restoreExpires']);
+          && after.restoreUid == request.auth.uid && after.restoreStartedAt == request.time
+          && after.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'generation', 'otherDataset', 'restoreToken', 'restoreUid', 'restoreStartedAt']);
       }
       function finishRestore() {
         let after = request.resource.data;
         let state = getAfter(statePath(fid, resource.data.otherDataset)).data;
         return admin(fid) && resource.data.status == 'RESTORING' && resource.data.restoreUid == request.auth.uid
-          && resource.data.restoreExpires > request.time && after.status == 'ACTIVE' && after.action == 'restored'
+          && resource.data.restoreStartedAt + duration.value(25, 'm') > request.time && after.status == 'ACTIVE' && after.action == 'restored'
           && after.activeDataset == resource.data.otherDataset && after.otherDataset == resource.data.activeDataset
           && state.restoreToken == resource.data.restoreToken && state.sealed == true
           && state.chunks == state.expectedChunks && state.chunkBytes == state.expectedBytes
-          && after.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'activeDataset', 'otherDataset', 'restoreToken', 'restoreUid', 'restoreExpires']);
+          && after.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'activeDataset', 'otherDataset', 'restoreToken', 'restoreUid', 'restoreStartedAt']);
       }
       function cancelRestore() {
         return admin(fid) && resource.data.status == 'RESTORING'
-          && (resource.data.restoreUid == request.auth.uid || resource.data.restoreExpires <= request.time)
+          && (resource.data.restoreUid == request.auth.uid || resource.data.restoreStartedAt + duration.value(25, 'm') <= request.time)
           && request.resource.data.status == 'ACTIVE' && request.resource.data.action == 'cancelRestore'
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'restoreToken', 'restoreUid', 'restoreExpires']);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'restoreToken', 'restoreUid', 'restoreStartedAt']);
       }
       function cleaned() {
         return admin(fid) && resource.data.status == 'ACTIVE' && resource.data.otherDataset != ''
@@ -209,21 +208,20 @@ service cloud.firestore {
       match /invites/{sid} {
         allow get, list: if signedIn() && (resource.data.email == request.auth.token.email || admin(fid) || deletingOwner(fid));
         function shape(d) {
-          return smallSlot(sid) && d.keys().hasOnly(['familyId', 'email', 'inviter', 'inviterEmail', 'expiresAt', 'status', 'uid'])
+          return smallSlot(sid) && d.keys().hasOnly(['familyId', 'email', 'inviter', 'inviterEmail', 'createdAt', 'status', 'uid'])
             && d.familyId == fid && d.email is string && d.email.size() >= 3 && d.email.size() <= 254
             && identifier(d.inviter) && d.inviterEmail is string && d.inviterEmail.size() <= 254
-            && d.expiresAt is timestamp && d.uid is string && d.uid.size() <= 128;
+            && d.createdAt is timestamp && d.uid is string && d.uid.size() <= 128;
         }
         allow create: if admin(fid) && shape(request.resource.data) && request.resource.data.inviter == request.auth.uid
           && request.resource.data.inviterEmail == request.auth.token.email
           && request.resource.data.status == 'PENDING' && request.resource.data.uid == ''
-          && request.resource.data.expiresAt > request.time
-          && request.resource.data.expiresAt <= request.time + duration.value(7, 'd');
+          && request.resource.data.createdAt == request.time;
         allow update: if signedIn() && shape(request.resource.data)
           && ((admin(fid) && request.resource.data.status == 'CANCELLED'
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
             || (resource.data.status == 'PENDING' && resource.data.email == request.auth.token.email
-              && resource.data.expiresAt > request.time && request.resource.data.status == 'ACCEPTED'
+              && resource.data.createdAt + duration.value(6, 'd') > request.time && request.resource.data.status == 'ACCEPTED'
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'uid'])
               && linkedAfter(request.auth.uid, fid)));
@@ -246,17 +244,17 @@ service cloud.firestore {
             && d.count is int && d.count >= 0 && d.count <= 1000
             && d.bytes is int && d.bytes >= 0 && d.bytes <= 10485760
             && d.bytes + d.get('chunkBytes', 0) <= 10485760
-            && d.day is int && d.dailyCount is int && d.dailyCount >= 0 && d.dailyCount <= 200
+            && d.day is timestamp && d.dailyCount is int && d.dailyCount >= 0 && d.dailyCount <= 200
             && d.lastOpId is string && d.lastOpId.size() <= 160;
         }
-        function day() { return int(request.time.toMillis() / 86400000); }
+        function day(value) { return int(value.toMillis() / 86400000); }
         function writable() {
           let f = get(familyPath(fid)).data;
           return member(fid) && f.status == 'ACTIVE' && f.activeDataset == did;
         }
         function increment(before, after, oid, payload) {
           return stateShape(after) && after.count == before.count + 1 && after.bytes == before.bytes + payload.size()
-            && after.day == day() && after.dailyCount == (before.day == day() ? before.dailyCount + 1 : 1)
+            && after.day == request.time && after.dailyCount == (day(before.day) == day(request.time) ? before.dailyCount + 1 : 1)
             && after.lastOpId == oid
             && after.diff(before).affectedKeys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId']);
         }
@@ -272,7 +270,7 @@ service cloud.firestore {
           let f = get(familyPath(fid)).data;
           return signedIn() && ((request.auth.uid == f.owner && f.status == 'INITIALIZING' && f.activeDataset == did)
             || (admin(fid) && f.status == 'RESTORING' && f.otherDataset == did
-              && f.restoreUid == request.auth.uid && f.restoreExpires > request.time));
+              && f.restoreUid == request.auth.uid && f.restoreStartedAt + duration.value(25, 'm') > request.time));
         }
         function retired() {
           let f = get(familyPath(fid)).data;
@@ -294,7 +292,7 @@ service cloud.firestore {
         allow create: if initializing() && stateShape(request.resource.data)
           && request.resource.data.get('restoreToken', '') == get(familyPath(fid)).data.get('restoreToken', '')
           && request.resource.data.count == 0 && request.resource.data.bytes == 0
-          && request.resource.data.dailyCount == 0 && request.resource.data.day == day()
+          && request.resource.data.dailyCount == 0 && request.resource.data.day == request.time
           && request.resource.data.lastOpId == '' && manifest(request.resource.data)
           && request.resource.data.chunks == 0 && request.resource.data.chunkBytes == 0 && request.resource.data.sealed == false;
         allow update: if writable() && stateShape(request.resource.data)

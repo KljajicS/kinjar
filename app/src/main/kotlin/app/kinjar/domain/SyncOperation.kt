@@ -43,7 +43,7 @@ data class SyncOperation(
     init {
         require(version == 1 && sequence > 0)
         require(listOf(familyId, datasetId, authorUid, installId).all { it.matches(Regex("[A-Za-z0-9_-]{1,128}")) })
-        require(parents.size <= 256 && resources.size <= 256 && rejected.size <= 256)
+        require(parents.size <= 1_000 && resources.size <= 1_000 && rejected.size <= 1_000)
         require(parents.all(::validOperationId) && rejected.all(::validOperationId))
         require(id !in parents && id !in rejected)
         require(resources.keys.all { it.length in 1..256 })

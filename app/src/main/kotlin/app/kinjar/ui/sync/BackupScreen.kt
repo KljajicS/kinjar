@@ -42,7 +42,7 @@ fun BackupScreen(onBack: () -> Unit, onContinue: () -> Unit, vm: FamilyViewModel
 
     LazyColumn(Modifier.fillMaxSize().background(c.bg).imePadding(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { ScreenHeader(stringResource(R.string.fbs_backups), onBack) }
-        item { WriteFeedback(vm.writes) }
+        item { WriteFeedback(vm.writes, R.string.fbs_backup_failed) }
         item {
             OutlinedBox(Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.fbs_backup_hint), style = BodyStyle, color = c.muted)
@@ -88,7 +88,7 @@ fun BackupScreen(onBack: () -> Unit, onContinue: () -> Unit, vm: FamilyViewModel
             onConfirm = vm::confirmBackupRestore, onDismiss = vm::cancelBackupRestore) {
             Text(stringResource(R.string.fbs_backup_date, displayTime(date)), color = c.text)
             Text(stringResource(if (state.enrolled) R.string.fbs_shared_restore_warning else R.string.fbs_local_restore_warning), color = c.text)
-            WriteFeedback(vm.writes)
+            WriteFeedback(vm.writes, R.string.fbs_backup_failed)
         }
     }
 }

@@ -4,11 +4,14 @@ import app.kinjar.data.auth.FirebaseServices
 import app.kinjar.domain.FamilyHistory
 import app.kinjar.domain.HistoryCodec
 import app.kinjar.domain.OperationCodec
+import app.kinjar.domain.QuarantinedOperation
+import app.kinjar.domain.UnsupportedSyncVersion
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.Blob
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.Source
 import kotlinx.coroutines.tasks.await
@@ -18,7 +21,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 data class CloudCursor(val seconds: Long, val nanos: Int, val id: String)
-data class CloudPage(val operations: List<ByteArray>, val cursor: CloudCursor?, val hasMore: Boolean)
+data class CloudPage(val operations: List<ByteArray>, val cursor: CloudCursor?, val hasMore: Boolean, val quarantine: List<QuarantinedOperation> = emptyList())
 
 class SyncCapacityReached : IllegalStateException("Cloud capacity reached; changes remain on this phone")
 
@@ -42,7 +45,7 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
             if (saved.exists()) {
                 require(saved.getString("digest") == digest && saved.getLong("expectedBytes") == bytes.size.toLong()) { "Bootstrap history changed" }
             } else {
-                tx.set(ref, mapOf("count" to 0L, "bytes" to 0L, "day" to day(), "dailyCount" to 0L, "lastOpId" to "",
+                tx.set(ref, mapOf("count" to 0L, "bytes" to 0L, "day" to FieldValue.serverTimestamp(), "dailyCount" to 0L, "lastOpId" to "",
                     "chunks" to 0L, "chunkBytes" to 0L, "expectedChunks" to chunks.size.toLong(), "expectedBytes" to bytes.size.toLong(),
                     "digest" to digest, "lastChunk" to "", "sealed" to false) +
                     if (restoreToken.isEmpty()) emptyMap() else mapOf("restoreToken" to restoreToken))
@@ -77,7 +80,7 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
                 if (restoreToken.isEmpty()) tx.update(root, mapOf("status" to "ACTIVE", "action" to "activate"))
                 else tx.update(root, mapOf("status" to "ACTIVE", "action" to "restored", "activeDataset" to did,
                     "otherDataset" to requireNotNull(f.getString("activeDataset")), "restoreToken" to FieldValue.delete(),
-                    "restoreUid" to FieldValue.delete(), "restoreExpires" to FieldValue.delete()))
+                    "restoreUid" to FieldValue.delete(), "restoreStartedAt" to FieldValue.delete()))
             }
         }.await()
     }
@@ -94,7 +97,7 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
                 && f.getString("status") == "ACTIVE" && f.getString("otherDataset") == "") { "Family changed or cleanup is pending" }
             tx.update(ref, mapOf("status" to "RESTORING", "action" to "restore", "generation" to generation + 1,
                 "otherDataset" to target, "restoreToken" to token, "restoreUid" to uid,
-                "restoreExpires" to Timestamp(java.util.Date.from(Instant.now().plusSeconds(25 * 60)))))
+                "restoreStartedAt" to FieldValue.serverTimestamp()))
         }.await()
     }
 
@@ -104,9 +107,9 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
             checkUser(uid)
             val ref = family(fid)
             val f = tx.get(ref)
-            require(f.getString("status") == "RESTORING" && (f.getString("restoreUid") == uid || requireNotNull(f.getTimestamp("restoreExpires")).toDate().toInstant() <= Instant.now()))
+            require(f.getString("status") == "RESTORING")
             tx.update(ref, mapOf("status" to "ACTIVE", "action" to "cancelRestore", "restoreToken" to FieldValue.delete(),
-                "restoreUid" to FieldValue.delete(), "restoreExpires" to FieldValue.delete()))
+                "restoreUid" to FieldValue.delete(), "restoreStartedAt" to FieldValue.delete()))
         }.await()
     }
 
@@ -237,6 +240,21 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
     }
 
     suspend fun upload(uid: String, fid: String, did: String, slot: String, payload: ByteArray) {
+        var dailyLimit = false
+        val observeLimit: (Boolean) -> Unit = { dailyLimit = dailyLimit || it }
+        try { uploadAttempt(uid, fid, did, slot, payload, false, observeLimit) }
+        catch (e: FirebaseFirestoreException) {
+            if (e.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) throw e
+            // Server rules decide the UTC day; retry the other counter value when the device clock disagrees.
+            try { uploadAttempt(uid, fid, did, slot, payload, true, observeLimit) }
+            catch (retry: FirebaseFirestoreException) {
+                if (retry.code == FirebaseFirestoreException.Code.PERMISSION_DENIED && dailyLimit) throw SyncCapacityReached()
+                throw retry
+            }
+        }
+    }
+
+    private suspend fun uploadAttempt(uid: String, fid: String, did: String, slot: String, payload: ByteArray, alternateDay: Boolean, observeLimit: (Boolean) -> Unit) {
         checkUser(uid)
         val op = OperationCodec.decode(payload)
         require(op.authorUid == uid && op.familyId == fid && op.datasetId == did)
@@ -251,12 +269,13 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
             } else {
                 val count = state.long("count") + 1
                 val bytes = state.long("bytes") + payload.size
-                val today = day()
-                val daily = if (state.long("day") == today) state.long("dailyCount") + 1 else 1
-                if (count > 1000 || bytes + state.long("chunkBytes") > MAX_HISTORY_BYTES || daily > 200) throw SyncCapacityReached()
+                val sameDay = Math.floorDiv(requireNotNull(state.getTimestamp("day")).seconds, 86400) == Math.floorDiv(Instant.now().epochSecond, 86400)
+                val daily = if (sameDay != alternateDay) state.long("dailyCount") + 1 else 1
+                observeLimit(daily > 200)
+                if (count > 1000 || bytes + state.long("chunkBytes") > MAX_HISTORY_BYTES) throw SyncCapacityReached()
                 tx.set(target, mapOf("uid" to uid, "installId" to op.installId, "installSlot" to slot,
                     "sequence" to op.sequence, "payload" to Blob.fromBytes(payload), "createdAt" to FieldValue.serverTimestamp()))
-                tx.update(ref, mapOf("count" to count, "bytes" to bytes, "day" to today, "dailyCount" to daily, "lastOpId" to op.id))
+                tx.update(ref, mapOf("count" to count, "bytes" to bytes, "day" to FieldValue.serverTimestamp(), "dailyCount" to daily, "lastOpId" to op.id))
             }
         }.await()
     }
@@ -270,21 +289,24 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
         }
         val documents = query.get(Source.SERVER).await().documents
         checkUser(uid)
-        val operations = documents.map { doc ->
+        val quarantine = mutableListOf<QuarantinedOperation>()
+        val operations = documents.mapNotNull { doc ->
             val bytes = requireNotNull(doc.getBlob("payload")).toBytes()
-            val op = OperationCodec.decode(bytes)
-            require(op.id == doc.id && op.familyId == fid && op.datasetId == did && op.authorUid == doc.getString("uid")
-                && op.installId == doc.getString("installId") && op.sequence == doc.getLong("sequence")) { "Operation identity mismatch" }
-            bytes
+            try {
+                val op = OperationCodec.decode(bytes)
+                require(op.id == doc.id && op.familyId == fid && op.datasetId == did && op.authorUid == doc.getString("uid")
+                    && op.installId == doc.getString("installId") && op.sequence == doc.getLong("sequence"))
+                bytes
+            } catch (e: UnsupportedSyncVersion) { throw e }
+            catch (_: IllegalArgumentException) { quarantine += QuarantinedOperation.from(bytes, "IDENTITY_MISMATCH"); null }
         }
         val end = documents.lastOrNull()?.let {
             val at = requireNotNull(it.getTimestamp("createdAt"))
             CloudCursor(at.seconds, at.nanoseconds, it.id)
         }
-        return CloudPage(operations, end ?: cursor, documents.size == 100)
+        return CloudPage(operations, end ?: cursor, documents.size == 100, quarantine)
     }
 
-    private fun day(): Long = Math.floorDiv(Instant.now().toEpochMilli(), 86_400_000)
     private fun DocumentSnapshot.long(name: String): Long = requireNotNull(getLong(name)) { "Invalid dataset metadata" }
 
     companion object {

@@ -9,8 +9,17 @@ import java.security.MessageDigest
 import java.util.Base64
 
 @Serializable
-data class FamilyHistory(val version: Int = 1, val baseline: List<OperationEvent>, val operations: List<String>) {
-    init { require(version == 1 && baseline.size <= 100_000 && operations.size <= 100_000) }
+data class QuarantinedOperation(val payload: String, val reason: String) {
+    init { require(reason in setOf("INVALID_OPERATION", "IDENTITY_MISMATCH")) }
+    fun bytes(): ByteArray = Base64.getDecoder().decode(payload).also { require(it.size in 1..OperationCodec.MAX_BYTES) }
+    companion object {
+        fun from(bytes: ByteArray, reason: String = "INVALID_OPERATION") = QuarantinedOperation(Base64.getEncoder().encodeToString(bytes), reason)
+    }
+}
+
+@Serializable
+data class FamilyHistory(val version: Int = 1, val baseline: List<OperationEvent>, val operations: List<String>, val quarantine: List<QuarantinedOperation> = emptyList()) {
+    init { require(version == 1 && baseline.size <= 100_000 && operations.size <= 100_000 && quarantine.size <= 100_000) }
     fun decodedOperations(): List<SyncOperation> = operations.map { OperationCodec.decode(Base64.getDecoder().decode(it)) }
 }
 

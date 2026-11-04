@@ -39,8 +39,8 @@ class WriteOperation(private val scope: CoroutineScope) {
 }
 
 @Composable
-fun WriteFeedback(operation: WriteOperation) {
+fun WriteFeedback(operation: WriteOperation, failureText: Int = R.string.write_failed) {
     val state by operation.state.collectAsStateWithLifecycle()
     if (state.busy) LinearProgressIndicator()
-    if (state.failed) Text(stringResource(R.string.write_failed), color = LocalColors.current.orange)
+    if (state.failed) Text(stringResource(failureText), color = LocalColors.current.orange)
 }

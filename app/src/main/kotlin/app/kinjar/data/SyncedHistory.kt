@@ -12,43 +12,60 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
         if (baseline == null) return FamilyHistory(baseline = db.eventQueries.allInOrder().executeAsList().map {
             OperationEvent(it.id, it.device_id, it.seq, it.occurred_at, EventJson.decodeFromString<Event>(it.payload))
         }, operations = emptyList())
-        return baseline.copy(operations = db.syncOperationQueries.all().executeAsList().map { Base64.getEncoder().encodeToString(it.payload) })
+        return baseline.copy(operations = db.syncOperationQueries.all().executeAsList().map { Base64.getEncoder().encodeToString(it.payload) },
+            quarantine = db.syncQuarantineQueries.all().executeAsList().map { QuarantinedOperation.from(it.payload, it.reason) })
     }
 
-    fun replace(history: FamilyHistory) {
+    fun replace(history: FamilyHistory, quarantineInvalid: Boolean = false) {
         val operationBytes = history.operations.map { Base64.getDecoder().decode(it) }
         val operations = operationBytes.map(OperationCodec::decode)
         require(operations.map { it.id }.distinct().size == operations.size)
-        operations.forEach { validateResources(it, history.baseline, operations) }
+        if (!quarantineInvalid) operations.forEach { validateResources(it, history.baseline, operations) }
         db.syncOutboxQueries.deleteAll()
         db.syncOperationQueries.deleteAll()
         db.syncConflictQueries.deleteAll()
         db.syncCheckpointQueries.deleteAll()
+        db.syncQuarantineQueries.deleteAll()
         db.eventQueries.deleteAll()
-        db.syncBaselineQueries.save(HistoryCodec.encode(history.copy(operations = emptyList())))
+        db.syncBaselineQueries.save(HistoryCodec.encode(history.copy(operations = emptyList(), quarantine = emptyList())))
         history.baseline.forEach(::insert)
+        history.quarantine.forEach(::quarantine)
         operations.zip(operationBytes).forEach { (operation, bytes) ->
-            db.syncOperationQueries.insert(operation.id, operation.installId, operation.sequence, bytes)
-            operation.events.forEach(::insert)
+            if (quarantineInvalid) acceptOrQuarantine(bytes, operation, history.baseline, operations)
+            else { db.syncOperationQueries.insert(operation.id, operation.installId, operation.sequence, bytes); operation.events.forEach(::insert) }
         }
         rebuild()
     }
 
     fun receive(payloads: List<ByteArray>, familyId: String, datasetId: String) {
-        val incoming = payloads.map(OperationCodec::decode)
+        val incoming = payloads.map { bytes ->
+            try { OperationCodec.decode(bytes) } catch (e: UnsupportedSyncVersion) { throw e }
+            catch (_: IllegalArgumentException) { quarantine(QuarantinedOperation.from(bytes)); null }
+        }
         val baseline = requireNotNull(db.syncBaselineQueries.current().executeAsOneOrNull()).let(HistoryCodec::decode).baseline
-        val known = db.syncOperationQueries.all().executeAsList().associateBy { it.id }
-        val context = known.values.map { OperationCodec.decode(it.payload) } + incoming
+        val context = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) } + incoming.filterNotNull()
         incoming.zip(payloads).forEach { (operation, bytes) ->
-            require(operation.familyId == familyId && operation.datasetId == datasetId)
-            val existing = known[operation.id]
-            if (existing != null) require(existing.payload.contentEquals(bytes)) { "Conflicting operation identity" }
-            else {
-                validateResources(operation, baseline, context)
-                db.syncOperationQueries.insert(operation.id, operation.installId, operation.sequence, bytes)
-                operation.events.forEach(::insert)
+            if (operation != null) {
+                if (operation.familyId != familyId || operation.datasetId != datasetId) quarantine(QuarantinedOperation.from(bytes, "IDENTITY_MISMATCH"))
+                else acceptOrQuarantine(bytes, operation, baseline, context)
             }
         }
+    }
+
+    fun quarantine(value: QuarantinedOperation) {
+        val bytes = value.bytes()
+        db.syncQuarantineQueries.save(HistoryCodec.digest(bytes), bytes, value.reason)
+    }
+
+    private fun acceptOrQuarantine(bytes: ByteArray, operation: SyncOperation, baseline: List<OperationEvent>, context: List<SyncOperation>) {
+        try {
+            val existing = db.syncOperationQueries.byId(operation.id).executeAsOneOrNull()
+            if (existing != null) { require(existing.payload.contentEquals(bytes)); return }
+            validateResources(operation, baseline, context)
+            operation.events.forEach(::validateIdentity)
+        } catch (_: IllegalArgumentException) { quarantine(QuarantinedOperation.from(bytes)); return }
+        db.syncOperationQueries.insert(operation.id, operation.installId, operation.sequence, bytes)
+        operation.events.forEach(::insert)
     }
 
     fun rebuild() {
@@ -81,6 +98,7 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
     }
 
     private fun insert(event: OperationEvent) {
+        validateIdentity(event)
         val payload = EventJson.encodeToString(Event.serializer(), event.event)
         val prior = db.eventQueries.bySequence(event.deviceId, event.seq).executeAsOneOrNull()
         if (prior != null) {
@@ -89,6 +107,14 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
         }
         db.eventQueries.insert(event.id, event.deviceId, event.seq, event.occurredAt,
             EventJson.parseToJsonElement(payload).jsonObject.getValue("type").jsonPrimitive.content, payload)
+    }
+
+    private fun validateIdentity(event: OperationEvent) {
+        val prior = db.eventQueries.byId(event.id).executeAsOneOrNull()
+        require(prior == null || (prior.device_id == event.deviceId && prior.seq == event.seq)) { "Conflicting event id" }
+        db.eventQueries.bySequence(event.deviceId, event.seq).executeAsOneOrNull()?.let {
+            require(it.id == event.id && it.occurred_at == event.occurredAt && it.payload == EventJson.encodeToString(Event.serializer(), event.event)) { "Conflicting historical identity" }
+        }
     }
 
     private fun validateResources(operation: SyncOperation, baseline: List<OperationEvent>, known: List<SyncOperation>) {

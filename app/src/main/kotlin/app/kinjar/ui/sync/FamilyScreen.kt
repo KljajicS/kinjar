@@ -50,7 +50,7 @@ fun FamilyScreen(onBack: () -> Unit, onContinue: () -> Unit, onBackup: () -> Uni
             }
         }
         item {
-            WriteFeedback(vm.writes)
+            WriteFeedback(vm.writes, R.string.fbs_action_failed)
             Text(stringResource(sync.phase.label()), style = BodyStyle, color = c.muted)
             if (sync.pending > 0) Text(stringResource(R.string.fbs_pending, sync.pending), color = c.muted)
             sync.lastSuccess?.let { Text(stringResource(R.string.fbs_last_sync, displayTime(it)), style = CaptionStyle, color = c.muted) }
@@ -65,7 +65,7 @@ fun FamilyScreen(onBack: () -> Unit, onContinue: () -> Unit, onBackup: () -> Uni
                 items(state.invitations, key = { it.familyId + it.slot }) { invite ->
                     OutlinedBox(Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.fbs_invited_by, invite.inviterEmail), style = BodyStyle, color = c.text)
-                        TextButton(onClick = { vm.stage(invite) }, enabled = !writes.busy) { Text(stringResource(R.string.fbs_join)) }
+                        TextButton(onClick = { ask(R.string.fbs_join, R.string.fbs_join_warning) { vm.stage(invite) } }, enabled = !writes.busy) { Text(stringResource(R.string.fbs_join)) }
                     }
                 }
                 if (!state.enrolled) item {
@@ -155,6 +155,10 @@ fun FamilyScreen(onBack: () -> Unit, onContinue: () -> Unit, onBackup: () -> Uni
             item { TextButton(onClick = { activity?.let(vm::signOut) }, enabled = !writes.busy) { Text(stringResource(R.string.fbs_sign_out)) } }
         }
         if (state.conflicts.isNotEmpty()) item { Text(stringResource(R.string.fbs_conflicts), style = SectionStyle, color = c.text) }
+        if (state.journalPhase in setOf("CREATE", "RESTORE")) item {
+            TextButton(onClick = { ask(R.string.fbs_abandon, R.string.fbs_abandon_warning, vm::abandonRecovery) }, enabled = !writes.busy) { Text(stringResource(R.string.fbs_abandon)) }
+        }
+        if (state.quarantined > 0) item { Text(stringResource(R.string.fbs_quarantined, state.quarantined), color = c.orange) }
         items(state.conflicts, key = { it.operation.id }) { conflict ->
             OutlinedBox(Modifier.fillMaxWidth()) {
                 val member = state.family?.members?.get(conflict.operation.authorUid)?.let(state.names::get)
@@ -172,7 +176,7 @@ fun FamilyScreen(onBack: () -> Unit, onContinue: () -> Unit, onBackup: () -> Uni
     confirmation?.let { dialog -> ConfirmDialog(stringResource(dialog.title), stringResource(R.string.dialog_ok), writes.busy,
         onConfirm = { confirmed = true; dialog.execute() }, onDismiss = { confirmation = null }) {
         Text(stringResource(dialog.body), color = c.text)
-        WriteFeedback(vm.writes)
+        WriteFeedback(vm.writes, R.string.fbs_action_failed)
     } }
 }
 

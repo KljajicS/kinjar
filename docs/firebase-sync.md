@@ -57,10 +57,14 @@ Do not deploy to an inferred/default project. Wait for the invitation collection
 2. Administrator enters the other person's Google email and sends an invitation.
 3. Other phone signs in with that account, opens the invitation, downloads the history, then confirms replacement. Local data is preserved separately for export.
 4. New phone signs in with an existing member account and chooses Get family data. It receives the same warning and validation before replacement.
-5. Offline edits stay in the local outbox. Foreground sync and scheduled background work retry online. Android may delay background work; it is not instant.
+5. Offline edits stay in the local outbox. Foreground sync and hourly background work retry online. Android may delay background work; it is not instant. Sync now reconciles the full bounded operation history; automatic runs use an overlapping incremental cursor.
 6. Conflicting complete commands wait in Family. Review both changes and discard the unwanted command and its dependents. Independent changes keep syncing.
 
 Signing out keeps the local copy and pauses cloud access. Confirmed membership removal clears that family's local copy. Device-slot removal frees capacity but does not revoke the member's Google identity.
+
+Joining asks for membership confirmation before accepting an invitation. Cancelling the later data-replacement dialog leaves membership in place; an administrator can remove it. If creation or restore cannot finish, Stop recovery on this phone unlocks local editing without changing the cloud. An abandoned initial family can be deleted by its creator. An expired shared restore is cancelled and cleaned before starting another restore; there is no automatic lease takeover.
+
+Malformed operations are held separately, preserved in backups and excluded from financial replay. Independent valid operations continue. Newer protocol versions require an app update rather than being silently skipped. Invitations and restore leases start at server time. Daily quota writes use server timestamps and retry the alternate day counter when the phone clock disagrees; rules remain authoritative.
 
 ## Backup and recovery
 
@@ -78,7 +82,9 @@ The creator can delete a family. Leave the app open until cleanup finishes. Inte
 
 ## Acceptance gates
 
-Automated checks cover raw-byte retries, local replacement rollback, duplicate/conflicting operations, linked loan commands, backup corruption/passwords, access isolation, counters, quotas, restore fences and staged activation, lease cancellation, six-member removal and resumable deletion. The rules emulator observed that an idle financial listener need not immediately error after removal; the app also observes authoritative membership and server-checks it. A later financial update is denied to the removed member.
+Automated checks cover raw-byte retries, local replacement rollback, duplicate/conflicting operations, linked loan commands, backup corruption/passwords, access isolation, counters, quotas, restore fences and staged activation, lease cancellation, six-member removal and resumable deletion. Coordinator tests use real local storage with mocked cloud boundaries for response loss, account switching and recovery interruption. They do not replace testing the Android Firebase SDK against the configured project. The rules emulator observed that an idle financial listener need not immediately error after removal; the app also observes authoritative membership and server-checks it. A later financial update is denied to the removed member.
+
+A fresh Android 15 emulator verified local setup, Settings navigation, disabled-sync behavior, masked passphrases, file-picker export, wrong-password rejection, authenticated preview, confirmed local restore, retained-copy export entry and Serbian Latin layout. No Google account was added. This is local UI evidence, not signed cloud acceptance.
 
 The following require the configured signed APK on two devices and remain pending:
 
