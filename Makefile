@@ -2,6 +2,12 @@
 
 check: lint test
 
+lint-sync:
+	cd firebase && npm run lint
+
+test-sync:
+	cd firebase && npm test
+
 lint-workflows:
 	bash scripts/lint-workflows.sh
 

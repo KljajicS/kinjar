@@ -1,0 +1,136 @@
+package app.kinjar.data.sync
+
+import app.kinjar.data.auth.FirebaseServices
+import app.kinjar.domain.newId
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.Source
+import kotlinx.coroutines.tasks.await
+import java.time.Instant
+import java.util.Date
+import java.util.Locale
+import javax.inject.Inject
+import javax.inject.Singleton
+
+data class FamilyMembership(val familyId: String, val memberId: String, val removed: Boolean)
+data class FamilyInfo(
+    val id: String, val owner: String, val admins: List<String>, val members: Map<String, String>,
+    val activeDataset: String, val generation: Long, val status: String,
+)
+data class FamilyInvitation(val familyId: String, val slot: String, val expiresAt: Instant)
+
+@Singleton
+class FamilyRepository @Inject constructor(private val services: FirebaseServices) {
+    private val db get() = services.firestore
+    private fun uid(): String = requireNotNull(services.auth.currentUser?.takeIf { it.isEmailVerified }?.uid)
+    private fun family(id: String) = db.collection("families").document(id)
+
+    suspend fun membership(): FamilyMembership? {
+        val document = db.collection("users").document(uid()).get(Source.SERVER).await()
+        if (!document.exists()) return null
+        return FamilyMembership(requireNotNull(document.getString("familyId")), requireNotNull(document.getString("memberId")), document.getString("status") == "REMOVED")
+    }
+
+    suspend fun info(familyId: String): FamilyInfo = decode(family(familyId).get(Source.SERVER).await())
+
+    suspend fun create(memberId: String): FamilyInfo {
+        val user = uid()
+        val id = newId()
+        val dataset = newId()
+        db.runTransaction { transaction ->
+            val userRef = db.collection("users").document(user)
+            val existing = transaction.get(userRef)
+            check(!existing.exists() || existing.getString("status") == "REMOVED") { "Account already belongs to a family" }
+            val slots = (0..9).map { db.collection("slots").document(it.toString()) }
+            val slot = slots.zip(slots.map { transaction.get(it) }).firstOrNull { !it.second.exists() }?.first
+                ?: error("Family capacity reached")
+            val data = mapOf("owner" to user, "admins" to listOf(user), "members" to mapOf(user to memberId),
+                "slot" to slot.id, "activeDataset" to dataset, "otherDataset" to "", "generation" to 1L,
+                "status" to "INITIALIZING", "action" to "create", "target" to "", "inviteSlot" to "")
+            transaction.set(slot, mapOf("familyId" to id, "owner" to user))
+            transaction.set(family(id), data)
+            transaction.set(userRef, mapOf("familyId" to id, "memberId" to memberId, "status" to "ACTIVE"))
+        }.await()
+        return info(id)
+    }
+
+    suspend fun invitations(): List<FamilyInvitation> {
+        val email = requireNotNull(services.auth.currentUser?.email)
+        return db.collectionGroup("invites").whereEqualTo("email", email).whereEqualTo("status", "PENDING")
+            .get(Source.SERVER).await().documents.mapNotNull { document ->
+                val expires = document.getTimestamp("expiresAt")?.toDate()?.toInstant() ?: return@mapNotNull null
+                if (expires <= Instant.now()) return@mapNotNull null
+                FamilyInvitation(requireNotNull(document.getString("familyId")), document.id, expires)
+            }
+    }
+
+    suspend fun invite(familyId: String, email: String) {
+        val user = uid()
+        val normalized = email.trim().lowercase(Locale.ROOT)
+        require(normalized.length in 3..254 && '@' in normalized)
+        db.runTransaction { transaction ->
+            val root = family(familyId)
+            val info = decode(transaction.get(root))
+            check(user in info.admins && info.status == "ACTIVE")
+            val slots = (0..5).map { root.collection("invites").document(it.toString()) }
+            val saved = slots.map { transaction.get(it) }
+            check(saved.none { it.getString("email") == normalized && it.getString("status") == "PENDING" }) { "Invitation already pending" }
+            val target = slots.zip(saved).firstOrNull { !it.second.exists() }?.first ?: error("Invitation capacity reached")
+            transaction.set(target, mapOf("familyId" to familyId, "email" to normalized, "inviter" to user,
+                "expiresAt" to Timestamp(Date.from(Instant.now().plusSeconds(6 * 86400))), "status" to "PENDING", "uid" to ""))
+        }.await()
+    }
+
+    suspend fun accept(invitation: FamilyInvitation, memberId: String): FamilyInfo {
+        val user = uid()
+        db.runTransaction { transaction ->
+            val root = family(invitation.familyId)
+            val current = decode(transaction.get(root))
+            val ref = root.collection("invites").document(invitation.slot)
+            val saved = transaction.get(ref)
+            val userRef = db.collection("users").document(user)
+            val existing = transaction.get(userRef)
+            check(!existing.exists() || existing.getString("status") == "REMOVED")
+            check(current.status == "ACTIVE" && current.members.size < 6)
+            check(saved.getString("email") == services.auth.currentUser?.email && saved.getString("status") == "PENDING")
+            check(requireNotNull(saved.getTimestamp("expiresAt")).toDate().toInstant() > Instant.now())
+            transaction.update(root, mapOf("members" to (current.members + (user to memberId)), "action" to "join", "target" to user, "inviteSlot" to invitation.slot))
+            transaction.update(ref, mapOf("status" to "ACCEPTED", "uid" to user))
+            transaction.set(userRef, mapOf("familyId" to invitation.familyId, "memberId" to memberId, "status" to "ACTIVE"))
+        }.await()
+        return info(invitation.familyId)
+    }
+
+    suspend fun setAdministrator(familyId: String, targetUid: String, administrator: Boolean) {
+        val user = uid()
+        db.runTransaction { transaction ->
+            val root = family(familyId)
+            val current = decode(transaction.get(root))
+            check(current.owner == user && targetUid in current.members)
+            check(administrator || targetUid != current.owner)
+            val admins = if (administrator) (current.admins + targetUid).distinct() else current.admins - targetUid
+            transaction.update(root, mapOf("admins" to admins, "action" to "roles"))
+        }.await()
+    }
+
+    suspend fun remove(familyId: String, targetUid: String) {
+        val user = uid()
+        db.runTransaction { transaction ->
+            val root = family(familyId)
+            val current = decode(transaction.get(root))
+            check(user in current.admins && targetUid != current.owner && targetUid in current.members)
+            check(targetUid !in current.admins || user == current.owner)
+            transaction.update(root, mapOf("members" to (current.members - targetUid), "admins" to (current.admins - targetUid), "action" to "remove", "target" to targetUid))
+            transaction.update(db.collection("users").document(targetUid), "status", "REMOVED")
+        }.await()
+    }
+
+    private fun decode(document: DocumentSnapshot): FamilyInfo {
+        require(document.exists()) { "Family unavailable" }
+        val rawMembers = document.get("members") as? Map<*, *> ?: error("Invalid family membership")
+        val members = rawMembers.entries.associate { requireNotNull(it.key as? String) to requireNotNull(it.value as? String) }
+        val admins = (document.get("admins") as? List<*>)?.map { requireNotNull(it as? String) } ?: error("Invalid administrators")
+        return FamilyInfo(document.id, requireNotNull(document.getString("owner")), admins, members,
+            requireNotNull(document.getString("activeDataset")), requireNotNull(document.getLong("generation")), requireNotNull(document.getString("status")))
+    }
+}

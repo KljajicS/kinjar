@@ -9,3 +9,6 @@ captures/
 *.aab
 *.keystore
 *.jks
+node_modules/
+*-debug.log
+.firebase/

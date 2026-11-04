@@ -1,0 +1,179 @@
+import { after, before, beforeEach, test } from 'node:test';
+import { readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
+import { doc, getDoc, setDoc, updateDoc, writeBatch, Bytes, Timestamp, serverTimestamp, setLogLevel } from 'firebase/firestore';
+
+setLogLevel('silent');
+
+let env;
+before(async () => {
+  env = await initializeTestEnvironment({ projectId: 'demo-kinjar', firestore: {
+    host: '127.0.0.1', port: 8088, rules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
+  } });
+});
+after(async () => env?.cleanup());
+beforeEach(async () => env.clearFirestore());
+function db(uid, provider = 'google.com') {
+  return env.authenticatedContext(uid, { email: `${uid}@example.com`, email_verified: true,
+    firebase: { sign_in_provider: provider } }).firestore();
+}
+const family = (members = { owner: 'm-owner' }) => ({ owner: 'owner', admins: ['owner'], members, slot: '0',
+  activeDataset: 'current', otherDataset: '', generation: 1, status: 'ACTIVE', action: 'create', target: '', inviteSlot: '' });
+const state = () => ({ count: 0, bytes: 0, day: Math.floor(Date.now() / 86400000), dailyCount: 0, lastOpId: '' });
+async function seed(members, overrides = {}) {
+  await env.withSecurityRulesDisabled(async context => {
+    const d = context.firestore();
+    await setDoc(doc(d, 'families/family'), { ...family(members), ...overrides });
+    await setDoc(doc(d, 'families/family/datasets/current'), state());
+    await setDoc(doc(d, 'families/family/installs/0'), { uid: 'owner', installId: 'device' });
+    for (const [uid, memberId] of Object.entries(members ?? { owner: 'm-owner' })) {
+      await setDoc(doc(d, `users/${uid}`), { familyId: 'family', memberId, status: 'ACTIVE' });
+    }
+  });
+}
+function operation() {
+  return { uid: 'owner', installId: 'device', installSlot: '0', sequence: 1,
+    payload: Bytes.fromUint8Array(new Uint8Array([1, 2, 3])), createdAt: serverTimestamp() };
+}
+function upload(d, options = {}) {
+  const batch = writeBatch(d);
+  batch.set(doc(d, 'families/family/datasets/current/operations/device:1'), { ...operation(), ...options.operation });
+  batch.update(doc(d, 'families/family/datasets/current'), { ...state(), count: 1, bytes: 3, dailyCount: 1,
+    lastOpId: 'device:1', ...options.state });
+  return batch;
+}
+
+test('member uploads immutable content with exact coupled counters', async () => {
+  await seed();
+  const d = db('owner');
+  await assertSucceeds(upload(d).commit());
+  await assertFails(setDoc(doc(d, 'families/family/datasets/current/operations/device:1'), operation()));
+  const s = await getDoc(doc(d, 'families/family/datasets/current'));
+  assert.equal(s.data().bytes, 3);
+});
+test('unauthenticated, foreign family and non-Google access are rejected', async () => {
+  await seed();
+  for (const d of [env.unauthenticatedContext().firestore(), db('stranger'), db('owner', 'password')]) {
+    await assertFails(getDoc(doc(d, 'families/family/datasets/current')));
+    await assertFails(upload(d).commit());
+  }
+});
+test('counter cannot move without content and content cannot bypass counter', async () => {
+  await seed();
+  const d = db('owner');
+  await assertFails(updateDoc(doc(d, 'families/family/datasets/current'), { count: 1, bytes: 3, lastOpId: 'device:1' }));
+  await assertFails(setDoc(doc(d, 'families/family/datasets/current/operations/device:1'), operation()));
+  await assertFails(upload(d, { state: { bytes: 2 } }).commit());
+  await assertFails(upload(d, { state: { dailyCount: 0 } }).commit());
+});
+test('one counter increment cannot authorize two operation documents', async () => {
+  await seed();
+  const d = db('owner');
+  const batch = upload(d);
+  batch.set(doc(d, 'families/family/datasets/current/operations/device:2'), { ...operation(), sequence: 2 });
+  await assertFails(batch.commit());
+});
+test('forged timestamp, extra fields and unregistered installation are rejected', async () => {
+  await seed();
+  const d = db('owner');
+  await assertFails(upload(d, { operation: { createdAt: Timestamp.fromMillis(0) } }).commit());
+  await assertFails(upload(d, { operation: { unbounded: 'extra' } }).commit());
+  await assertFails(upload(d, { operation: { installSlot: '5' } }).commit());
+});
+test('quota exhaustion blocks cloud writes without deleting existing content', async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), dailyCount: 200 }));
+  await assertFails(upload(db('owner'), { state: { dailyCount: 201 } }).commit());
+});
+test('invited account can read family metadata in last invitation slot but not finances', async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/5'), {
+    familyId: 'family', email: 'wife@example.com', inviter: 'owner', status: 'PENDING', uid: '',
+    expiresAt: Timestamp.fromMillis(Date.now() + 3600000),
+  }));
+  await assertSucceeds(getDoc(doc(db('wife'), 'families/family')));
+  await assertFails(getDoc(doc(db('wife'), 'families/family/datasets/current')));
+});
+test('invitation acceptance requires membership and user reference in same commit', async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/0'), {
+    familyId: 'family', email: 'wife@example.com', inviter: 'owner', status: 'PENDING', uid: '',
+    expiresAt: Timestamp.fromMillis(Date.now() + 3600000),
+  }));
+  const d = db('wife');
+  const batch = writeBatch(d);
+  batch.update(doc(d, 'families/family'), { members: { owner: 'm-owner', wife: 'm-wife' }, action: 'join', target: 'wife', inviteSlot: '0' });
+  batch.update(doc(d, 'families/family/invites/0'), { status: 'ACCEPTED', uid: 'wife' });
+  batch.set(doc(d, 'users/wife'), { familyId: 'family', memberId: 'm-wife', status: 'ACTIVE' });
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(getDoc(doc(d, 'families/family/datasets/current')));
+});
+test('ordinary member cannot promote self or erase final administrator', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  await assertFails(updateDoc(doc(db('wife'), 'families/family'), { admins: ['owner', 'wife'], action: 'roles' }));
+  await assertFails(updateDoc(doc(db('owner'), 'families/family'), { admins: [], action: 'roles' }));
+});
+test('removal closes finance access and keeps own removal proof readable', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  const d = db('owner');
+  const batch = writeBatch(d);
+  batch.update(doc(d, 'families/family'), { members: { owner: 'm-owner' }, action: 'remove', target: 'wife' });
+  batch.update(doc(d, 'users/wife'), { status: 'REMOVED' });
+  await assertSucceeds(batch.commit());
+  await assertFails(getDoc(doc(db('wife'), 'families/family/datasets/current')));
+  assert.equal((await getDoc(doc(db('wife'), 'users/wife'))).data().status, 'REMOVED');
+});
+
+test('family creation reserves one public slot and links account atomically', async () => {
+  const d = db('owner');
+  const create = (fid, slot) => {
+    const b = writeBatch(d);
+    b.set(doc(d, `slots/${slot}`), { familyId: fid, owner: 'owner' });
+    b.set(doc(d, `families/${fid}`), { ...family(), slot, status: 'INITIALIZING' });
+    b.set(doc(d, 'users/owner'), { familyId: fid, memberId: 'm-owner', status: 'ACTIVE' });
+    return b.commit();
+  };
+  await assertFails(create('out-of-range', '10'));
+  await assertSucceeds(create('family', '0'));
+  await assertFails(create('second', '1'));
+  await assertSucceeds(setDoc(doc(d, 'families/family/datasets/current'), state()));
+});
+test('ordinary users cannot claim a slot or forge family reference separately', async () => {
+  const d = db('owner');
+  await assertFails(setDoc(doc(d, 'slots/0'), { familyId: 'family', owner: 'owner' }));
+  await assertFails(setDoc(doc(d, 'users/owner'), { familyId: 'family', memberId: 'm-owner', status: 'ACTIVE' }));
+});
+test('owner can appoint admin but cannot transfer ownership to outsider', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  const d = db('owner');
+  await assertSucceeds(updateDoc(doc(d, 'families/family'), { admins: ['owner', 'wife'], action: 'roles' }));
+  await assertFails(updateDoc(doc(d, 'families/family'), { owner: 'stranger', admins: ['owner', 'stranger'], action: 'transfer' }));
+  await assertSucceeds(updateDoc(doc(d, 'families/family'), { owner: 'wife', action: 'transfer' }));
+  await assertFails(updateDoc(doc(d, 'families/family'), { admins: ['owner'], action: 'roles' }));
+});
+test('state caps bound both document count and payload bytes', async () => {
+  await seed();
+  const d = db('owner');
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), count: 1000 }));
+  await assertFails(upload(d, { state: { count: 1001 } }).commit());
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), bytes: 10485760 }));
+  await assertFails(upload(d, { state: { bytes: 10485763 } }).commit());
+});
+test('daily usage resets only on server day change', async () => {
+  await seed();
+  const yesterday = state().day - 1;
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), day: yesterday, dailyCount: 200 }));
+  await assertFails(upload(db('owner'), { state: { day: yesterday, dailyCount: 1 } }).commit());
+  await assertSucceeds(upload(db('owner')).commit());
+});
+test('invitation creation is bounded and cannot name another inviter', async () => {
+  await seed();
+  const d = db('owner');
+  const invite = { familyId: 'family', email: 'wife@example.com', inviter: 'owner', status: 'PENDING', uid: '',
+    expiresAt: Timestamp.fromMillis(Date.now() + 3600000) };
+  await assertSucceeds(setDoc(doc(d, 'families/family/invites/0'), invite));
+  await assertFails(setDoc(doc(d, 'families/family/invites/6'), invite));
+  await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, inviter: 'stranger' }));
+  await assertFails(setDoc(doc(d, 'families/family/invites/1'), { ...invite, expiresAt: Timestamp.fromMillis(Date.now() + 9 * 86400000) }));
+});

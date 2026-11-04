@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    { "collectionGroup": "invites", "queryScope": "COLLECTION_GROUP", "fields": [
+      { "fieldPath": "email", "order": "ASCENDING" },
+      { "fieldPath": "status", "order": "ASCENDING" }
+    ] }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "operations", "fieldPath": "payload", "indexes": [] },
+    { "collectionGroup": "chunks", "fieldPath": "payload", "indexes": [] },
+    { "collectionGroup": "operations", "fieldPath": "digest", "indexes": [] },
+    { "collectionGroup": "chunks", "fieldPath": "digest", "indexes": [] }
+  ]
+}

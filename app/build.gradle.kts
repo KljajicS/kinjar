@@ -21,6 +21,12 @@ android {
         targetSdk = 36
         versionCode = 6
         versionName = "0.3.3"
+        buildConfigField("boolean", "FIREBASE_SYNC_ENABLED", providers.gradleProperty("firebaseSyncEnabled").orElse("false").get().toBoolean().toString())
+        listOf("PROJECT_ID", "APP_ID", "API_KEY", "WEB_CLIENT_ID").forEach { key ->
+            val value = providers.environmentVariable("KINJAR_FIREBASE_$key").orElse("").get()
+            require(value.none { it == '\n' || it == '\r' }) { "Invalid Firebase configuration" }
+            buildConfigField("String", "FIREBASE_$key", "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        }
     }
 
     signingConfigs {
@@ -47,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -71,6 +78,14 @@ sqldelight {
 }
 
 dependencies {
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.appcheck)
+    implementation(libs.credentials)
+    implementation(libs.credentials.play)
+    implementation(libs.googleid)
+    implementation(libs.coroutines.tasks)
     implementation(libs.appcompat)
     implementation(libs.biometric)
     implementation(libs.camera.camera2)

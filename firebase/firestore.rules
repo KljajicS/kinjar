@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function familyPath(fid) { return /databases/$(database)/documents/families/$(fid); }
+    function userPath(uid) { return /databases/$(database)/documents/users/$(uid); }
+    function statePath(fid, did) { return /databases/$(database)/documents/families/$(fid)/datasets/$(did); }
+    function opPath(fid, did, oid) { return /databases/$(database)/documents/families/$(fid)/datasets/$(did)/operations/$(oid); }
+    function member(fid) {
+      return signedIn() && request.auth.uid in get(familyPath(fid)).data.members
+        && get(familyPath(fid)).data.status != 'DELETING';
+    }
+    function admin(fid) { return member(fid) && request.auth.uid in get(familyPath(fid)).data.admins; }
+    function invitedAt(fid, sid) {
+      let path = /databases/$(database)/documents/families/$(fid)/invites/$(sid);
+      return signedIn() && exists(path) && get(path).data.status == 'PENDING'
+        && get(path).data.email == request.auth.token.email && get(path).data.expiresAt > request.time;
+    }
+    function invited(fid) {
+      return invitedAt(fid, '0') || invitedAt(fid, '1') || invitedAt(fid, '2')
+        || invitedAt(fid, '3') || invitedAt(fid, '4') || invitedAt(fid, '5');
+    }
+    function identifier(id) { return id is string && id.matches('[A-Za-z0-9_-]{1,128}'); }
+    function slot(id) { return id.matches('[0-9]'); }
+    function smallSlot(id) { return id.matches('[0-5]'); }
+    function familyShape(d) {
+      return d.keys().hasOnly(['owner', 'admins', 'members', 'slot', 'activeDataset', 'otherDataset', 'generation', 'status', 'action', 'target', 'inviteSlot'])
+        && identifier(d.owner) && d.admins is list && d.admins.size() >= 1 && d.admins.size() <= 6
+        && d.admins.toSet().size() == d.admins.size() && d.owner in d.admins
+        && d.members is map && d.members.size() >= 1 && d.members.size() <= 6
+        && d.members.keys().hasAll(d.admins) && slot(d.slot)
+        && identifier(d.activeDataset) && (d.otherDataset == '' || identifier(d.otherDataset))
+        && d.generation is int && d.generation >= 1 && d.generation <= 2147483647
+        && d.status in ['INITIALIZING', 'ACTIVE', 'RESTORING', 'DELETING']
+        && d.action is string && d.action.size() <= 16 && d.target is string && d.target.size() <= 128
+        && d.inviteSlot is string && d.inviteSlot.size() <= 1;
+    }
+    function linkedAfter(uid, fid) {
+      return getAfter(userPath(uid)).data.familyId == fid && getAfter(userPath(uid)).data.status == 'ACTIVE'
+        && getAfter(userPath(uid)).data.memberId == getAfter(familyPath(fid)).data.members[uid];
+    }
+    function noFamily(uid) {
+      return !exists(userPath(uid)) || get(userPath(uid)).data.status == 'REMOVED';
+    }
+
+    match /slots/{id} {
+      allow get: if signedIn();
+      allow create: if signedIn() && slot(id) && request.resource.data.keys().hasOnly(['familyId', 'owner'])
+        && identifier(request.resource.data.familyId) && request.resource.data.owner == request.auth.uid
+        && !exists(familyPath(request.resource.data.familyId))
+        && getAfter(familyPath(request.resource.data.familyId)).data.slot == id
+        && getAfter(familyPath(request.resource.data.familyId)).data.owner == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['familyId', 'memberId', 'status'])
+        && identifier(request.resource.data.familyId) && identifier(request.resource.data.memberId)
+        && ((request.auth.uid == uid && noFamily(uid)
+          && request.resource.data.status == 'ACTIVE'
+          && getAfter(familyPath(request.resource.data.familyId)).data.members[uid] == request.resource.data.memberId)
+          || (resource.data.status == 'ACTIVE' && request.resource.data.status == 'REMOVED'
+            && request.resource.data.familyId == resource.data.familyId
+            && request.resource.data.memberId == resource.data.memberId
+            && admin(resource.data.familyId)
+            && !(uid in getAfter(familyPath(resource.data.familyId)).data.members)));
+    }
+
+    match /families/{fid} {
+      allow get: if member(fid) || invited(fid);
+      allow create: if signedIn() && identifier(fid) && familyShape(request.resource.data) && noFamily(request.auth.uid)
+        && request.resource.data.owner == request.auth.uid && request.resource.data.admins == [request.auth.uid]
+        && request.resource.data.members.keys().hasOnly([request.auth.uid])
+        && identifier(request.resource.data.members[request.auth.uid])
+        && request.resource.data.status == 'INITIALIZING' && request.resource.data.generation == 1
+        && request.resource.data.otherDataset == '' && request.resource.data.action == 'create'
+        && getAfter(/databases/$(database)/documents/slots/$(request.resource.data.slot)).data.familyId == fid
+        && getAfter(/databases/$(database)/documents/slots/$(request.resource.data.slot)).data.owner == request.auth.uid
+        && linkedAfter(request.auth.uid, fid);
+
+      function joining() {
+        let invite = get(/databases/$(database)/documents/families/$(fid)/invites/$(request.resource.data.inviteSlot)).data;
+        let after = getAfter(/databases/$(database)/documents/families/$(fid)/invites/$(request.resource.data.inviteSlot)).data;
+        return signedIn() && resource.data.status == 'ACTIVE' && noFamily(request.auth.uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'action', 'target', 'inviteSlot'])
+          && request.resource.data.action == 'join' && request.resource.data.target == request.auth.uid
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
+          && !(request.auth.uid in resource.data.members) && identifier(request.resource.data.members[request.auth.uid])
+          && invite.status == 'PENDING' && invite.email == request.auth.token.email && invite.expiresAt > request.time
+          && after.status == 'ACCEPTED' && after.uid == request.auth.uid && linkedAfter(request.auth.uid, fid);
+      }
+      function removing() {
+        let target = request.resource.data.target;
+        return admin(fid) && target in resource.data.members && target != resource.data.owner
+          && (!(target in resource.data.admins) || request.auth.uid == resource.data.owner)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'admins', 'action', 'target'])
+          && request.resource.data.action == 'remove'
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([target])
+          && !(target in request.resource.data.members)
+          && request.resource.data.admins.toSet() == resource.data.admins.toSet().difference([target].toSet())
+          && getAfter(userPath(target)).data.status == 'REMOVED'
+          && getAfter(userPath(target)).data.familyId == fid;
+      }
+      function roles() {
+        return request.auth.uid == resource.data.owner
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner', 'admins', 'action'])
+          && request.resource.data.action in ['roles', 'transfer']
+          && (request.resource.data.owner == resource.data.owner || request.resource.data.action == 'transfer');
+      }
+      allow update: if signedIn() && familyShape(request.resource.data) && (joining() || removing() || roles());
+
+      match /invites/{sid} {
+        allow get, list: if signedIn() && (resource.data.email == request.auth.token.email || admin(fid));
+        function shape(d) {
+          return smallSlot(sid) && d.keys().hasOnly(['familyId', 'email', 'inviter', 'expiresAt', 'status', 'uid'])
+            && d.familyId == fid && d.email is string && d.email.size() >= 3 && d.email.size() <= 254
+            && identifier(d.inviter) && d.expiresAt is timestamp && d.uid is string && d.uid.size() <= 128;
+        }
+        allow create: if admin(fid) && shape(request.resource.data) && request.resource.data.inviter == request.auth.uid
+          && request.resource.data.status == 'PENDING' && request.resource.data.uid == ''
+          && request.resource.data.expiresAt > request.time
+          && request.resource.data.expiresAt <= request.time + duration.value(7, 'd');
+        allow update: if signedIn() && shape(request.resource.data)
+          && ((admin(fid) && request.resource.data.status == 'CANCELLED'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+            || (resource.data.status == 'PENDING' && resource.data.email == request.auth.token.email
+              && resource.data.expiresAt > request.time && request.resource.data.status == 'ACCEPTED'
+              && request.resource.data.uid == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'uid'])
+              && linkedAfter(request.auth.uid, fid)));
+        allow delete: if admin(fid) && resource.data.status != 'PENDING';
+      }
+
+      match /installs/{sid} {
+        allow get, list: if member(fid);
+        allow create: if member(fid) && smallSlot(sid)
+          && request.resource.data.keys().hasOnly(['uid', 'installId'])
+          && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId);
+        allow delete: if admin(fid) || (member(fid) && resource.data.uid == request.auth.uid);
+      }
+
+      match /datasets/{did} {
+        allow get: if member(fid);
+        function stateShape(d) {
+          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId'])
+            && d.count is int && d.count >= 0 && d.count <= 1000
+            && d.bytes is int && d.bytes >= 0 && d.bytes <= 10485760
+            && d.day is int && d.dailyCount is int && d.dailyCount >= 0 && d.dailyCount <= 200
+            && d.lastOpId is string && d.lastOpId.size() <= 160;
+        }
+        function day() { return int(request.time.toMillis() / 86400000); }
+        function writable() {
+          let f = get(familyPath(fid)).data;
+          return member(fid) && f.status == 'ACTIVE' && f.activeDataset == did;
+        }
+        function increment(before, after, oid, payload) {
+          return stateShape(after) && after.count == before.count + 1 && after.bytes == before.bytes + payload.size()
+            && after.day == day() && after.dailyCount == (before.day == day() ? before.dailyCount + 1 : 1)
+            && after.lastOpId == oid;
+        }
+        allow create: if admin(fid) && get(familyPath(fid)).data.status == 'INITIALIZING'
+          && get(familyPath(fid)).data.activeDataset == did && stateShape(request.resource.data)
+          && request.resource.data.count == 0 && request.resource.data.bytes == 0
+          && request.resource.data.dailyCount == 0 && request.resource.data.day == day()
+          && request.resource.data.lastOpId == '';
+        allow update: if writable() && stateShape(request.resource.data)
+          && !exists(opPath(fid, did, request.resource.data.lastOpId))
+          && increment(resource.data, request.resource.data, request.resource.data.lastOpId,
+            getAfter(opPath(fid, did, request.resource.data.lastOpId)).data.payload);
+
+        match /operations/{oid} {
+          allow get, list: if member(fid) && get(familyPath(fid)).data.activeDataset == did;
+          allow create: if writable()
+            && request.resource.data.keys().hasOnly(['uid', 'installId', 'installSlot', 'sequence', 'payload', 'createdAt'])
+            && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId)
+            && request.resource.data.sequence is int && request.resource.data.sequence > 0
+            && request.resource.data.sequence <= 2147483647
+            && smallSlot(request.resource.data.installSlot)
+            && get(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.uid == request.auth.uid
+            && get(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.installId == request.resource.data.installId
+            && oid == request.resource.data.installId + ':' + string(request.resource.data.sequence)
+            && request.resource.data.payload is bytes && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
+            && request.resource.data.createdAt == request.time
+            && increment(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, oid, request.resource.data.payload);
+        }
+      }
+    }
+    match /{path=**}/invites/{id} {
+      allow list: if signedIn() && resource.data.email == request.auth.token.email;
+    }
+  }
+}
