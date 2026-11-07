@@ -14,7 +14,9 @@ SQLDelight owns the event log, durable outbox, conflict records and recovery jou
 
 One Firestore memory-cache client uses Google authentication and membership rules. Writes are online transactions. Foreground listeners and WorkManager share one coordinator. A fresh installation receives a new writer identity. Joining or recovering downloads and validates the family history before asking to replace local finances.
 
-The creator can appoint administrators, transfer ownership and delete the family. Admission is public while ten slots are available, with six members and six installations per family. Rules enforce immutable operations and coupled content/counters. Limits are 200 operations per family per UTC day, 512 KiB per payload and one additional staged or retired dataset. There is no cumulative operation-count or active-history byte cap. Count and byte counters remain authoritative for cleanup and deletion.
+The creator can appoint administrators, transfer ownership and delete the family. Creating a workspace requires an administrator-provisioned `admission/{uid}` entry with `enabled: true`; clients cannot write admission. Ten slots, six members and six installations per family remain. Invitations are trusted only while their inviter is a current administrator. Rules enforce immutable operations and coupled content/counters. Limits are 200 operations per family per UTC day, 512 KiB per payload and one additional staged or retired dataset. There is no cumulative operation-count or active-history byte cap. Count and byte counters remain authoritative for cleanup and deletion.
+
+Operation IDs stay `installId:sequence`, so existing bytes and IDs are unchanged. Instead, each installation ID is bound by an immutable per-family claim to the first account that registers it. Uploads and device registrations require the caller's claim. Installations registered before claims existed must be backfilled by the project owner before the rules are deployed; otherwise the first account to claim an ID would own it. Consequently, one installation cannot upload for two accounts in the same family.
 
 Initial history is transferred in 512 KiB chunks, with no 128-chunk ceiling for version 2 streams. A cold download reads those chunks plus every subsequent operation document, metadata and rule reads. For example, 10,000 operations cost at least 10,000 document reads per phone; repeated recoveries can exhaust the project's daily quota. Payloads are exempt from indexes. Spark without billing prevents paid overages, not service exhaustion.
 
@@ -31,7 +33,8 @@ Independent password backups use PBKDF2-HMAC-SHA256 and AES-256-GCM, with authen
 ## Consequences
 
 - Google and authorized project administrators can read synchronized finances. No family key or QR pairing is needed.
-- Public clients can exhaust free quota or admission slots. Local work and export remain available.
+- Unapproved accounts cannot claim admission slots or bootstrap storage, but any signed-in account can still spend read quota on denied requests. Local work and export remain available.
+- Claims, admission and inviter checks are not backward compatible with older rules: deployment follows the backfill and precedes the updated APK.
 - Rules enforce access and bounds; clients validate financial contents and hashes. A malicious authorized member can still disrupt their family.
 - Membership removal cannot erase offline/exported copies. Deletion cleanup requires a running client or project-owner maintenance.
 - History growth can pause cloud uploads. Pending changes are retained; no automatic pruning or paid upgrade occurs.

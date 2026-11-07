@@ -6,6 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.kinjar.data.BudgetRepository
 import app.kinjar.data.EventStore
+import app.kinjar.data.DiagnosticOperation
+import app.kinjar.data.Diagnostics
+import app.kinjar.data.StoredHistory
 import app.kinjar.data.auth.FirebaseAuthRepository
 import app.kinjar.data.auth.GoogleAccount
 import app.kinjar.data.backup.BackupFiles
@@ -18,7 +21,9 @@ import app.kinjar.R
 import kotlinx.coroutines.CancellationException
 import com.google.firebase.firestore.FirebaseFirestoreException
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -67,7 +72,7 @@ class FamilyViewModel @Inject constructor(
     private val store: EventStore,
     private val repository: BudgetRepository,
 ) : ViewModel() {
-    val writes = WriteOperation(viewModelScope)
+    val writes = WriteOperation(viewModelScope, DiagnosticOperation.FAMILY_WRITE)
     val status = sync.status
     val configured get() = auth.configured
     private val mutableState = MutableStateFlow(FamilyScreenState())
@@ -76,7 +81,7 @@ class FamilyViewModel @Inject constructor(
     private var exportCopy: String? = null
     private var exportArchive: String? = null
     private var opened: OpenStoredBackup? = null
-    private var handedOff = false
+    private var restoring = false
     private var restoreDigest: String? = null
 
     init {
@@ -89,10 +94,12 @@ class FamilyViewModel @Inject constructor(
                 if (wasRestoring && state.value.journalPhase == null && status.phase in setOf(SyncPhase.READY, SyncPhase.CLEANUP_REQUIRED)) {
                     cancelBackupRestore()
                     writes.clearFailure()
-                    mutableState.update { it.copy(notice = R.string.fbs_restored) }
                 }
                 if (status.phase != previousPhase && status.phase in setOf(SyncPhase.REPLACEMENT_REQUIRED, SyncPhase.RESTORING, SyncPhase.REMOVED)) {
-                    try { load() } catch (e: Exception) { if (e is CancellationException) throw e }
+                    try { load() } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        Diagnostics.report(DiagnosticOperation.FAMILY_READ, e)
+                    }
                 }
                 previousPhase = status.phase
             }
@@ -100,7 +107,10 @@ class FamilyViewModel @Inject constructor(
         viewModelScope.launch {
             sync.observedFamily.collect { family ->
                 if (family != null && auth.current()?.uid in family.members && state.value.family != family) {
-                    try { load() } catch (e: Exception) { if (e is CancellationException) throw e }
+                    try { load() } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        Diagnostics.report(DiagnosticOperation.FAMILY_READ, e)
+                    }
                 }
             }
         }
@@ -168,6 +178,13 @@ class FamilyViewModel @Inject constructor(
     fun cleanup() = run { sync.cleanupFamily(requireFamily()); load() }
     fun discard(id: String) = run { withContext(Dispatchers.IO) { store.discardConflictingChange(id) }; loadLocal(); sync.synchronize(); load() }
 
+    /** Deletes retained copy [id] if it belongs to the signed-in account or to this device without a session. */
+    fun deleteCopy(id: String) = run {
+        val uid = auth.current()?.uid ?: "local"
+        check(withContext(Dispatchers.IO) { listOf(uid, "local").any { store.deleteDraft(it, id) } }) { "Retained copy is unavailable" }
+        loadLocal()
+    }
+
     fun loadArchives() = run {
         val uid = requireNotNull(auth.current()).uid
         val archives = families.archived()
@@ -190,67 +207,67 @@ class FamilyViewModel @Inject constructor(
         val copy = exportCopy
         val archive = exportArchive
         run {
+            var history: StoredHistory? = null
             try {
                 requireNotNull(password) { "Enter the backup passphrase again" }
-                val history = if (archive != null) sync.archivedHistory(archive) else withContext(Dispatchers.IO) {
-                    if (copy == null) store.captureHistory() else {
+                if (archive != null) history = sync.archivedHistory(archive)
+                else withContext(Dispatchers.IO) {
+                    history = if (copy == null) store.captureHistory() else {
                         val uid = auth.current()?.uid ?: "local"
                         requireNotNull(listOf(uid, "local").firstNotNullOfOrNull { store.draftHistory(it, copy) }) { "Retained copy is unavailable" }
                     }
                 }
-                try { backups.write(uri, history, password) }
-                finally { if (copy == null) withContext(Dispatchers.IO) { store.discardHistory(history.id) } }
+                backups.write(uri, requireNotNull(history), password)
                 mutableState.update { it.copy(savedBackup = true) }
-            } finally { password?.fill('\u0000') }
+            } finally {
+                password?.fill('\u0000')
+                history?.let { release(it) }
+            }
         }
     }
 
     fun inspectBackup(uri: Uri, password: CharArray) = run(R.string.fbs_backup_open_failed) {
         try {
             val backup = backups.read(uri, password)
-            try {
-                withContext(Dispatchers.IO) { store.validateHistory(backup.history) }
-                val digest = withContext(Dispatchers.IO) { store.currentDigest() }
-                cancelBackupRestore()
-                opened = backup
-                restoreDigest = digest
-            } catch (e: Exception) {
-                withContext(Dispatchers.IO) { store.discardHistory(backup.history.id) }
+            val digest = try {
+                withContext(Dispatchers.IO) { store.validateHistory(backup.history); store.currentDigest() }
+            } catch (e: Throwable) {
+                release(backup.history)
                 throw e
             }
+            cancelBackupRestore()
+            opened = backup
+            restoreDigest = digest
             mutableState.update { it.copy(backupDate = backup.createdAt) }
         } finally { password.fill('\u0000') }
     }
 
-    /** Forgets the opened backup, discarding its staged history unless a restore took ownership of it. */
+    /** Forgets the opened backup; while a restore is running, that restore releases it once the coordinator returns. */
     fun cancelBackupRestore() {
-        val unused = opened?.history?.takeUnless { handedOff }
+        val unused = opened?.history?.takeUnless { restoring }
         opened = null
         restoreDigest = null
-        handedOff = false
         mutableState.update { it.copy(backupDate = null) }
-        if (unused != null) viewModelScope.launch(Dispatchers.IO) { store.discardHistory(unused.id) }
+        if (unused != null) viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { release(unused) }
     }
     fun confirmBackupRestore() = run {
         val backup = requireNotNull(opened)
         val digest = requireNotNull(restoreDigest)
+        restoring = true
         try {
             if (withContext(Dispatchers.IO) { store.read { db.syncSessionQueries.current().executeAsOneOrNull() } } == null) {
                 withContext(Dispatchers.IO) { store.restoreLocal(backup.history, digest) }
-                handedOff = true
             } else if (state.value.journalPhase == "RESTORE") sync.resumeRestore()
-            else {
-                // A saved restore journal references this history even when a later step fails.
-                try { sync.restoreFamily(backup.history, digest) }
-                catch (e: Exception) {
-                    handedOff = withContext(Dispatchers.IO) { store.read { db.restoreJournalQueries.journalInfo().executeAsOneOrNull() != null } }
-                    throw e
-                }
-                handedOff = true
-            }
+            else sync.restoreFamily(backup.history, digest)
         } catch (e: LocalHistoryChanged) {
             restoreDigest = withContext(Dispatchers.IO) { store.currentDigest() }
             throw e
+        } catch (e: RestoreSuperseded) {
+            cancelBackupRestore()
+            throw e
+        } finally {
+            restoring = false
+            if (opened !== backup) release(backup.history)
         }
         cancelBackupRestore()
         load()
@@ -270,6 +287,11 @@ class FamilyViewModel @Inject constructor(
             if (e is CancellationException) throw e
             val message = when (e) {
                 is LocalHistoryChanged -> R.string.fbs_local_changed
+                is RestoreSuperseded -> R.string.audit_restore_superseded
+                is CloudCleanupPending -> R.string.audit_cleanup_pending
+                is WorkspaceAdmissionRequired -> R.string.audit_admission_required
+                is InstallationClaimed -> R.string.audit_installation_claimed
+                is InvitationNoLongerValid -> R.string.audit_invitation_invalid
                 is SyncCapacityReached -> R.string.fbs_capacity
                 is UnsupportedSyncVersion -> R.string.fbs_update
                 is FirebaseFirestoreException -> when (e.code) {
@@ -306,7 +328,8 @@ class FamilyViewModel @Inject constructor(
         check(auth.current()?.uid == account.uid)
         val matchesCloud = withContext(Dispatchers.IO) { store.read {
             db.syncSessionQueries.current().executeAsOneOrNull()?.let {
-                family != null && it.uid == account.uid && it.family_id == family.id && it.dataset_id == family.activeDataset && it.generation == family.generation
+                family != null && it.uid == account.uid && it.family_id == family.id && it.dataset_id == family.activeDataset &&
+                    it.generation == family.generation && family.members[account.uid] == it.member_id
             } == true
         } }
         mutableState.update { it.copy(account = account, family = family, invitations = invites, devices = devices, sessionMatchesCloud = matchesCloud) }
@@ -335,8 +358,16 @@ class FamilyViewModel @Inject constructor(
     override fun onCleared() {
         exportPassword?.fill('\u0000')
         exportPassword = null
-        // releaseHistory waits on the store lock and viewModelScope is already cancelled here.
-        opened?.history?.takeUnless { handedOff }?.let { thread(name = "release-history") { store.releaseHistory(it.id) } }
+        // Releasing waits on the store lock and viewModelScope is already cancelled here.
+        opened?.history?.takeUnless { restoring }?.let { thread(name = "release-history") { releaseNow(it) } }
         opened = null
     }
+
+    /** Deletes [history] unless the baseline, a retained copy or recovery references it; a referenced spool is only unpinned. */
+    private fun releaseNow(history: StoredHistory) {
+        runCatching { store.discardHistory(history.id) }
+        store.releaseHistory(history.id)
+    }
+
+    private suspend fun release(history: StoredHistory) = withContext(NonCancellable + Dispatchers.IO) { releaseNow(history) }
 }

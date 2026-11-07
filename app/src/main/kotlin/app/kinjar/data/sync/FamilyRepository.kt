@@ -3,10 +3,12 @@ package app.kinjar.data.sync
 import app.kinjar.data.auth.FirebaseServices
 import app.kinjar.domain.newId
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Transaction
 import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.util.Date
@@ -28,6 +30,12 @@ data class FamilyDevice(val slot: String, val uid: String, val installId: String
 /** The personal workspace was not archived and the invitation was not accepted; retrying the same switch cannot succeed. */
 class FamilySwitchRejected : IllegalStateException("Invitation or personal workspace is no longer eligible")
 
+/** The project administrator has not approved this account to create a cloud workspace. Joining by invitation is unaffected. */
+class WorkspaceAdmissionRequired : IllegalStateException("This account is not approved to create a cloud workspace")
+
+/** The invitation expired, was cancelled or was issued by someone who is no longer an administrator. */
+class InvitationNoLongerValid : IllegalStateException("Invitation is no longer valid; ask a current administrator to invite you again")
+
 @Singleton
 class FamilyRepository @Inject constructor(private val services: FirebaseServices) {
     private val db get() = services.firestore
@@ -42,28 +50,39 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
 
     suspend fun info(familyId: String): FamilyInfo = decode(family(familyId).get(Source.SERVER).await())
 
+    /** Whether the project administrator approved this account to create a workspace; rules enforce the same check. */
+    suspend fun admitted(): Boolean = db.collection("admission").document(uid()).get(Source.SERVER).await().getBoolean("enabled") == true
+
     suspend fun create(memberId: String, id: String, dataset: String): FamilyInfo {
         val user = uid()
-        val created = db.runTransaction { transaction ->
+        val outcome = db.runTransaction { transaction ->
             check(uid() == user)
             val userRef = db.collection("users").document(user)
             val existing = transaction.get(userRef)
-            if (existing.getString("familyId") == id && existing.getString("status") == "ACTIVE") return@runTransaction true
+            if (existing.getString("familyId") == id && existing.getString("status") == "ACTIVE") return@runTransaction CreateOutcome.CREATED
             check(!existing.exists() || existing.getString("status") == "REMOVED") { "Account already belongs to a family" }
+            val admission = transaction.get(db.collection("admission").document(user))
+            if (admission.getBoolean("enabled") != true) return@runTransaction CreateOutcome.NOT_ADMITTED
             val slots = (0..9).map { db.collection("slots").document(it.toString()) }
             val slot = slots.zip(slots.map { transaction.get(it) }).firstOrNull { !it.second.exists() }?.first
-                ?: return@runTransaction false
+                ?: return@runTransaction CreateOutcome.FULL
             val data = mapOf("owner" to user, "admins" to listOf(user), "members" to mapOf(user to memberId),
                 "slot" to slot.id, "activeDataset" to dataset, "otherDataset" to "", "generation" to 1L,
                 "status" to "INITIALIZING", "action" to "create", "target" to "", "inviteSlot" to "")
             transaction.set(slot, mapOf("familyId" to id, "owner" to user))
             transaction.set(family(id), data)
             transaction.set(userRef, mapOf("familyId" to id, "memberId" to memberId, "status" to "ACTIVE"))
-            true
+            CreateOutcome.CREATED
         }.await()
-        if (!created) throw SyncCapacityReached()
+        when (outcome) {
+            CreateOutcome.NOT_ADMITTED -> throw WorkspaceAdmissionRequired()
+            CreateOutcome.FULL -> throw SyncCapacityReached()
+            CreateOutcome.CREATED -> Unit
+        }
         return info(id)
     }
+
+    private enum class CreateOutcome { CREATED, NOT_ADMITTED, FULL }
 
     /** Owned archived workspaces; archives keep their admission slot, so at most ten exist. */
     suspend fun archived(): List<FamilyInfo> = db.collection("families").whereEqualTo("owner", uid())
@@ -97,6 +116,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
                     || source == null || !source.isPersonal(user) || source.admins != listOf(user) || source.status != "ACTIVE"
                     || target == null || target.status != "ACTIVE" || user in target.members || sourceFamilyId == targetFamilyId
                     || invite.getString("email") != email || invite.getString("status") != "PENDING"
+                    || invite.getString("inviter") !in target.admins
                     || created + 6 * 86400 <= Instant.now().epochSecond) return@runTransaction SwitchOutcome.REJECTED
                 if (target.members.size >= 6) return@runTransaction SwitchOutcome.FULL
                 tx.update(sourceRef, mapOf("status" to "ARCHIVED", "action" to "archive", "target" to targetFamilyId, "inviteSlot" to ""))
@@ -137,7 +157,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             check(user in info.admins && info.status == "ACTIVE")
             val slots = (0..5).map { root.collection("invites").document(it.toString()) }
             val saved = slots.map { transaction.get(it) }
-            if (saved.any { it.getString("email") == normalized && it.getString("status") == "PENDING"
+            if (saved.any { it.getString("email") == normalized && it.getString("status") == "PENDING" && it.getString("inviter") in info.admins
                     && (it.getTimestamp("createdAt")?.seconds ?: 0) + 6 * 86400 > Instant.now().epochSecond }) return@runTransaction
             val target = slots.zip(saved).firstOrNull { !it.second.exists() }?.first ?: error("Invitation capacity reached")
             transaction.set(target, mapOf("familyId" to familyId, "email" to normalized, "inviter" to user,
@@ -148,20 +168,29 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
 
     suspend fun accept(invitation: FamilyInvitation, memberId: String): FamilyInfo {
         val user = uid()
-        db.runTransaction { transaction ->
-            val root = family(invitation.familyId)
-            val current = decode(transaction.get(root))
-            val ref = root.collection("invites").document(invitation.slot)
-            val saved = transaction.get(ref)
-            val userRef = db.collection("users").document(user)
-            val existing = transaction.get(userRef)
-            check(!existing.exists() || existing.getString("status") == "REMOVED")
-            check(current.status == "ACTIVE" && current.members.size < 6)
-            check(saved.getString("email") == services.auth.currentUser?.email && saved.getString("status") == "PENDING")
-            transaction.update(root, mapOf("members" to (current.members + (user to memberId)), "action" to "join", "target" to user, "inviteSlot" to invitation.slot))
-            transaction.update(ref, mapOf("status" to "ACCEPTED", "uid" to user))
-            transaction.set(userRef, mapOf("familyId" to invitation.familyId, "memberId" to memberId, "status" to "ACTIVE"))
-        }.await()
+        val valid = try {
+            db.runTransaction { transaction ->
+                val root = family(invitation.familyId)
+                val current = decode(transaction.get(root))
+                val ref = root.collection("invites").document(invitation.slot)
+                val saved = transaction.get(ref)
+                val userRef = db.collection("users").document(user)
+                val existing = transaction.get(userRef)
+                check(!existing.exists() || existing.getString("status") == "REMOVED")
+                check(current.status == "ACTIVE" && current.members.size < 6)
+                if (saved.getString("email") != services.auth.currentUser?.email || saved.getString("status") != "PENDING"
+                    || saved.getString("inviter") !in current.admins) return@runTransaction false
+                transaction.update(root, mapOf("members" to (current.members + (user to memberId)), "action" to "join", "target" to user, "inviteSlot" to invitation.slot))
+                transaction.update(ref, mapOf("status" to "ACCEPTED", "uid" to user))
+                transaction.set(userRef, mapOf("familyId" to invitation.familyId, "memberId" to memberId, "status" to "ACTIVE"))
+                true
+            }.await()
+        } catch (e: FirebaseFirestoreException) {
+            // Rules deny reading the family once the invitation stops being valid, including when its inviter lost administrator rights.
+            if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) throw InvitationNoLongerValid()
+            throw e
+        }
+        if (!valid) throw InvitationNoLongerValid()
         return info(invitation.familyId)
     }
 
@@ -173,7 +202,9 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             check(current.owner == user && targetUid in current.members)
             check(administrator || targetUid != current.owner)
             val admins = if (administrator) (current.admins + targetUid).distinct() else current.admins - targetUid
+            val revoked = if (administrator) emptyList() else pendingInvitesBy(transaction, root, targetUid)
             transaction.update(root, mapOf("admins" to admins, "action" to "roles"))
+            revoked.forEach { transaction.update(it, "status", "CANCELLED") }
         }.await()
     }
 
@@ -186,11 +217,18 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             check(targetUid !in current.admins || user == current.owner)
             val installs = (0..5).map { root.collection("installs").document(it.toString()) }
             val removed = installs.filter { transaction.get(it).getString("uid") == targetUid }
+            val revoked = pendingInvitesBy(transaction, root, targetUid)
             transaction.update(root, mapOf("members" to (current.members - targetUid), "admins" to (current.admins - targetUid), "action" to "remove", "target" to targetUid))
             transaction.update(db.collection("users").document(targetUid), "status", "REMOVED")
             removed.forEach(transaction::delete)
+            revoked.forEach { transaction.update(it, "status", "CANCELLED") }
         }.await()
     }
+
+    /** Rules already refuse these invitations once their inviter is not an administrator; cancelling hides them from invitees. */
+    private fun pendingInvitesBy(transaction: Transaction, root: DocumentReference, inviter: String) =
+        (0..5).map { root.collection("invites").document(it.toString()) }
+            .filter { transaction.get(it).let { invite -> invite.getString("status") == "PENDING" && invite.getString("inviter") == inviter } }
 
     suspend fun beginDeletion(familyId: String) {
         val user = uid()

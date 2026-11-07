@@ -1,6 +1,7 @@
 package app.kinjar.ui
 
 import android.net.Uri
+import app.kinjar.R
 import app.kinjar.data.*
 import app.kinjar.data.auth.FirebaseAuthRepository
 import app.kinjar.data.auth.GoogleAccount
@@ -73,6 +74,20 @@ class FamilyRecoveryUiTest {
         assertTrue(vm.writes.state.value.failed)
     }
 
+    @Test fun `obsolete journal disappearing is not reported as a successful restore`() = runTest(dispatcher) {
+        val status = MutableStateFlow(SyncStatus())
+        doReturn(status).`when`(sync).status
+        db.syncSessionQueries.save("user", "family", "old", "member", "install", 1, "ACTIVE")
+        db.restoreJournalQueries.save("user", "family", "old", "target", "token", "RESTORE", "{}".toByteArray())
+        val vm = viewModel()
+        vm.state.first { it.journalPhase == "RESTORE" }
+        store.read { db.restoreJournalQueries.deleteAll() }
+        status.value = SyncStatus(SyncPhase.READY)
+        vm.state.first { it.journalPhase == null }
+        advanceUntilIdle()
+        assertNotEquals(R.string.fbs_restored, vm.state.value.notice)
+    }
+
     @Test fun `cancelling replacement runs store work off the caller thread`() = runTest(dispatcher) {
         val vm = viewModel()
         val caller = Thread.currentThread()
@@ -82,5 +97,47 @@ class FamilyRecoveryUiTest {
         vm.awaitIdle()
         assertFalse(vm.writes.state.value.failed)
         assertNotEquals(caller, worker.get())
+    }
+
+    @Test fun `retained copies are deleted only for this account or this device`() = runTest(dispatcher) {
+        repo.setUp("Local", listOf(Account("cash", "Cash", Currency.RSD)))
+        store.restoreLocal(store.captureHistory(), store.currentDigest())
+        val local = db.syncDraftQueries.draftInfo("local").executeAsList().single().id
+        val mine = store.retainHistory(store.captureHistory(), "user", "family")
+        db.syncDraftQueries.save("other-copy", "other", "other-family", 0, ByteArray(0))
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(setOf(local, mine), vm.state.value.copies.map { it.id }.toSet())
+
+        vm.deleteCopy("other-copy")
+        vm.awaitIdle()
+        assertTrue(vm.writes.state.value.failed)
+        assertEquals(listOf("other-copy"), db.syncDraftQueries.draftInfo("other").executeAsList().map { it.id })
+
+        vm.deleteCopy(mine)
+        vm.awaitIdle()
+        assertEquals(listOf(local), vm.state.value.copies.map { it.id })
+        vm.deleteCopy(local)
+        vm.awaitIdle()
+        assertFalse(vm.writes.state.value.failed)
+        assertTrue(vm.state.value.copies.isEmpty())
+        assertTrue(db.historySpoolQueries.unreferenced().executeAsList().isEmpty())
+        assertEquals(listOf("other-copy"), db.syncDraftQueries.draftInfo("other").executeAsList().map { it.id })
+    }
+
+    @Test fun `cloud session matches only while this account keeps its member id`() = runTest(dispatcher) {
+        db.syncSessionQueries.save("user", "family", "dataset", "member", "install", 1, "ACTIVE")
+        val family = FamilyInfo("family", "user", listOf("user"), mapOf("user" to "rejoined"), "dataset", 1, "ACTIVE")
+        doReturn(FamilyMembership("family", "rejoined", false)).`when`(families).membership()
+        doReturn(family).`when`(families).info("family")
+        doReturn(emptyList<FamilyDevice>()).`when`(families).devices("family")
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.sessionMatchesCloud)
+
+        doReturn(family.copy(members = mapOf("user" to "member"))).`when`(families).info("family")
+        vm.refresh()
+        vm.awaitIdle()
+        assertTrue(vm.state.value.sessionMatchesCloud)
     }
 }

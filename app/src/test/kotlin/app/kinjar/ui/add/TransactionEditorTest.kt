@@ -21,6 +21,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import app.kinjar.R
 import app.kinjar.data.BudgetRepository
 import app.kinjar.data.EventStore
 import app.kinjar.data.FixedClock
@@ -86,6 +87,92 @@ class TransactionEditorTest {
         assertEquals(tx("t").copy(money = rsd("1005"), accountId = "card", date = clock.today().plusDays(3), merchant = "Market"), saved)
         assertTrue(remembered.isEmpty())
         assertEquals(rsd("0"), repo.home.first().balances["card"])
+    }
+
+    @Test fun `a form filled before another phone corrected the entry is refused and saves only after reloading`() = runTest(dispatcher) {
+        seed()
+        val original = tx("t")
+        repo.add(original)
+        val vm = editor("t")
+        val corrected = original.copy(money = rsd("200"))
+        repo.edit(corrected)
+        vm.setMerchant("Market")
+        vm.save()
+        val stale = vm.state.first { it.stale }
+        assertFalse(stale.saving)
+        assertFalse(stale.canSave)
+        assertEquals(R.string.audit_edit_stale, stale.saveError)
+        vm.save()
+        vm.delete()
+        advanceUntilIdle()
+        assertEquals(listOf(corrected), repo.transactions.first())
+
+        vm.reload()
+        val fresh = vm.state.first { !it.stale && !it.loading }
+        assertEquals("200", fresh.amount.text)
+        assertEquals("Shop", fresh.merchant)
+        assertNull(fresh.saveError)
+        vm.setMerchant("Market")
+        vm.save()
+        vm.state.first { it.saved }
+        assertEquals(listOf(corrected.copy(merchant = "Market")), repo.transactions.first())
+    }
+
+    @Test fun `deleting from a form older than the stored entry keeps the entry`() = runTest(dispatcher) {
+        seed()
+        repo.add(tx("t"))
+        val vm = editor("t")
+        repo.edit(tx("t").copy(merchant = "Elsewhere"))
+        vm.delete()
+        assertTrue(vm.state.first { !it.saving }.stale)
+        assertEquals(listOf(tx("t").copy(merchant = "Elsewhere")), repo.transactions.first())
+    }
+
+    @Test fun `a correction draft restored over a newer stored version stays stale`() = runTest(dispatcher) {
+        seed()
+        repo.add(tx("t"))
+        val handle = SavedStateHandle(mapOf("id" to "t"))
+        editor("t", handle).setMerchant("Draft")
+        advanceUntilIdle()
+        repo.edit(tx("t").copy(money = rsd("300")))
+        val restored = editor("t", handle)
+        assertTrue(restored.state.value.stale)
+        assertEquals("Draft", restored.state.value.merchant)
+        assertFalse(restored.state.value.canSave)
+        advanceUntilIdle()
+        assertTrue(editor("t", handle).state.value.stale)
+
+        restored.reload()
+        assertEquals("300", restored.state.first { !it.stale && !it.loading }.amount.text)
+        advanceUntilIdle()
+        assertFalse(editor("t", handle).state.value.stale)
+    }
+
+    @Test fun `an untouched editor opens the latest version after recreation`() = runTest(dispatcher) {
+        seed()
+        repo.add(tx("t"))
+        val handle = SavedStateHandle(mapOf("id" to "t"))
+        editor("t", handle)
+        advanceUntilIdle()
+        assertFalse(handle.contains("draft.amount"))
+        repo.edit(tx("t").copy(merchant = "Latest"))
+        val vm = editor("t", handle)
+        assertFalse(vm.state.value.stale)
+        assertEquals("Latest", vm.state.value.merchant)
+    }
+
+    @Test fun `a legacy correction draft without its base must reload before writing`() = runTest(dispatcher) {
+        seed()
+        repo.add(tx("t"))
+        val handle = SavedStateHandle(mapOf("id" to "t", "draft.amount" to "50", "draft.merchant" to "Old draft"))
+        val vm = editor("t", handle)
+        assertTrue(vm.state.value.stale)
+        vm.save()
+        vm.delete()
+        advanceUntilIdle()
+        assertEquals(listOf(tx("t")), repo.transactions.first())
+        vm.reload()
+        assertFalse(vm.state.first { !it.loading }.stale)
     }
 
     @Test fun `ordinary entries can change type and transfers need an active destination`() = runTest(dispatcher) {

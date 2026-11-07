@@ -67,6 +67,8 @@ data class RecentTx(val transaction: Transaction, val categoryName: String?, val
 class DuplicateReceipt : IllegalStateException("Receipt already saved")
 class InvalidReceiptAccount : IllegalStateException("Receipt requires an active RSD account")
 class InvalidReceiptCategory : IllegalStateException("Category no longer available")
+/** The stored transaction no longer matches the one the editor showed; saving would overwrite a change it never saw. */
+class StaleTransaction : IllegalStateException("Transaction changed; reload it")
 
 class BudgetRepository(
     private val db: KinjarDb,
@@ -244,12 +246,17 @@ class BudgetRepository(
         runCatching { loans.requireUnlinked(id) }.isFailure
     }
 
-    /** Corrections keep the identity a receipt or paid bill is matched by, so neither can be recorded twice. */
-    suspend fun edit(t: Transaction) {
+    /**
+     * Corrections keep the identity a receipt or paid bill is matched by, so neither can be recorded twice.
+     * With [expected], the write is refused with [StaleTransaction] unless the stored row still equals it.
+     */
+    suspend fun edit(t: Transaction, expected: Transaction? = null) {
         store.append(TransactionEdited(t)) {
             loans.requireUnlinked(t.id)
             require(t.type != TransactionType.LOAN_RECEIPT)
-            val previous = requireNotNull(db.txQueries.all().executeAsList().firstOrNull { it.id == t.id }?.toDomain()) { "Transaction no longer exists" }
+            val previous = storedTransaction(t.id)
+            if (expected != null) requireUnchanged(expected, previous)
+            requireNotNull(previous) { "Transaction no longer exists" }
             require(previous.type != TransactionType.LOAN_RECEIPT && previous.source == t.source && previous.paidBy == t.paidBy)
             if (t.source != TransactionSource.MANUAL) require(t.type == TransactionType.EXPENSE)
             if (t.source == TransactionSource.RECEIPT) require(t.money.currency == Currency.RSD)
@@ -270,7 +277,21 @@ class BudgetRepository(
             }
         }
     }
-    suspend fun delete(id: String) { store.append(TransactionDeleted(id)) { loans.requireUnlinked(id) } }
+
+    /** With [expected], the delete is refused with [StaleTransaction] unless the stored row still equals it. */
+    suspend fun delete(id: String, expected: Transaction? = null) {
+        require(expected == null || expected.id == id)
+        store.append(TransactionDeleted(id)) {
+            loans.requireUnlinked(id)
+            if (expected != null) requireUnchanged(expected, storedTransaction(id))
+        }
+    }
+
+    private fun storedTransaction(id: String): Transaction? = db.txQueries.all().executeAsList().firstOrNull { it.id == id }?.toDomain()
+
+    private fun requireUnchanged(expected: Transaction, stored: Transaction?) {
+        if (stored != expected) throw StaleTransaction()
+    }
 
     private fun GoalRow.toDomain() = Goal(id, name, Money.of(target, Currency.valueOf(currency)), Money.of(monthly, Currency.valueOf(currency)), archived == 1L)
     private fun RuleRow.toDomain() = RecurringRule(

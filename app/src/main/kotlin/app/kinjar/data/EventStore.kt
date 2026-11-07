@@ -271,6 +271,20 @@ class EventStore(
         stored.also { live += it.id }
     }
 
+    /** Keeps finished [history] as a retained copy of [uid]; the spool is shared, not copied. Returns the copy id. */
+    fun retainHistory(history: StoredHistory, uid: String, familyId: String): String = read {
+        stored(history)
+        newId().also { db.syncDraftQueries.saveStored(it, uid, familyId, clock.now().toEpochMilli(), history.id) }
+    }
+
+    /** Deletes retained copy [id] of [uid] only; its spool goes too unless the baseline, recovery or another copy uses it. */
+    fun deleteDraft(uid: String, id: String): Boolean = read {
+        val row = db.syncDraftQueries.draftHistory(uid, id).executeAsOneOrNull() ?: return@read false
+        db.syncDraftQueries.deleteDraft(uid, id)
+        dropIfUnused(row.history_id)
+        true
+    }
+
     /** On success [history] is consumed: its spool is deleted unless something else still references it. */
     fun restoreLocal(history: StoredHistory, expectedLocalDigest: String) = read {
         require(db.restoreJournalQueries.journalInfo().executeAsOneOrNull() == null) { "Cancel pending recovery before restoring a file" }
@@ -324,9 +338,10 @@ class EventStore(
                 quarantine: List<app.kinjar.domain.QuarantinedOperation> = emptyList()) = read {
         val session = requireNotNull(db.syncSessionQueries.current().executeAsOneOrNull())
         check(session.uid == uid && session.family_id == familyId && session.dataset_id == datasetId && session.status == "ACTIVE")
-        synced.receive(operations, familyId, datasetId)
+        val inserted = synced.receive(operations, familyId, datasetId)
         quarantine.forEach(synced::quarantine)
-        synced.rebuild()
+        // Overlapping pages mostly repeat stored operations; only a newly stored one can change projections.
+        if (inserted) synced.rebuild()
         db.syncCheckpointQueries.save(datasetId, checkpointSeconds, checkpointNanos, checkpointId)
     }
 

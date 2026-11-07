@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audit_restore_superseded">This restore is no longer current. Finances on this phone are unchanged and the backup is kept in Retained copies.</string>
+    <string name="audit_cleanup_pending">Previous restore cleanup is still running in the background. Try restoring again after it finishes.</string>
+    <string name="audit_admission_required">Cloud workspace creation is limited to approved accounts. Ask the project administrator for access, or join an existing family by invitation. Local finances are unchanged.</string>
+    <string name="audit_installation_claimed">This installation belongs to another account in this family. Sign in with that account to continue syncing. Pending changes remain on this phone.</string>
+    <string name="audit_invitation_invalid">This invitation is no longer valid. Ask a current family administrator for a new invitation.</string>
+</resources>

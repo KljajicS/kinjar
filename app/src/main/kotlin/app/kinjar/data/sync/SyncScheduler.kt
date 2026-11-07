@@ -6,4 +6,5 @@ import javax.inject.Inject
 
 class SyncScheduler @Inject constructor(@ApplicationContext private val context: Context) {
     fun schedule() = SyncWorker.schedule(context)
+    fun continueCleanup() = SyncWorker.continueCleanup(context)
 }

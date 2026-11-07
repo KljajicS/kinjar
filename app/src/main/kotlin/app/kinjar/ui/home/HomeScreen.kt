@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
+import app.kinjar.ui.conflict.ConflictCheckFailed
 import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.data.RecentTx
 import app.kinjar.data.StarterCategories
@@ -110,6 +111,7 @@ fun HomeScreen(
             }
         }
         if (failed) item { LoadFailed(vm::retry) }
+        if (held.failed) item { ConflictCheckFailed(R.string.audit_conflict_list_failed, conflicts::retry) }
         item { SavingsCard(s, locale) }
         item { MonthSection(s, locale) }
         s.topGoal?.let { goal -> item { HomeGoal(goal) { onGoal(goal.goal.id) } } }

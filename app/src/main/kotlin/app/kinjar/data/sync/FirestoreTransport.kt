@@ -36,6 +36,9 @@ data class CloudPage(val operations: List<ByteArray>, val cursor: CloudCursor?, 
 
 class SyncCapacityReached : IllegalStateException("Cloud capacity reached; changes remain on this phone")
 
+/** Another account in this family owns this installation identity, so its operation IDs cannot be used here. */
+class InstallationClaimed : IllegalStateException("This phone is registered to another account in this family")
+
 @Singleton
 class FirestoreTransport @Inject constructor(
     private val services: FirebaseServices,
@@ -151,16 +154,21 @@ class FirestoreTransport @Inject constructor(
         }.await()
     }
 
-    suspend fun cleanup(uid: String, fid: String) {
+    /**
+     * Deletes at most [maxDeletes] retired operation or chunk documents, one counted transaction each.
+     * Returns true once the retired dataset is gone, false while more deletion remains.
+     */
+    suspend fun cleanup(uid: String, fid: String, maxDeletes: Int = 32): Boolean {
+        require(maxDeletes > 0)
         checkUser(uid)
         val root = family(fid)
         val f = root.get(Source.SERVER).await()
         require(f.getString("status") == "ACTIVE")
         val other = requireNotNull(f.getString("otherDataset"))
-        if (other.isEmpty()) return
+        if (other.isEmpty()) return true
         require(other != f.getString("activeDataset"))
         val stateRef = dataset(fid, other)
-        deleteContents(uid, stateRef)
+        if (!deleteContents(uid, stateRef, maxDeletes)) return false
         db.runTransaction { tx ->
             checkUser(uid)
             val current = tx.get(root)
@@ -173,15 +181,20 @@ class FirestoreTransport @Inject constructor(
             }
             tx.update(root, mapOf("otherDataset" to "", "action" to "cleaned"))
         }.await()
+        return true
     }
 
-    private suspend fun deleteContents(uid: String, stateRef: com.google.firebase.firestore.DocumentReference) {
+    /** True when no content remains; false after [limit] deletions, even if those emptied the dataset. */
+    private suspend fun deleteContents(uid: String, stateRef: com.google.firebase.firestore.DocumentReference, limit: Int = Int.MAX_VALUE): Boolean {
+        var remaining = limit
         for (collection in listOf("operations", "chunks")) {
             while (true) {
+                if (remaining == 0) return false
                 checkUser(uid)
-                val documents = stateRef.collection(collection).limit(50).get(Source.SERVER).await().documents
+                val documents = stateRef.collection(collection).limit(minOf(50, remaining).toLong()).get(Source.SERVER).await().documents
                 if (documents.isEmpty()) break
                 documents.forEach { document ->
+                    remaining--
                     db.runTransaction { tx ->
                         checkUser(uid)
                         val content = tx.get(document.reference)
@@ -198,6 +211,7 @@ class FirestoreTransport @Inject constructor(
                 }
             }
         }
+        return true
     }
 
     suspend fun deleteFamily(uid: String, fid: String) {
@@ -214,6 +228,15 @@ class FirestoreTransport @Inject constructor(
                 val state = tx.get(ref)
                 if (state.exists()) { requireEmpty(state); tx.delete(ref) }
             }.await()
+        }
+        val claims = root.collection("claims")
+        while (true) {
+            checkUser(uid)
+            val documents = claims.limit(50).get(Source.SERVER).await().documents
+            if (documents.isEmpty()) break
+            val batch = db.batch()
+            documents.forEach { batch.delete(it.reference) }
+            batch.commit().await()
         }
         for ((index, collection) in listOf("invites", "installs").withIndex()) {
             val current = root.get(Source.SERVER).await()
@@ -277,14 +300,19 @@ class FirestoreTransport @Inject constructor(
 
     suspend fun register(uid: String, fid: String, installId: String): String {
         checkUser(uid)
+        val refs = (0..5).map { family(fid).collection("installs").document(it.toString()) }
+        val claim = family(fid).collection("claims").document(installId)
         return db.runTransaction { tx ->
             checkUser(uid)
-            val refs = (0..5).map { family(fid).collection("installs").document(it.toString()) }
             val saved = refs.map(tx::get)
+            val owner = tx.get(claim)
+            if (owner.exists() && owner.getString("uid") != uid) throw InstallationClaimed()
             val existing = saved.indexOfFirst { it.getString("installId") == installId && it.getString("uid") == uid }
+            val empty = saved.indexOfFirst { !it.exists() }
+            check(existing >= 0 || empty >= 0) { "Remove an old installation before connecting another phone" }
+            val slot = refs[if (existing >= 0) existing else empty].id
+            if (!owner.exists()) tx.set(claim, mapOf("uid" to uid, "installSlot" to slot, "createdAt" to FieldValue.serverTimestamp()))
             if (existing >= 0) refs[existing].id else {
-                val empty = saved.indexOfFirst { !it.exists() }
-                check(empty >= 0) { "Remove an old installation before connecting another phone" }
                 tx.set(refs[empty], mapOf("uid" to uid, "installId" to installId, "name" to android.os.Build.MODEL.take(80), "createdAt" to FieldValue.serverTimestamp()))
                 refs[empty].id
             }
@@ -378,15 +406,19 @@ class FirestoreTransport @Inject constructor(
             payloadSize + REFERENCE_COST * (operation.parents.size.toLong() + operation.rejected.size)
 
         /**
-         * Decodes a downloaded payload only after its stored cost is plausible, then requires the exact cost it was charged.
-         * Documents without a cost predate the budget and can only hold version 1 operations.
+         * Decodes a downloaded payload only after its stored cost is plausible, within the reference count that cost paid for,
+         * then requires the exact cost it was charged. Documents without a cost predate the budget and can only hold
+         * version 1 operations, which carry at most [LEGACY_REFERENCES] references.
          */
         fun checkedOperation(payload: ByteArray, claimedCost: Any?): SyncOperation {
             require(claimedCost == null || (claimedCost is Long && claimedCost in payload.size..MAX_DAILY_BYTES)) { "Invalid operation cost" }
-            val operation = OperationCodec.decode(payload)
+            val references = if (claimedCost == null) LEGACY_REFERENCES else ((claimedCost as Long) - payload.size) / REFERENCE_COST
+            val operation = OperationCodec.decode(payload, references)
             require(if (claimedCost == null) operation.version == 1 else claimedCost == operationCost(operation, payload.size)) { "Operation cost mismatch" }
             return operation
         }
+
+        private const val LEGACY_REFERENCES = 2_000L
     }
 }
 

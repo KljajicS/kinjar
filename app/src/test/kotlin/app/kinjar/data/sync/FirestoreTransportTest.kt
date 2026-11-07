@@ -107,4 +107,18 @@ class FirestoreTransportTest {
         assertEquals(1, FirestoreTransport.checkedOperation(legacy, null).version)
         assertEquals(1, FirestoreTransport.checkedOperation(legacy, legacy.size + 32L).version)
     }
+
+    @Test fun `underpaid reference expansions fail within the paid budget and legitimate missing parents still decode`() {
+        val hostile = OperationCodec.encode(rejecting(100_000))
+        val exact = hostile.size + 32L * 100_000
+        for (claimed in listOf<Any?>(hostile.size.toLong(), exact - 32, null)) {
+            val error = runCatching { FirestoreTransport.checkedOperation(hostile, claimed) }.exceptionOrNull()
+            assertTrue("$claimed", error is IllegalArgumentException && error !is app.kinjar.domain.UnsupportedSyncVersion)
+        }
+        assertEquals(100_000, FirestoreTransport.checkedOperation(hostile, exact).rejected.size)
+        val orphan = SyncOperation(familyId = "family", datasetId = "dataset", authorUid = "user", installId = "device", sequence = 9,
+            parents = (1..1_001).mapTo(mutableSetOf()) { "never-downloaded:$it" }, resources = emptyMap(), events = emptyList(), rejected = setOf("peer:1"))
+        val bytes = OperationCodec.encode(orphan)
+        assertEquals(orphan, FirestoreTransport.checkedOperation(bytes, FirestoreTransport.operationCost(orphan, bytes.size)))
+    }
 }

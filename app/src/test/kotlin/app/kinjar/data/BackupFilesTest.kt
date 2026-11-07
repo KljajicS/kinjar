@@ -8,6 +8,7 @@ import app.kinjar.data.backup.BackupCodec
 import app.kinjar.data.backup.BackupFiles
 import app.kinjar.domain.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -119,6 +120,22 @@ class BackupFilesTest {
         documentSize(4096)
         assertTrue(failure(history, "four long random words".toCharArray()) is IOException)
         assertTrue(deleted.isEmpty())
+    }
+
+    @Test fun `cancellation after a backup was read discards its history and wipes the password`() = runTest {
+        documentSize(0)
+        val bytes = ByteArrayOutputStream().also(::output)
+        val history = history()
+        files.write(uri, history, "four long random words".toCharArray())
+        store.discardHistory(history.id)
+        val password = "four long random words".toCharArray()
+        lateinit var job: Job
+        `when`(resolver.openInputStream(uri)).thenAnswer { job.cancel(); ByteArrayInputStream(bytes.toByteArray()) }
+        job = launch { files.read(uri, password) }
+        job.join()
+        assertTrue(job.isCancelled)
+        assertTrue(db.historySpoolQueries.unreferenced().executeAsList().isEmpty())
+        assertTrue(password.all { it == '\u0000' })
     }
 
     @Test fun `unsupported deletion keeps the original error with the cleanup failure suppressed`() = runTest {

@@ -10,6 +10,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -63,12 +66,34 @@ class SyncCoordinatorTest {
         doReturn(true).`when`(user).isEmailVerified
         doReturn("user").`when`(user).uid
         doAnswer { membership }.`when`(families).membership()
+        doReturn(true).`when`(families).admitted()
         doAnswer { call -> if (call.getArgument<String>(0) == "target") target else family }.`when`(families).info(anyString())
         doReturn("0").`when`(transport).register(anyString(), anyString(), anyString())
+        doReturn(true).`when`(transport).cleanup(anyString(), anyString(), anyInt())
         doReturn(CloudPage(emptyList(), null, false)).`when`(transport).download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
     }
 
     @After fun close() = driver.close()
+
+    @Test fun `unapproved workspace creation leaves local editing available without a journal`() = runTest {
+        doReturn(false).`when`(families).admitted()
+        val before = store.snapshot()
+        assertTrue(runCatching { coordinator().createFamily("member") }.exceptionOrNull() is WorkspaceAdmissionRequired)
+        assertNull(journal())
+        assertEquals(before, store.snapshot())
+        verify(families, never()).create(anyString(), anyString(), anyString())
+        verifyNoInteractions(transport)
+        store.append(AccountCreated(Account("later", "Later", Currency.RSD)))
+    }
+
+    @Test fun `creation claims the installation before exposing bootstrap history`() = runTest {
+        doThrow(InstallationClaimed()).`when`(transport).register(anyString(), anyString(), anyString())
+        val before = store.snapshot()
+        assertTrue(runCatching { coordinator().createFamily("member") }.exceptionOrNull() is InstallationClaimed)
+        verify(transport, never()).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        assertEquals("CREATE", journal()?.phase)
+        assertEquals(before, store.snapshot())
+    }
 
     @Test fun `failed initial creation can be abandoned offline without losing local finances`() = runTest {
         doThrow(IllegalStateException("Public capacity reached")).`when`(families).create(anyString(), anyString(), anyString())
@@ -188,10 +213,54 @@ class SyncCoordinatorTest {
         assertEquals(SyncPhase.CLEANUP_REQUIRED, sync.status.value.phase)
         assertEquals(family.activeDataset, db.syncSessionQueries.current().executeAsOne().dataset_id)
         assertEquals(1, db.syncDraftQueries.all("user").executeAsList().size)
-        doAnswer { family = family.copy(otherDataset = ""); Unit }.`when`(transport).cleanup("user", "family")
+        doAnswer { family = family.copy(otherDataset = ""); true }.`when`(transport).cleanup("user", "family")
         sync.synchronize()
         assertEquals(SyncPhase.READY, sync.status.value.phase)
         assertEquals(1, db.syncDraftQueries.all("user").executeAsList().size)
+    }
+
+    @Test fun `unfinished cleanup releases the lock between batches and schedules its continuation`() = runTest {
+        enroll()
+        family = family.copy(otherDataset = "retired")
+        var batches = 0
+        doAnswer { if (++batches == 3) { family = family.copy(otherDataset = ""); true } else false }
+            .`when`(transport).cleanup("user", "family")
+        val sync = coordinator()
+        sync.synchronize()
+        assertEquals(1, batches)
+        assertEquals(SyncPhase.CLEANUP_REQUIRED, sync.status.value.phase)
+        verify(scheduler).continueCleanup()
+        assertTrue(sync.continueCleanup())
+        assertFalse(sync.continueCleanup())
+        assertEquals(3, batches)
+        assertEquals(SyncPhase.READY, sync.status.value.phase)
+        assertFalse(sync.continueCleanup())
+        assertEquals(3, batches)
+    }
+
+    @Test fun `background cleanup failures remain cleanup status and propagate for worker retry`() = runTest {
+        enroll()
+        family = family.copy(otherDataset = "retired")
+        val failure = java.io.IOException("Offline")
+        doAnswer { throw failure }.`when`(transport).cleanup("user", "family")
+        val sync = coordinator()
+        assertTrue(runCatching { sync.continueCleanup() }.exceptionOrNull() is java.io.IOException)
+        assertEquals(SyncPhase.CLEANUP_REQUIRED, sync.status.value.phase)
+        assertTrue(runCatching { sync.cleanupFamily("family") }.exceptionOrNull() is java.io.IOException)
+        assertEquals(SyncPhase.CLEANUP_REQUIRED, sync.status.value.phase)
+        assertEquals("dataset", db.syncSessionQueries.current().executeAsOne().dataset_id)
+    }
+
+    @Test fun `restore waits for unfinished cleanup without writing a journal`() = runTest {
+        enroll()
+        family = family.copy(otherDataset = "retired")
+        doReturn(false).`when`(transport).cleanup("user", "family")
+        val sync = coordinator()
+        assertTrue(runCatching { sync.restoreFamily(staged(store.snapshot()), current()) }.exceptionOrNull() is CloudCleanupPending)
+        assertEquals(SyncPhase.CLEANUP_REQUIRED, sync.status.value.phase)
+        assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
+        verify(scheduler).continueCleanup()
+        verify(transport, never()).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
     }
 
     @Test fun `pending cleanup failure cannot start a second restore journal`() = runTest {
@@ -302,6 +371,16 @@ class SyncCoordinatorTest {
         assertEquals(operations.map(HistoryCodec::digest), db.syncOperationQueries.all().executeAsList().map { HistoryCodec.digest(it.payload) })
         assertEquals("dataset", db.syncSessionQueries.current().executeAsOne().dataset_id)
         assertTrue(db.syncConflictQueries.all().executeAsList().isEmpty())
+    }
+
+    @Test fun `replacement registers this installation even with no pending changes`() = runTest {
+        doReturn(source(store.snapshot())).`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        val sync = coordinator()
+        sync.stageRecovery()
+        sync.confirmReplacement()
+        verify(transport).register("user", "family", install)
+        verify(transport, never()).upload(anyString(), anyString(), anyString(), anyString(), anyBytes())
+        assertEquals(SyncPhase.READY, sync.status.value.phase)
     }
 
     private fun targetHistory() = store.snapshot().let { it.copy(baseline = it.baseline.filterNot { record -> record.event is AccountCreated }) }
@@ -491,6 +570,17 @@ class SyncCoordinatorTest {
         assertTrue(runCatching { coordinator().archivedHistory("family") }.isFailure)
     }
 
+    @Test fun `cancelled archive export releases history completed before dispatcher return`() = runTest {
+        family = family.copy(status = "ARCHIVED")
+        val archive = source(store.snapshot())
+        val job = Job()
+        doAnswer { job.cancel(); archive }.`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        val failure = runCatching { withContext(job) { coordinator().archivedHistory("family") } }.exceptionOrNull()
+        assertTrue(failure is CancellationException)
+        assertTrue(db.historySpoolQueries.unreferenced().executeAsList().isEmpty())
+        assertEquals(1, accounts())
+    }
+
     private fun legacyEnrollment(history: FamilyHistory) =
         """{"memberId":"member","localDigest":"${digest()}","history":${HistoryCodec.encode(history).toString(Charsets.UTF_8)}}""".toByteArray()
 
@@ -590,5 +680,116 @@ class SyncCoordinatorTest {
             .download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
         coordinator().confirmReplacement()
         assertEquals(0, accounts())
+    }
+
+    private fun accountIds() = db.accountQueries.active().executeAsList().map { it.id }.toSet()
+    private fun pendingCount() = db.syncOutboxQueries.pending("family", "dataset").executeAsList().size
+    private fun drafts() = db.syncDraftQueries.draftInfo("user").executeAsList().map { records(requireNotNull(store.draftHistory("user", it.id))) }
+    private fun holdsPending(records: List<HistoryRecord>) = records.filterIsInstance<HistoryRecord.Operation>().any { record ->
+        OperationCodec.decode(record.bytes()).events.any { (it.event as? AccountCreated)?.account?.id == "pending" }
+    }
+
+    /** A restore journal whose cloud restore never began, with one local edit still waiting for upload. */
+    private suspend fun interruptedRestore(): FamilyHistory {
+        enroll()
+        val backup = targetHistory()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        doThrow(IllegalStateException("Connection lost")).`when`(transport)
+            .beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
+        assertTrue(runCatching { coordinator().restoreFamily(staged(backup), current()) }.isFailure)
+        assertEquals("RESTORE", journal()?.phase)
+        return backup
+    }
+
+    @Test fun `admin demoted before cloud activation keeps local edits and the backup`() = runTest {
+        val backup = interruptedRestore()
+        family = family.copy(admins = listOf("owner"))
+        val sync = coordinator()
+        assertTrue(runCatching { sync.resumeRestore() }.exceptionOrNull() is RestoreSuperseded)
+        assertNull(journal())
+        assertEquals(listOf(backup.source().records().toList()), drafts())
+        assertEquals(setOf("account", "pending"), accountIds())
+        assertEquals("dataset", db.syncSessionQueries.current().executeAsOne().dataset_id)
+        assertEquals(SyncPhase.READY, sync.status.value.phase)
+        verify(transport, times(1)).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
+        verify(transport, never()).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        verify(transport, never()).cancelExpiredRestore(anyString(), anyString())
+        store.append(AccountCreated(Account("later", "Later", Currency.RSD)))
+        assertEquals(setOf("account", "pending", "later"), accountIds())
+    }
+
+    @Test fun `admin demoted after lost cloud activation still adopts the restored dataset`() = runTest {
+        enroll()
+        val backup = targetHistory()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        doAnswer { call -> family = family.copy(activeDataset = call.getArgument(4), generation = 2, otherDataset = "dataset"); Unit }
+            .`when`(transport).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
+        doThrow(IllegalStateException("Response lost after activation")).`when`(transport)
+            .initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        assertTrue(runCatching { coordinator().restoreFamily(staged(backup), current()) }.isFailure)
+        family = family.copy(admins = listOf("owner"))
+        doReturn(source(backup)).`when`(transport).downloadBaseline("user", "family", family.activeDataset, true)
+        coordinator().synchronize()
+        assertNull(journal())
+        assertEquals(family.activeDataset, db.syncSessionQueries.current().executeAsOne().dataset_id)
+        assertTrue(accountIds().isEmpty())
+        assertTrue(holdsPending(drafts().single()))
+        verify(transport, times(1)).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
+        verify(transport, never()).cleanup(anyString(), anyString(), anyInt())
+    }
+
+    @Test fun `restore superseded by a third dataset keeps both histories and offers replacement`() = runTest {
+        val backup = interruptedRestore()
+        family = family.copy(activeDataset = "third", generation = 2, otherDataset = "dataset")
+        val sync = coordinator()
+        sync.synchronize()
+        assertNull(journal())
+        assertEquals(SyncPhase.REPLACEMENT_REQUIRED, sync.status.value.phase)
+        assertEquals(listOf(backup.source().records().toList()), drafts())
+        assertEquals(setOf("account", "pending"), accountIds())
+        assertEquals(1, pendingCount())
+        verify(transport, never()).upload(anyString(), anyString(), anyString(), anyString(), anyBytes())
+        verify(transport, times(1)).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
+        doReturn(source(backup)).`when`(transport).downloadBaseline("user", "family", "third", true)
+        sync.stageRecovery()
+        sync.confirmReplacement()
+        assertEquals("third", db.syncSessionQueries.current().executeAsOne().dataset_id)
+        val retained = drafts()
+        assertEquals(2, retained.size)
+        assertTrue(backup.source().records().toList() in retained)
+        assertTrue(retained.any(::holdsPending))
+    }
+
+    @Test fun `cancelling an obsolete restore never cancels another admin restore`() = runTest {
+        val backup = interruptedRestore()
+        family = family.copy(status = "RESTORING", otherDataset = "theirs", generation = 2)
+        val sync = coordinator()
+        sync.cancelRestore("family")
+        verify(transport, never()).cancelExpiredRestore(anyString(), anyString())
+        assertNull(journal())
+        assertEquals(listOf(backup.source().records().toList()), drafts())
+        assertEquals(setOf("account", "pending"), accountIds())
+        assertEquals(1, pendingCount())
+        assertEquals(SyncPhase.REPLACEMENT_REQUIRED, sync.status.value.phase)
+    }
+
+    @Test fun `rejoined member identity waits for replacement keeping pending edits`() = runTest {
+        enroll()
+        val cloud = targetHistory()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        membership = FamilyMembership("family", "rejoined", false)
+        family = family.copy(members = mapOf("user" to "rejoined"))
+        val sync = coordinator()
+        sync.synchronize()
+        assertEquals(SyncPhase.REPLACEMENT_REQUIRED, sync.status.value.phase)
+        assertEquals(1, pendingCount())
+        verify(transport, never()).download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+        verify(transport, never()).upload(anyString(), anyString(), anyString(), anyString(), anyBytes())
+        doReturn(source(cloud)).`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        sync.stageRecovery()
+        sync.confirmReplacement()
+        assertEquals("rejoined", db.syncSessionQueries.current().executeAsOne().member_id)
+        assertTrue(holdsPending(drafts().single()))
+        assertEquals(SyncPhase.READY, sync.status.value.phase)
     }
 }

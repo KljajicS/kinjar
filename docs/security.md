@@ -31,11 +31,15 @@ App lock is an access gate for the user interface. It is not encryption.
 
 Google sign-in identifies a family member. Firestore rules restrict access to active members and administrator actions to administrators. A Google account compromise can expose that member's family data. Cloud data is encrypted in transit and at rest by the provider, but is not end-to-end encrypted. Google and authorized project administrators can read it.
 
+Creating a cloud workspace requires an `admission/{uid}` document with `enabled: true`, written only by the project owner with administrator credentials. Clients can read their own entry and can never write one. Other Google accounts can sign in but cannot create workspaces or consume admission slots. Joining by invitation does not need admission: a current administrator of that family vouches for the invitee. An invitation stops working as soon as its inviter is no longer an administrator; removing or demoting an administrator also cancels their pending invitations.
+
+Each installation ID is claimed permanently, per family, by the first account that registers it. Operation IDs are derived from installation IDs, so rules refuse uploads and device registrations that use an installation ID claimed by another account. Claims survive device and member removal and are deleted only with the family.
+
 SQLDelight stores local finances and pending operations. Firestore uses memory-only caching. Signing out pauses cloud access; it does not erase the local financial copy. App lock remains optional. Confirmed online removal clears that family's local data; an offline phone or exported copy cannot be remotely erased. Permission errors alone never trigger deletion.
 
 Creator-authorized family deletion first removes member access, then deletes remote content. Cleanup runs in the client and can resume after interruption. Closing every client can leave a deletion unfinished; the project owner must finish abandoned cleanup. Removing a device slot only frees capacity: an authorized member can connect that phone again.
 
-Release builds use Play Integrity App Check. Debug builds use the debug provider and must never be distributed as production releases. Enforcement requires verification with the actual signed sideloaded APK; see [setup](firebase-sync.md). App Check supplements membership rules and does not prevent every form of quota abuse.
+Release builds use Play Integrity App Check. Debug builds use the debug provider and must never be distributed as production releases. Enforcement requires verification with the actual signed sideloaded APK; see [setup](firebase-sync.md). App Check supplements admission and membership rules and does not prevent every form of quota abuse, such as repeated denied requests from any signed-in account.
 
 ## Backup files
 

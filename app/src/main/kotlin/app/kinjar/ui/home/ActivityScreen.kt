@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
+import app.kinjar.ui.conflict.ConflictCheckFailed
 import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.domain.Transaction
 import app.kinjar.domain.TransactionType
@@ -128,6 +129,7 @@ fun ActivityScreen(onBack: () -> Unit, onEdit: (String) -> Unit, vm: HomeViewMod
                 }
             }
             if (failed) item { LoadFailedBanner(vm::retry) }
+            if (held.failed) item { ConflictCheckFailed(R.string.audit_conflict_list_failed, conflicts::retry) }
             if (rows.isEmpty()) item { Text(stringResource(R.string.activity_empty), style = BodyStyle, color = c.muted) }
             items(rows, key = { it.transaction.id }) {
                 RecentRow(it, s.accountNames, s.currentMemberId, s.today, onEdit, held = it.transaction.id in held.ids)

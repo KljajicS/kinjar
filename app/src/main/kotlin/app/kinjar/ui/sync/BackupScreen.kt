@@ -37,6 +37,7 @@ fun BackupScreen(onBack: () -> Unit, onContinue: () -> Unit, vm: FamilyViewModel
     var importUri by remember { mutableStateOf<Uri?>(null) }
     var copyId by remember { mutableStateOf<String?>(null) }
     var archiveId by remember { mutableStateOf<String?>(null) }
+    var deletingCopy by remember { mutableStateOf<String?>(null) }
     androidx.activity.compose.BackHandler(enabled = writes.busy) { }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream"), vm::export)
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -75,6 +76,7 @@ fun BackupScreen(onBack: () -> Unit, onContinue: () -> Unit, vm: FamilyViewModel
                 OutlinedBox(Modifier.fillMaxWidth()) {
                     Text(displayTime(copy.createdAt), style = BodyStyle, color = c.text)
                     TextButton(onClick = { beginExport(copy.id) }, enabled = !writes.busy) { Text(stringResource(R.string.fbs_export_copy)) }
+                    DangerLink(stringResource(R.string.audit_backup_delete_copy), enabled = !writes.busy) { deletingCopy = copy.id }
                 }
             }
         }
@@ -113,6 +115,12 @@ fun BackupScreen(onBack: () -> Unit, onContinue: () -> Unit, vm: FamilyViewModel
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), visualTransformation = PasswordVisualTransformation())
         if (password.isNotEmpty() && password.length < 12) Text(stringResource(R.string.fbs_password_short), color = c.orange)
         if (repeated.isNotEmpty() && password != repeated) Text(stringResource(R.string.fbs_password_mismatch), color = c.orange)
+    }
+    deletingCopy?.let { id ->
+        ConfirmDialog(stringResource(R.string.audit_backup_delete_copy_title), stringResource(R.string.audit_backup_delete_copy), writes.busy,
+            onConfirm = { deletingCopy = null; vm.deleteCopy(id) }, onDismiss = { deletingCopy = null }) {
+            Text(stringResource(R.string.audit_backup_delete_copy_warning), color = c.text)
+        }
     }
     state.backupDate?.let { date ->
         ConfirmDialog(stringResource(R.string.fbs_replace), stringResource(R.string.fbs_restore), writes.busy,

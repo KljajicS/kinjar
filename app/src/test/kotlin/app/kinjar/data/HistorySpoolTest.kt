@@ -150,6 +150,39 @@ class HistorySpoolTest {
         assertEquals("Changed", db.accountQueries.active().executeAsList().single().name)
     }
 
+    @Test fun `deleting one retained copy keeps other copies the baseline and recovery history`() = runTest {
+        store.append(account("a"))
+        store.activate("user", "family", "dataset", "member", 1, store.captureHistory(), store.currentDigest(), preserveDraft = false)
+        val prior = store.snapshot()
+        val baseline = store.history(requireNotNull(db.syncBaselineQueries.baselineHistory().executeAsOne().history_id))
+        val first = store.captureHistory()
+        val doomed = store.retainHistory(first, "user", "family")
+        val kept = store.retainHistory(store.captureHistory(), "user", "family")
+        val sharesBaseline = store.retainHistory(baseline, "user", "family")
+        val pending = store.captureHistory()
+        store.saveJournal("user", "family", "", "dataset", "token", "REPLACE", "{}".toByteArray(), pending)
+        val sharesJournal = store.retainHistory(pending, "user", "family")
+        val foreign = store.retainHistory(store.captureHistory(), "other", "family")
+        db.syncDraftQueries.save("legacy", "user", "family", 1, HistoryCodec.encode(prior))
+
+        assertFalse(store.deleteDraft("other", doomed))
+        assertTrue(store.deleteDraft("user", doomed))
+        assertFalse(exists(first.id))
+        assertFalse(store.deleteDraft("user", doomed))
+        assertTrue(store.deleteDraft("user", sharesBaseline))
+        assertTrue(store.deleteDraft("user", sharesJournal))
+        assertTrue(store.deleteDraft("user", "legacy"))
+
+        assertEquals(listOf(kept), db.syncDraftQueries.draftInfo("user").executeAsList().map { it.id })
+        assertEquals(prior.source().records().toList(), records(requireNotNull(store.draftHistory("user", kept))))
+        assertEquals(listOf(foreign), db.syncDraftQueries.draftInfo("other").executeAsList().map { it.id })
+        assertEquals(baseline, store.history(baseline.id))
+        assertEquals(pending, store.journalHistory())
+        assertTrue(spools().isEmpty())
+        store.rebuild()
+        assertEquals(prior, store.snapshot())
+    }
+
     @Test fun `local restore from a spool retains the replaced history and validation never commits`() = runTest {
         store.append(account("a"))
         val backup = store.captureHistory()

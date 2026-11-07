@@ -284,7 +284,7 @@ private fun ChangesCard(sum: InsightsSummary, categories: Map<String, Category>)
                     Text(categoryName(change.categoryId, categories), style = sans(14), color = c.text, maxLines = 1, modifier = Modifier.weight(1f))
                     Text("${formatAmount(change.delta, sign = true, locale = locale)} RSD", style = mono(14), color = c.text)
                     Text(
-                        change.percent?.let { if (it > 0) "+$it%" else "$it%" } ?: stringResource(R.string.insights_new_spending),
+                        change.percent?.let { (if (it.signum() > 0) "+" else "") + it.toPlainString() + "%" } ?: stringResource(R.string.insights_new_spending),
                         style = mono(13), color = tone,
                     )
                 }

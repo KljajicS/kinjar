@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audit_edit_stale">Ova transakcija je izmenjena na drugom telefonu. Ništa nije sačuvano. Učitaj najnoviju verziju, pa ponovi izmenu.</string>
+    <string name="audit_edit_reload">Učitaj najnoviju verziju</string>
+    <string name="audit_conflict_check_failed">Provera da li ova transakcija ima druge verzije nije uspela. Ostaje zaključana dok provera ne uspe.</string>
+    <string name="audit_conflict_list_failed">Provera transakcija za druge verzije nije uspela. Prikazane oznake možda nisu ažurne.</string>
+</resources>

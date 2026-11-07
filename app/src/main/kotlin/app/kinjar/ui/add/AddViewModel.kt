@@ -17,6 +17,9 @@ import app.kinjar.data.Clock
 import app.kinjar.data.DuplicateReceipt
 import app.kinjar.data.InvalidReceiptAccount
 import app.kinjar.data.InvalidReceiptCategory
+import app.kinjar.data.StaleTransaction
+import app.kinjar.data.DiagnosticOperation
+import app.kinjar.data.Diagnostics
 import app.kinjar.data.StarterCategories
 import app.kinjar.data.TransactionAccountStore
 import app.kinjar.domain.Account
@@ -25,6 +28,7 @@ import app.kinjar.domain.BillCalculator
 import app.kinjar.domain.billTxId
 import app.kinjar.domain.Category
 import app.kinjar.domain.Currency
+import app.kinjar.domain.EventJson
 import app.kinjar.domain.Money
 import app.kinjar.domain.Transaction
 import app.kinjar.domain.Receipt
@@ -60,12 +64,14 @@ data class AddState(
     val loadFailed: Boolean = false,
     val loading: Boolean = false,
     val today: LocalDate = date,
+    /** [editing] changed after this form was filled; only a reload, never a save or delete, is allowed. */
+    val stale: Boolean = false,
 ) {
     val typeLocked: Boolean get() = bill != null || receipt != null || (editing != null && editing.source != TransactionSource.MANUAL)
     val rsdOnly: Boolean get() = receipt != null || editing?.source == TransactionSource.RECEIPT
     val billInFuture: Boolean get() = editing?.source == TransactionSource.RECURRING && date > today
 
-    val canSave: Boolean get() = !loading && !loadFailed && !saving && !saved && !missing && !loanLocked && amount.value != null && accountId != null && error == null &&
+    val canSave: Boolean get() = !loading && !loadFailed && !saving && !saved && !missing && !loanLocked && !stale && amount.value != null && accountId != null && error == null &&
         accounts.any { it.id == accountId && !it.archived && it.currency == currency } &&
         (!rsdOnly || currency == Currency.RSD) && !billInFuture &&
         (type != TransactionType.EXPENSE || categoryId == null || categories.any { it.id == categoryId }) &&
@@ -113,7 +119,8 @@ class AddViewModel @Inject constructor(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Diagnostics.report(DiagnosticOperation.TRANSACTION_READ, e)
             _state.update { it.copy(loadFailed = true, loading = false) }
         }
     }
@@ -126,15 +133,7 @@ class AddViewModel @Inject constructor(
                 _state.update { it.copy(missing = true) }
                 return
             }
-            val locked = t.type == TransactionType.LOAN_RECEIPT || repo.isLoanLinked(t.id)
-            val savedReceipt = repo.receiptForTransaction(t.id)
-            _state.update {
-                it.copy(
-                    type = t.type, amount = AmountInput(t.money.amount.stripTrailingZeros().toPlainString()), currency = t.money.currency,
-                    categoryId = t.categoryId, accountId = t.accountId, toAccountId = t.toAccountId, date = t.date, merchant = t.merchant,
-                    editing = t, loanLocked = locked, savedReceipt = savedReceipt,
-                )
-            }
+            showEditing(t)
             return
         }
         val ruleId = savedState.get<String>("rule")
@@ -157,10 +156,43 @@ class AddViewModel @Inject constructor(
         }
     }
 
+    private suspend fun showEditing(t: Transaction) {
+        val locked = t.type == TransactionType.LOAN_RECEIPT || repo.isLoanLinked(t.id)
+        val savedReceipt = repo.receiptForTransaction(t.id)
+        _state.update {
+            it.copy(
+                type = t.type, amount = AmountInput(t.money.amount.stripTrailingZeros().toPlainString()), currency = t.money.currency,
+                categoryId = t.categoryId, accountId = t.accountId, toAccountId = t.toAccountId, date = t.date, merchant = t.merchant,
+                editing = t, loanLocked = locked, savedReceipt = savedReceipt, stale = false, saveError = null,
+            )
+        }
+    }
+
+    /** Replaces the form with the stored transaction, dropping what was typed over the outdated one. */
+    fun reload() {
+        val s = _state.value
+        val id = s.editing?.id ?: return
+        if (!s.stale || s.loading || s.saving || s.saved) return
+        _state.update { it.copy(loading = true) }
+        viewModelScope.launch {
+            try {
+                val t = repo.transaction(id)
+                if (t == null) _state.update { it.copy(missing = true, stale = false, saveError = null) } else showEditing(t)
+                _state.update { selectAccount(it.copy(loading = false)) }
+            } catch (e: CancellationException) {
+                _state.update { it.copy(loading = false) }
+                throw e
+            } catch (e: Exception) {
+                Diagnostics.report(DiagnosticOperation.TRANSACTION_READ, e)
+                _state.update { it.copy(loading = false, saveError = R.string.audit_finance_load_failed) }
+            }
+        }
+    }
+
     /** Receipts are never persisted: the scan screen re-reads them, and the fiscal URL should not sit in saved state. */
     private fun persist(s: AddState) {
         if (s.loading || s.loadFailed) return
-        if (s.receipt != null || s.missing || s.loanLocked || s.saved) {
+        if (s.receipt != null || s.missing || s.loanLocked || s.saved || (!s.stale && s.editing?.let { matches(s, it) } == true)) {
             DRAFT_KEYS.forEach { savedState.remove<Any>(it) }
             return
         }
@@ -171,17 +203,23 @@ class AddViewModel @Inject constructor(
         savedState[DRAFT_TO] = s.toAccountId
         savedState[DRAFT_DATE] = s.date.toString()
         savedState[DRAFT_MERCHANT] = s.merchant
+        // A stale form keeps the version it was typed over, so recreation cannot pass the draft off as current.
+        if (!s.stale) savedState[DRAFT_BASE] = s.editing?.let { encode(it) }
     }
 
-    /** Restored values pass the same rules as typed ones: the amount is re-entered key by key and locked fields stay locked. */
+    /**
+     * Restored values pass the same rules as typed ones: the amount is re-entered key by key and locked fields stay locked.
+     * A correction drafted over a different stored version is restored as stale.
+     */
     private fun restoreDraft(s: AddState): AddState {
         if (!savedState.contains(DRAFT_AMOUNT) || s.missing || s.loanLocked) return s
+        val stale = s.editing != null && savedState.get<String>(DRAFT_BASE) != encode(s.editing)
         val type = savedState.get<String>(DRAFT_TYPE)
             ?.let { name -> TransactionType.entries.firstOrNull { it.name == name } }
             ?.takeIf { it != TransactionType.LOAN_RECEIPT && !s.typeLocked } ?: s.type
         val date = if (s.bill != null) s.date
             else savedState.get<String>(DRAFT_DATE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: s.date
-        return s.copy(
+        val restored = s.copy(
             type = type,
             amount = savedState.get<String>(DRAFT_AMOUNT).orEmpty().fold(AmountInput()) { input, key -> input.press(key) },
             categoryId = savedState.get<String>(DRAFT_CATEGORY),
@@ -189,8 +227,19 @@ class AddViewModel @Inject constructor(
             toAccountId = if (type == TransactionType.TRANSFER) savedState.get<String>(DRAFT_TO) else null,
             date = date,
             merchant = savedState.get<String>(DRAFT_MERCHANT) ?: s.merchant,
+            stale = stale,
+            saveError = if (stale) R.string.audit_edit_stale else s.saveError,
         )
+        val base = savedState.get<String>(DRAFT_BASE)?.let {
+            runCatching { EventJson.decodeFromString(Transaction.serializer(), it) }.getOrNull()
+        }
+        return if (base != null && matches(restored, base)) s else restored
     }
+
+    private fun matches(s: AddState, transaction: Transaction): Boolean = s.type == transaction.type &&
+        s.currency == transaction.money.currency && s.amount.value?.compareTo(transaction.money.amount) == 0 &&
+        s.categoryId == transaction.categoryId && s.accountId == transaction.accountId && s.toAccountId == transaction.toAccountId &&
+        s.date == transaction.date && s.merchant == transaction.merchant
 
     fun setType(type: TransactionType) = _state.update { s ->
         if (s.typeLocked || s.missing || s.loanLocked || s.type == type) s else selectAccount(
@@ -262,7 +311,7 @@ class AddViewModel @Inject constructor(
                     repo.edit(original.copy(
                         type = s.type, money = Money.of(amount, s.currency), accountId = accountId, toAccountId = toAccountId,
                         categoryId = categoryId, date = s.date, merchant = s.merchant.trim(),
-                    ))
+                    ), expected = original)
                 } else {
                     val member = requireNotNull(repo.currentMember())
                     val transaction = Transaction(
@@ -288,6 +337,11 @@ class AddViewModel @Inject constructor(
                 _state.update { it.copy(saving = false) }
                 throw e
             } catch (e: Exception) {
+                if (e is StaleTransaction) {
+                    _state.update { it.copy(saving = false, stale = true, saveError = R.string.audit_edit_stale) }
+                    return@launch
+                }
+                Diagnostics.report(DiagnosticOperation.TRANSACTION_WRITE, e)
                 val message = when (e) {
                     is DuplicateReceipt -> R.string.scan_duplicate
                     is InvalidReceiptAccount -> R.string.scan_rsd_account
@@ -313,16 +367,19 @@ class AddViewModel @Inject constructor(
     fun delete() {
         val s = _state.value
         val original = s.editing ?: return
-        if (s.loading || s.loadFailed || s.saving || s.saved || s.loanLocked) return
+        if (s.loading || s.loadFailed || s.saving || s.saved || s.loanLocked || s.stale) return
         _state.update { it.copy(saving = true, saveError = null) }
         viewModelScope.launch {
             try {
-                repo.delete(original.id)
+                repo.delete(original.id, expected = original)
                 _state.update { it.copy(saved = true, saving = false) }
             } catch (e: CancellationException) {
                 _state.update { it.copy(saving = false) }
                 throw e
-            } catch (_: Exception) {
+            } catch (_: StaleTransaction) {
+                _state.update { it.copy(saving = false, stale = true, saveError = R.string.audit_edit_stale) }
+            } catch (e: Exception) {
+                Diagnostics.report(DiagnosticOperation.TRANSACTION_WRITE, e)
                 _state.update { it.copy(saving = false, saveError = R.string.audit_finance_delete_failed) }
             }
         }
@@ -360,6 +417,9 @@ class AddViewModel @Inject constructor(
         const val DRAFT_TO = "draft.to"
         const val DRAFT_DATE = "draft.date"
         const val DRAFT_MERCHANT = "draft.merchant"
-        val DRAFT_KEYS = listOf(DRAFT_TYPE, DRAFT_AMOUNT, DRAFT_CATEGORY, DRAFT_ACCOUNT, DRAFT_TO, DRAFT_DATE, DRAFT_MERCHANT)
+        const val DRAFT_BASE = "draft.base"
+        val DRAFT_KEYS = listOf(DRAFT_TYPE, DRAFT_AMOUNT, DRAFT_CATEGORY, DRAFT_ACCOUNT, DRAFT_TO, DRAFT_DATE, DRAFT_MERCHANT, DRAFT_BASE)
+
+        fun encode(t: Transaction): String = EventJson.encodeToString(Transaction.serializer(), t)
     }
 }

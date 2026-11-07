@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audit_backup_delete_copy">Delete copy</string>
+    <string name="audit_backup_delete_copy_title">Delete this retained copy?</string>
+    <string name="audit_backup_delete_copy_warning">The copy is permanently removed from this phone. Current finances are not changed. Export it first if you might need it later.</string>
+</resources>

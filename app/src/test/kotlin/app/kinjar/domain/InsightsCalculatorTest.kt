@@ -95,11 +95,18 @@ class InsightsCalculatorTest {
         assertEquals(14, s.comparedDays)
         assertEquals(listOf("groceries", "transport", "new"), s.changes.map { it.categoryId })
         assertEquals(rsd("8000"), s.changes[0].delta)
-        assertEquals(80, s.changes[0].percent)
+        assertEquals("80".toBigDecimal(), s.changes[0].percent)
         assertEquals(rsd("-5000"), s.changes[1].delta)
-        assertEquals(-83, s.changes[1].percent)
+        assertEquals("-83".toBigDecimal(), s.changes[1].percent)
         assertNull(s.changes[2].percent)
         assertFalse(s.changesPartial)
+    }
+
+    @Test
+    fun `extreme percentages keep their sign and magnitude past the Int range`() {
+        assertEquals("2147483700".toBigDecimal(), CategoryChange("g", rsd("214748.38"), rsd("0.01")).percent)
+        assertEquals("-100".toBigDecimal(), CategoryChange("g", rsd("0"), rsd("214748.38")).percent)
+        assertEquals("9999999999999999999999800".toBigDecimal(), CategoryChange("g", rsd("999999999999999999999.99"), rsd("0.01")).percent)
     }
 
     @Test

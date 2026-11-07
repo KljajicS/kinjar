@@ -40,3 +40,6 @@ DELETE FROM sync_draft;
 
 deleteFamily:
 DELETE FROM sync_draft WHERE uid = ? AND family_id = ?;
+
+deleteDraft:
+DELETE FROM sync_draft WHERE uid = ? AND id = ?;

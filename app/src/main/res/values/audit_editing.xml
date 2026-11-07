@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audit_edit_stale">This transaction was changed on another phone. Nothing was saved. Reload to see the latest version, then make your change again.</string>
+    <string name="audit_edit_reload">Reload latest version</string>
+    <string name="audit_conflict_check_failed">Could not check whether this transaction has other versions. It stays locked until the check succeeds.</string>
+    <string name="audit_conflict_list_failed">Could not check transactions for other versions. Marks shown may be out of date.</string>
+</resources>

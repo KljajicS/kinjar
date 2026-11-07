@@ -62,6 +62,7 @@ import app.kinjar.domain.Currency
 import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.ui.categoryDisplayName
+import app.kinjar.ui.conflict.ConflictCheckFailedScreen
 import app.kinjar.ui.conflict.ConflictReview
 import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.ui.formatAmount
@@ -93,12 +94,13 @@ fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts
     // The form was filled before the decision; once settled here or on another phone, it may show a replaced value.
     LaunchedEffect(pending != null) { if (pending != null) reviewed = true else if (reviewed) onClose() }
     when {
+        review.failed && pending == null -> ConflictCheckFailedScreen(conflicts::retry, onClose)
         !review.loaded -> Box(Modifier.fillMaxSize().background(LocalColors.current.bg))
         pending != null -> ConflictReview(review, pending, conflicts, onClose)
         reviewed -> Unit
         s.editing != null && !s.loading && !s.loadFailed && !editing -> TransactionDetails(s, onClose, onEdit = { editing = true })
         else -> AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::press, vm::setCategory, vm::setAccount,
-            vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad)
+            vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad, vm::reload)
     }
 }
 
@@ -107,7 +109,7 @@ fun AddContent(
     s: AddState, onClose: () -> Unit, onType: (TransactionType) -> Unit, onKey: (Char) -> Unit,
     onCategory: (String?) -> Unit, onAccount: (String) -> Unit, onToAccount: (String) -> Unit,
     onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit, onSave: () -> Unit,
-    onDelete: () -> Unit = {}, onRetry: () -> Unit = {},
+    onDelete: () -> Unit = {}, onRetry: () -> Unit = {}, onReload: () -> Unit = {},
 ) {
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
@@ -143,6 +145,7 @@ fun AddContent(
                 s.loanLocked -> Text(stringResource(R.string.audit_finance_loan_locked), style = sans(15), color = c.orange)
                 else -> Fields(s, locale, separator, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip) { confirmDelete = true }
             }
+            if (s.stale && !s.loading) TextButton(onClick = onReload) { Text(stringResource(R.string.audit_edit_reload), color = c.primary) }
         }
 
         if (!readOnly) {
@@ -159,7 +162,7 @@ fun AddContent(
     }
 
     val editing = s.editing
-    if (confirmDelete && editing != null && !readOnly) {
+    if (confirmDelete && editing != null && !readOnly && !s.stale) {
         DeleteDialog(editing.source, s.saving, onDismiss = { confirmDelete = false }) { confirmDelete = false; onDelete() }
     }
 }
@@ -219,7 +222,8 @@ private fun Fields(
         app.kinjar.ui.theme.DangerLink(stringResource(R.string.add_skip_bill), onClick = onSkip)
     }
     if (s.editing != null) {
-        app.kinjar.ui.theme.DangerLink(stringResource(if (s.editing.source == TransactionSource.RECEIPT) R.string.receipt_delete else R.string.audit_finance_delete), enabled = !s.saving, onClick = onDelete)
+        app.kinjar.ui.theme.DangerLink(stringResource(if (s.editing.source == TransactionSource.RECEIPT) R.string.receipt_delete else R.string.audit_finance_delete),
+            enabled = !s.saving && !s.stale, onClick = onDelete)
     }
 }
 

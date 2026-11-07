@@ -1,5 +1,6 @@
 package app.kinjar.data
 
+import app.cash.sqldelight.Query
 import app.kinjar.domain.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -111,6 +112,26 @@ class FamilyRecoveryTest {
         receive(operation("one", "Forged"))
         assertEquals(1, db.syncQuarantineQueries.all().executeAsList().size)
         assertEquals("One", db.accountQueries.active().executeAsList().single().name)
+    }
+
+    @Test fun `duplicate-only page advances the checkpoint without rewriting projections or quarantine`() = runTest {
+        store.append(account("a")); enroll()
+        val one = OperationCodec.encode(operation("one", "One"))
+        val forged = OperationCodec.encode(operation("one", "Forged"))
+        store.receive(listOf(one, forged), "user", "family", "dataset", 100, 0, "one:1")
+        val quarantined = db.syncQuarantineQueries.all().executeAsList().map { it.digest to it.reason }
+        assertEquals(1, quarantined.size)
+        val rewrites = mutableListOf<String>()
+        listOf("account" to db.accountQueries.active(), "conflict" to db.syncConflictQueries.all(), "operation" to db.syncOperationQueries.all())
+            .forEach { (table, query) -> query.addListener(object : Query.Listener { override fun queryResultsChanged() { rewrites += table } }) }
+        store.receive(listOf(one, forged), "user", "family", "dataset", 160, 0, "one:1",
+            listOf(QuarantinedOperation.from(forged)))
+        assertEquals(emptyList<String>(), rewrites)
+        assertEquals(160L, db.syncCheckpointQueries.byDataset("dataset").executeAsOne().seconds)
+        assertEquals(quarantined, db.syncQuarantineQueries.all().executeAsList().map { it.digest to it.reason })
+        assertEquals("One", db.accountQueries.active().executeAsList().single().name)
+        store.receive(listOf(one, OperationCodec.encode(operation("two", "Two"))), "user", "family", "dataset", 170, 0, "two:1")
+        assertTrue("a new operation still replays", "account" in rewrites && "conflict" in rewrites)
     }
 
     @Test fun `malformed versions and invalid resolutions preserve progress and cloud recovery`() = runTest {

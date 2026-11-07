@@ -31,6 +31,7 @@ async function seed(members, overrides = {}) {
     await setDoc(doc(d, 'slots/0'), { familyId: 'family', owner: 'owner' });
     await setDoc(doc(d, 'families/family/datasets/current'), state());
     await setDoc(doc(d, 'families/family/installs/0'), { uid: 'owner', installId: 'device' });
+    await setDoc(doc(d, 'families/family/claims/device'), { uid: 'owner' });
     for (const [uid, memberId] of Object.entries(members ?? { owner: 'm-owner' })) {
       await setDoc(doc(d, `users/${uid}`), { familyId: 'family', memberId, status: 'ACTIVE' });
     }
@@ -141,7 +142,19 @@ test('removal closes finance access and keeps own removal proof readable', async
   assert.equal((await getDoc(doc(db('wife'), 'users/wife'))).data().status, 'REMOVED');
 });
 
+async function admit(uid, data = { enabled: true }) {
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), `admission/${uid}`), data));
+}
+function createWorkspace(d, uid, fid, slot) {
+  const b = writeBatch(d);
+  b.set(doc(d, `slots/${slot}`), { familyId: fid, owner: uid });
+  b.set(doc(d, `families/${fid}`), { ...family({ [uid]: `m-${uid}` }), owner: uid, admins: [uid], slot, status: 'INITIALIZING' });
+  b.set(doc(d, `users/${uid}`), { familyId: fid, memberId: `m-${uid}`, status: 'ACTIVE' });
+  return b.commit();
+}
+
 test('family creation reserves one public slot and links account atomically', async () => {
+  await admit('owner');
   const d = db('owner');
   const create = (fid, slot) => {
     const b = writeBatch(d);
@@ -154,6 +167,41 @@ test('family creation reserves one public slot and links account atomically', as
   await assertSucceeds(create('family', '0'));
   await assertFails(create('second', '1'));
   await assertSucceeds(setDoc(doc(d, 'families/family/datasets/current'), initialState()));
+});
+test('only administrator-approved accounts can create a workspace', async () => {
+  await assertFails(createWorkspace(db('outsider'), 'outsider', 'mine', '0'));
+  await admit('disabled', { enabled: false });
+  await assertFails(createWorkspace(db('disabled'), 'disabled', 'mine', '0'));
+  await admit('string', { enabled: 'true' });
+  await assertFails(createWorkspace(db('string'), 'string', 'mine', '0'));
+  await admit('creator');
+  await assertFails(createWorkspace(db('creator', 'password'), 'creator', 'mine', '0'));
+  await assertSucceeds(createWorkspace(db('creator'), 'creator', 'mine', '0'));
+  assert.equal((await getDoc(doc(db('creator'), 'families/mine'))).data().owner, 'creator');
+});
+test('clients cannot grant, change or read workspace admission of other accounts', async () => {
+  await admit('creator');
+  const outsider = db('outsider');
+  await assertFails(setDoc(doc(outsider, 'admission/outsider'), { enabled: true }));
+  await assertFails(setDoc(doc(outsider, 'admission/creator'), { enabled: false }));
+  await assertFails(getDoc(doc(outsider, 'admission/creator')));
+  await assertSucceeds(getDoc(doc(outsider, 'admission/outsider')));
+  const creator = db('creator');
+  await assertSucceeds(getDoc(doc(creator, 'admission/creator')));
+  await assertFails(updateDoc(doc(creator, 'admission/creator'), { enabled: false }));
+  await assertFails(deleteDoc(doc(creator, 'admission/creator')));
+});
+test('existing members without admission keep reading, syncing and joining by invitation', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  await assertSucceeds(getDoc(doc(db('wife'), 'families/family/datasets/current')));
+  await assertSucceeds(upload(db('owner')).commit());
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/0'), invitation('kid@example.com')));
+  const kid = db('kid');
+  const join = writeBatch(kid);
+  join.update(doc(kid, 'families/family'), { members: { owner: 'm-owner', wife: 'm-wife', kid: 'm-kid' }, action: 'join', target: 'kid', inviteSlot: '0' });
+  join.update(doc(kid, 'families/family/invites/0'), { status: 'ACCEPTED', uid: 'kid' });
+  join.set(doc(kid, 'users/kid'), { familyId: 'family', memberId: 'm-kid', status: 'ACTIVE' });
+  await assertSucceeds(join.commit());
 });
 test('ordinary users cannot claim a slot or forge family reference separately', async () => {
   const d = db('owner');
@@ -294,18 +342,105 @@ test('racing administrator role edits cannot remove creator or elevate a member'
   assert.deepEqual((await getDoc(doc(db('owner'), 'families/family'))).data().admins, ['owner']);
 });
 
-test('member removal and all six device slots fit atomic access limits', async () => {
-  await seed({ owner: 'm-owner', wife: 'm-wife' });
+test('member removal, all six device slots and six invitation cancellations fit atomic access limits', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' }, { admins: ['owner', 'wife'] });
   await env.withSecurityRulesDisabled(async c => {
-    for (let i = 0; i < 6; i++) await setDoc(doc(c.firestore(), `families/family/installs/${i}`), { uid: 'wife', installId: `device${i}` });
+    for (let i = 0; i < 6; i++) {
+      await setDoc(doc(c.firestore(), `families/family/installs/${i}`), { uid: 'wife', installId: `device${i}` });
+      await setDoc(doc(c.firestore(), `families/family/invites/${i}`), invitation(`kid${i}@example.com`, Date.now(), 'wife'));
+    }
   });
   const d = db('owner');
   const remove = writeBatch(d);
-  remove.update(doc(d, 'families/family'), { members: { owner: 'm-owner' }, action: 'remove', target: 'wife' });
+  remove.update(doc(d, 'families/family'), { members: { owner: 'm-owner' }, admins: ['owner'], action: 'remove', target: 'wife' });
   remove.update(doc(d, 'users/wife'), { status: 'REMOVED' });
-  for (let i = 0; i < 6; i++) remove.delete(doc(d, `families/family/installs/${i}`));
+  for (let i = 0; i < 6; i++) {
+    remove.delete(doc(d, `families/family/installs/${i}`));
+    remove.update(doc(d, `families/family/invites/${i}`), { status: 'CANCELLED' });
+  }
   await assertSucceeds(remove.commit());
   for (let i = 0; i < 6; i++) assert.equal((await getDoc(doc(d, `families/family/installs/${i}`))).exists(), false);
+});
+
+function register(d, uid, installId, slot, { claim = true } = {}) {
+  const b = writeBatch(d);
+  b.set(doc(d, `families/family/installs/${slot}`), { uid, installId, name: 'Phone', createdAt: serverTimestamp() });
+  if (claim) b.set(doc(d, `families/family/claims/${installId}`), { uid, installSlot: slot, createdAt: serverTimestamp() });
+  return b.commit();
+}
+test('a new installation claims its ID permanently in the same commit that registers it', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  const wife = db('wife');
+  await assertFails(setDoc(doc(wife, 'families/family/claims/unregistered'), { uid: 'wife', installSlot: '1', createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(wife, 'families/family/claims/unregistered'), { uid: 'wife', installSlot: '0', createdAt: serverTimestamp() }));
+  await assertFails(register(wife, 'wife', 'wifephone', '1', { claim: false }));
+  await assertFails(register(wife, 'owner', 'wifephone', '1'));
+  await assertSucceeds(register(wife, 'wife', 'wifephone', '1'));
+  for (const d of [wife, db('owner')]) {
+    await assertFails(updateDoc(doc(d, 'families/family/claims/wifephone'), { uid: 'owner' }));
+    await assertFails(deleteDoc(doc(d, 'families/family/claims/wifephone')));
+  }
+  await assertFails(getDocs(collection(wife, 'families/family/claims')));
+  await assertSucceeds(deleteDoc(doc(wife, 'families/family/installs/1')));
+  await assertSucceeds(register(wife, 'wife', 'wifephone', '1', { claim: false }));
+  const b = writeBatch(wife);
+  b.set(doc(wife, 'families/family/datasets/current/operations/wifephone:1'), { ...operation(), uid: 'wife', installId: 'wifephone', installSlot: '1' });
+  b.update(doc(wife, 'families/family/datasets/current'), { ...state(), count: 1, bytes: 3, dailyCount: 1, dailyBytes: 3, lastOpId: 'wifephone:1' });
+  await assertSucceeds(b.commit());
+});
+test('another member cannot occupy operation IDs of a claimed installation, even from a legacy slot', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  const wife = db('wife');
+  await assertFails(register(wife, 'wife', 'device', '1'));
+  await assertFails(register(wife, 'wife', 'device', '1', { claim: false }));
+  await assertFails(setDoc(doc(wife, 'families/family/claims/device'), { uid: 'wife', createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(db('stranger'), 'families/family/claims/fresh'), { uid: 'stranger', createdAt: serverTimestamp() }));
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/installs/2'), { uid: 'wife', installId: 'device' }));
+  await assertFails(upload(wife, { operation: { uid: 'wife', installSlot: '2' } }).commit());
+  await assertSucceeds(upload(db('owner')).commit());
+});
+test('an installation registered before claims cannot upload until its claim is backfilled', async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/claims/device')));
+  const d = db('owner');
+  await assertFails(upload(d).commit());
+  await assertSucceeds(setDoc(doc(d, 'families/family/claims/device'), { uid: 'owner', installSlot: '0', createdAt: serverTimestamp() }));
+  await assertSucceeds(upload(d).commit());
+});
+
+function joinFamily(uid, slot, members) {
+  const d = db(uid);
+  const b = writeBatch(d);
+  b.update(doc(d, 'families/family'), { members, action: 'join', target: uid, inviteSlot: slot });
+  b.update(doc(d, `families/family/invites/${slot}`), { status: 'ACCEPTED', uid });
+  b.set(doc(d, `users/${uid}`), { familyId: 'family', memberId: `m-${uid}`, status: 'ACTIVE' });
+  return b.commit();
+}
+test('invitations stop admitting once their inviter is demoted, and a current administrator can invite again', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' }, { admins: ['owner', 'wife'] });
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/0'), invitation('kid@example.com', Date.now(), 'wife')));
+  const kid = db('kid');
+  await assertSucceeds(getDoc(doc(kid, 'families/family')));
+  await assertSucceeds(updateDoc(doc(db('owner'), 'families/family'), { admins: ['owner'], action: 'roles' }));
+  await assertFails(getDoc(doc(kid, 'families/family')));
+  await assertSucceeds(getDoc(doc(kid, 'families/family/invites/0')));
+  const members = { owner: 'm-owner', wife: 'm-wife', kid: 'm-kid' };
+  await assertFails(joinFamily('kid', '0', members));
+  await assertFails(updateDoc(doc(kid, 'families/family/invites/0'), { status: 'ACCEPTED', uid: 'kid' }));
+  await assertFails(setDoc(doc(db('wife'), 'families/family/invites/1'), { ...invitation('kid@example.com', Date.now(), 'wife'), createdAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(db('owner'), 'families/family/invites/1'), { ...invitation('kid@example.com'), createdAt: serverTimestamp() }));
+  await assertSucceeds(joinFamily('kid', '1', members));
+});
+test('invitations stop admitting once their inviter is removed', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' }, { admins: ['owner', 'wife'] });
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/invites/0'), invitation('kid@example.com', Date.now(), 'wife')));
+  const owner = db('owner');
+  const remove = writeBatch(owner);
+  remove.update(doc(owner, 'families/family'), { members: { owner: 'm-owner' }, admins: ['owner'], action: 'remove', target: 'wife' });
+  remove.update(doc(owner, 'users/wife'), { status: 'REMOVED' });
+  await assertSucceeds(remove.commit());
+  await assertFails(joinFamily('kid', '0', { owner: 'm-owner', kid: 'm-kid' }));
+  await assertSucceeds(updateDoc(doc(owner, 'families/family/invites/0'), { status: 'CANCELLED' }));
 });
 
 test('bootstrap requires complete immutable chunks before activation', async () => {
@@ -527,6 +662,9 @@ test('family deletion requires removal proofs and complete cleanup before releas
   early.delete(doc(d, 'slots/0'));
   await assertFails(early.commit());
   await assertSucceeds(updateDoc(doc(d, 'families/family'), { deletionPhase: 1, action: 'deleteSlots' }));
+  await assertFails(deleteDoc(doc(db('a'), 'families/family/claims/device')));
+  await assertSucceeds(deleteDoc(doc(d, 'families/family/claims/device')));
+  assert.equal((await getDocs(collection(d, 'families/family/claims'))).size, 0);
   await assertFails(updateDoc(doc(d, 'families/family'), { deletionPhase: 2, action: 'deleteSlots' }));
   const installs = writeBatch(d);
   installs.delete(doc(d, 'families/family/installs/0'));
@@ -541,7 +679,7 @@ test('family deletion requires removal proofs and complete cleanup before releas
   await assertSucceeds(finish.commit());
 });
 
-const invitation = (email, createdAt = Date.now()) => ({ familyId: 'family', email, inviter: 'owner', inviterEmail: 'owner@example.com',
+const invitation = (email, createdAt = Date.now(), inviter = 'owner') => ({ familyId: 'family', email, inviter, inviterEmail: `${inviter}@example.com`,
   status: 'PENDING', uid: '', createdAt: Timestamp.fromMillis(createdAt) });
 async function seedPersonal(members = { wife: 'm-wife' }, invitedAt = Date.now()) {
   await seed();
@@ -551,6 +689,7 @@ async function seedPersonal(members = { wife: 'm-wife' }, invitedAt = Date.now()
     await setDoc(doc(d, 'slots/1'), { familyId: 'personal', owner: 'wife' });
     await setDoc(doc(d, 'families/personal/datasets/current'), state());
     await setDoc(doc(d, 'families/personal/installs/0'), { uid: 'wife', installId: 'phone' });
+    await setDoc(doc(d, 'families/personal/claims/phone'), { uid: 'wife' });
     for (const [uid, memberId] of Object.entries(members)) {
       await setDoc(doc(d, `users/${uid}`), { familyId: 'personal', memberId, status: 'ACTIVE' });
     }

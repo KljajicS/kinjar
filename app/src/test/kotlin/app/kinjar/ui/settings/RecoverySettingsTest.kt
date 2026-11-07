@@ -74,6 +74,24 @@ class RecoverySettingsTest {
     }
 
     @Test
+    fun `a name typed while an earlier name is saving stays unsaved`() = runTest(dispatcher) {
+        repo.setUp("Ana", listOf(Account("cash", "Cash", Currency.RSD)))
+        val vm = SettingsViewModel(repo, ThemeStore({ null }, {})).also { models += it }
+        vm.state.first { it.memberId != null }
+        vm.setName("Ana M")
+        vm.saveName()
+        vm.setName("Ana Markovic")
+        vm.writes.state.first { !it.busy }
+        assertFalse(vm.state.value.saved)
+        assertEquals("Ana Markovic", vm.state.value.name)
+        assertEquals("Ana M", repo.currentMember()?.displayName)
+
+        vm.saveName()
+        vm.state.first { it.saved }
+        assertEquals("Ana Markovic", repo.currentMember()?.displayName)
+    }
+
+    @Test
     fun `category list and editor recover and an unread category cannot be saved or deleted`() = runTest(dispatcher) {
         repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD)))
         val before = events()

@@ -4,6 +4,8 @@ import android.content.Context
 import app.kinjar.data.restoreManifest
 import app.kinjar.data.db.JournalInfo
 import app.kinjar.data.EventStore
+import app.kinjar.data.DiagnosticOperation
+import app.kinjar.data.Diagnostics
 import app.kinjar.data.StoredHistory
 import app.kinjar.data.auth.FirebaseServices
 import app.kinjar.data.db.KinjarDb
@@ -11,6 +13,7 @@ import app.kinjar.data.deviceId
 import app.kinjar.domain.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -33,6 +36,12 @@ import javax.inject.Singleton
 
 enum class SyncPhase { LOCAL, SIGNED_OUT, READY, RUNNING, REPLACEMENT_REQUIRED, RESTORING, CLEANUP_REQUIRED, REMOVED, CAPACITY, UPDATE_REQUIRED, ERROR }
 data class SyncStatus(val phase: SyncPhase = SyncPhase.LOCAL, val pending: Int = 0, val lastSuccess: Instant? = null)
+
+/** Retired cloud data of an earlier restore is still being deleted in batches; retry once cleanup finishes. */
+class CloudCleanupPending : IllegalStateException("Cloud cleanup is still in progress")
+
+/** The restore no longer applies to the cloud family; local data is unchanged and the backup is kept as a retained copy. */
+class RestoreSuperseded : IllegalStateException("Restore no longer applies; local data and the backup were kept")
 
 /** [history] is only present in journals written before histories were staged; [stored] replaces it on first use. */
 @Serializable
@@ -152,6 +161,8 @@ class SyncCoordinator @Inject constructor(
         val uid = user()
         var journal = store.read { db.restoreJournalQueries.journalInfo().executeAsOneOrNull() }
         if (journal == null) {
+            if (!families.admitted()) throw WorkspaceAdmissionRequired()
+            checkUser(uid)
             val history = store.captureHistory()
             try {
                 store.validateHistory(history)
@@ -172,6 +183,7 @@ class SyncCoordinator @Inject constructor(
         val history = staged(journal, enrollment) { Json.encodeToString(it) }
         families.create(enrollment.memberId, journal.family_id, journal.target_dataset)
         checkUser(uid)
+        transport.register(uid, journal.family_id, install)
         transport.initialize(uid, journal.family_id, journal.target_dataset, store.historySource(history.id))
         val family = families.info(journal.family_id)
         checkUser(uid)
@@ -270,18 +282,30 @@ class SyncCoordinator @Inject constructor(
             store.discardHistory(history.id)
             throw e
         }
+        transport.register(uid, family.id, install)
         syncAfterReplacement(uid)
     }
 
     /** Validated cloud history of an archived workspace owned by the signed-in account, for export only; the caller discards it. */
-    suspend fun archivedHistory(familyId: String): StoredHistory = withContext(Dispatchers.IO) {
-        val uid = user()
-        val archive = families.info(familyId)
-        checkUser(uid)
-        require(archive.status == "ARCHIVED" && archive.owner == uid) { "Workspace is not an archive of this account" }
-        val history = downloadHistory(uid, archive)
-        try { checkUser(uid) } catch (e: Throwable) { store.discardHistory(history.id); throw e }
-        history
+    suspend fun archivedHistory(familyId: String): StoredHistory {
+        var staged: StoredHistory? = null
+        try {
+            return withContext(Dispatchers.IO) {
+                val uid = user()
+                val archive = families.info(familyId)
+                checkUser(uid)
+                require(archive.status == "ARCHIVED" && archive.owner == uid) { "Workspace is not an archive of this account" }
+                val history = downloadHistory(uid, archive).also { staged = it }
+                checkUser(uid)
+                history
+            }
+        } catch (e: Throwable) {
+            staged?.let { history -> withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { store.discardHistory(history.id) }.exceptionOrNull()?.let(e::addSuppressed)
+                store.releaseHistory(history.id)
+            } }
+            throw e
+        }
     }
 
     /** Stages the baseline and every page on disk; nothing local changes until a caller activates the result. */
@@ -323,6 +347,7 @@ class SyncCoordinator @Inject constructor(
         val history = staged(journal, enrollment) { Json.encodeToString(it) }
         store.activate(uid, family.id, family.activeDataset, enrollment.memberId, family.generation,
             history, enrollment.localDigest, preserveDraft = true)
+        transport.register(uid, family.id, install)
         syncAfterReplacement(uid)
     }
 
@@ -363,7 +388,7 @@ class SyncCoordinator @Inject constructor(
         require(session.uid == uid)
         val family = families.info(session.family_id)
         require(uid in family.admins && family.status == "ACTIVE" && family.activeDataset == session.dataset_id && family.generation == session.generation)
-        if (family.otherDataset.isNotEmpty()) transport.cleanup(uid, family.id)
+        if (family.otherDataset.isNotEmpty() && !cleanupBatch(uid, family.id)) throw CloudCleanupPending()
         checkUser(uid)
         store.read {
             require(db.restoreJournalQueries.journalInfo().executeAsOneOrNull() == null) { "Recovery already pending" }
@@ -371,20 +396,38 @@ class SyncCoordinator @Inject constructor(
             val data = FamilyRestore(Enrollment(session.member_id, expectedLocalDigest, history), session.generation)
             store.saveJournal(uid, family.id, session.dataset_id, newId(), newId(), "RESTORE", Json.encodeToString(data).toByteArray(), history)
         }
-        restoreLocked(uid)
+        resumeLocked(uid)
     }
 
-    suspend fun resumeRestore() = action { restoreLocked(user()) }
+    suspend fun resumeRestore() = action { resumeLocked(user()) }
 
-    private suspend fun restoreLocked(uid: String) {
+    private suspend fun resumeLocked(uid: String) {
+        if (restoreLocked(uid)) return
+        syncAfterReplacement(uid)
+        throw RestoreSuperseded()
+    }
+
+    /**
+     * Changing the cloud needs an admin whose restore is still current; adopting a target already activated needs only
+     * the same membership. Any other journal is obsolete: it is cleared with its backup kept as a retained copy, local
+     * data and pending edits stay untouched, and false is returned.
+     */
+    private suspend fun restoreLocked(uid: String): Boolean {
         val journal = store.read { requireNotNull(db.restoreJournalQueries.journalInfo().executeAsOneOrNull()) }
         require(journal.uid == uid && journal.phase == "RESTORE")
         val data = journalData<FamilyRestore>(journal)
         val history = staged(journal, data.enrollment) { Json.encodeToString(data.copy(enrollment = it)) }
         mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.RESTORING)
         val current = families.info(journal.family_id)
-        require(uid in current.admins && current.members[uid] == data.enrollment.memberId)
-        if (current.status != "ACTIVE" || current.activeDataset != journal.target_dataset) {
+        checkUser(uid)
+        val activated = current.status == "ACTIVE" && current.activeDataset == journal.target_dataset
+        val resumable = uid in current.admins && (current.status == "RESTORING" && current.otherDataset == journal.target_dataset
+            || current.status == "ACTIVE" && current.activeDataset == journal.source_dataset && current.generation == data.sourceGeneration)
+        if (current.members[uid] != data.enrollment.memberId || !(activated || resumable)) {
+            retainObsolete(journal, history)
+            return false
+        }
+        if (!activated) {
             transport.beginRestore(uid, journal.family_id, journal.source_dataset, data.sourceGeneration, journal.target_dataset, journal.token)
             transport.initialize(uid, journal.family_id, journal.target_dataset, store.historySource(history.id), journal.token)
         } else {
@@ -395,16 +438,24 @@ class SyncCoordinator @Inject constructor(
         }
         val family = families.info(journal.family_id)
         checkUser(uid)
-        require(family.status == "ACTIVE" && family.activeDataset == journal.target_dataset)
+        require(family.status == "ACTIVE" && family.activeDataset == journal.target_dataset && family.members[uid] == data.enrollment.memberId)
         store.activate(uid, family.id, family.activeDataset, data.enrollment.memberId, family.generation,
             history, data.enrollment.localDigest, preserveDraft = true)
         syncAfterReplacement(uid)
+        return true
+    }
+
+    private fun retainObsolete(journal: JournalInfo, history: StoredHistory) = store.read {
+        check(db.restoreJournalQueries.journalInfo().executeAsOneOrNull() == journal) { "Recovery changed" }
+        store.retainHistory(history, journal.uid, journal.family_id)
+        store.abandonRecovery(journal.uid)
     }
 
     private suspend fun syncAfterReplacement(uid: String) {
         try { syncLocked(uid) }
         catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
+            Diagnostics.report(DiagnosticOperation.SYNC, e)
             mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.ERROR)
         }
     }
@@ -412,23 +463,43 @@ class SyncCoordinator @Inject constructor(
     suspend fun cancelRestore(familyId: String) = action {
         val uid = user()
         val family = families.info(familyId)
-        require(uid in family.admins)
-        if (family.status == "RESTORING") transport.cancelExpiredRestore(uid, familyId)
+        checkUser(uid)
         val journal = store.read { db.restoreJournalQueries.journalInfo().executeAsOneOrNull() }
-        if (journal?.phase == "RESTORE" && journal.uid == uid && journal.family_id == familyId) {
+            ?.takeIf { it.phase == "RESTORE" && it.uid == uid && it.family_id == familyId }
+        require(journal != null || uid in family.admins)
+        // A restore other than this journal's belongs to the admin who started it.
+        if (family.status == "RESTORING" && uid in family.admins && (journal == null || family.otherDataset == journal.target_dataset)) {
+            transport.cancelExpiredRestore(uid, familyId)
+        }
+        if (journal != null) {
             val current = families.info(familyId)
-            require(current.status == "ACTIVE" && current.activeDataset == journal.source_dataset) { "Restore already activated; recover restored data" }
-            store.read {
+            checkUser(uid)
+            require(current.status != "ACTIVE" || current.activeDataset != journal.target_dataset) { "Restore already activated; recover restored data" }
+            if (current.status == "ACTIVE" && current.activeDataset == journal.source_dataset) store.read {
                 val history = journalHistory(journal)
                 db.restoreJournalQueries.deleteAll()
                 history?.let { store.discardHistory(it.id) }
+            } else {
+                val data = journalData<FamilyRestore>(journal)
+                retainObsolete(journal, staged(journal, data.enrollment) { Json.encodeToString(data.copy(enrollment = it)) })
             }
         }
         syncLocked(uid)
-        cleanupLocked(uid, familyId)
     }
 
-    suspend fun cleanupFamily(familyId: String) = action { cleanupLocked(user(), familyId) }
+    suspend fun cleanupFamily(familyId: String) = action(DiagnosticOperation.SYNC_CLEANUP) { cleanupBatch(user(), familyId); Unit }
+
+    /** Deletes one bounded batch of retired cloud data; true while more remains for this admin. Each batch takes the lock anew. */
+    suspend fun continueCleanup(): Boolean = action(DiagnosticOperation.SYNC_CLEANUP) {
+        if (!configured || services.auth.currentUser == null) return@action false
+        val uid = user()
+        val session = store.read { db.syncSessionQueries.current().executeAsOneOrNull() }
+        if (session == null || session.uid != uid || session.install_id != install) return@action false
+        val family = families.info(session.family_id)
+        checkUser(uid)
+        if (family.status != "ACTIVE" || family.otherDataset.isEmpty() || uid !in family.admins) return@action false
+        !cleanupBatch(uid, family.id)
+    }
 
     suspend fun deleteFamily(familyId: String) = action {
         val uid = user()
@@ -440,10 +511,13 @@ class SyncCoordinator @Inject constructor(
         mutableStatus.value = SyncStatus(SyncPhase.REMOVED)
     }
 
-    private suspend fun cleanupLocked(uid: String, familyId: String) {
+    /** True once fully cleaned; otherwise a continuation is scheduled so the lock is never held across batches. */
+    private suspend fun cleanupBatch(uid: String, familyId: String): Boolean {
         mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.CLEANUP_REQUIRED)
-        transport.cleanup(uid, familyId)
-        mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.READY)
+        val done = transport.cleanup(uid, familyId)
+        checkUser(uid)
+        if (done) mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.READY) else scheduler.continueCleanup()
+        return done
     }
 
     private suspend fun syncLocked(uid: String, reconcile: Boolean = false) {
@@ -480,11 +554,10 @@ class SyncCoordinator @Inject constructor(
         checkUser(uid)
         mutableObservedFamily.value = family
         val journal = store.read { db.restoreJournalQueries.journalInfo().executeAsOneOrNull() }
-        if (journal?.uid == uid && journal.phase == "RESTORE") {
-            restoreLocked(uid)
-            return
-        }
-        if (family.activeDataset != session.dataset_id || family.status != "ACTIVE") {
+        if (journal?.uid == uid && journal.phase == "RESTORE" && restoreLocked(uid)) return
+        // Rejoining from another phone issues a new member ID; this copy keeps its pending edits until replaced.
+        if (family.activeDataset != session.dataset_id || family.status != "ACTIVE"
+            || family.members[uid] != session.member_id || membership.memberId != session.member_id) {
             mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.REPLACEMENT_REQUIRED)
             return
         }
@@ -502,7 +575,6 @@ class SyncCoordinator @Inject constructor(
             cursor?.let { store.receive(page.operations, uid, family.id, session.dataset_id, it.seconds, it.nanos.toLong(), it.id, page.quarantine) }
             overlap = false
         } while (page.hasMore)
-        require(family.members[uid] == session.member_id)
         if (store.read { db.memberQueries.all().executeAsList().none { it.id == session.member_id } }) {
             store.append(MemberCreated(Member(session.member_id, services.auth.currentUser?.displayName?.take(80) ?: "Member", uid)))
         }
@@ -516,21 +588,25 @@ class SyncCoordinator @Inject constructor(
         }
         mutableStatus.value = SyncStatus(SyncPhase.READY, lastSuccess = Instant.now())
         if (family.otherDataset.isNotEmpty() && uid in family.admins) {
-            try { cleanupLocked(uid, family.id) }
+            try { cleanupBatch(uid, family.id) }
             catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                Diagnostics.report(DiagnosticOperation.SYNC_CLEANUP, e)
                 mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.CLEANUP_REQUIRED)
             }
         }
     }
 
-    private suspend fun action(block: suspend () -> Unit) = withContext(Dispatchers.IO) {
+    private suspend fun <T> action(operation: DiagnosticOperation = DiagnosticOperation.SYNC, block: suspend () -> T): T = withContext(Dispatchers.IO) {
         mutex.withLock {
             try { block() } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                mutableStatus.value = mutableStatus.value.copy(phase = when (e) {
+                Diagnostics.report(operation, e)
+                mutableStatus.value = mutableStatus.value.copy(phase = if (operation == DiagnosticOperation.SYNC_CLEANUP) SyncPhase.CLEANUP_REQUIRED else when (e) {
                     is SyncCapacityReached -> SyncPhase.CAPACITY
                     is UnsupportedSyncVersion -> SyncPhase.UPDATE_REQUIRED
+                    is CloudCleanupPending -> SyncPhase.CLEANUP_REQUIRED
+                    is RestoreSuperseded -> mutableStatus.value.phase
                     else -> SyncPhase.ERROR
                 })
                 throw e

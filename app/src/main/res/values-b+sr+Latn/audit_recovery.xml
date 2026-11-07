@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audit_restore_superseded">Ovo vraćanje više nije aktuelno. Finansije na ovom telefonu nisu promenjene, a rezervna kopija je sačuvana među zadržanim kopijama.</string>
+    <string name="audit_cleanup_pending">Čišćenje prethodnog vraćanja još traje u pozadini. Pokušaj ponovo kada se završi.</string>
+    <string name="audit_admission_required">Samo odobreni nalozi mogu da naprave prostor u oblaku. Zatraži pristup od administratora projekta ili se pozivnicom pridruži postojećoj porodici. Lokalne finansije nisu promenjene.</string>
+    <string name="audit_installation_claimed">Ova instalacija pripada drugom nalogu u ovoj porodici. Prijavi se tim nalogom da nastaviš sinhronizaciju. Izmene na čekanju ostaju na ovom telefonu.</string>
+    <string name="audit_invitation_invalid">Ova pozivnica više ne važi. Zatraži novu pozivnicu od trenutnog administratora porodice.</string>
+</resources>

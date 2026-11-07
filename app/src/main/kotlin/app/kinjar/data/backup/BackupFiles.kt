@@ -8,6 +8,7 @@ import app.kinjar.data.EventStore
 import app.kinjar.data.StoredHistory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import javax.inject.Inject
@@ -44,14 +45,23 @@ class BackupFiles internal constructor(
         }
     }.getOrNull() == true
 
-    /** The backup's history as a finished spool; a damaged or partial file leaves no spool behind. */
-    suspend fun read(uri: Uri, password: CharArray): OpenStoredBackup = withContext(Dispatchers.IO) {
+    /** The backup's history as a finished spool; a damaged or partial file, or cancellation, leaves no spool behind. */
+    suspend fun read(uri: Uri, password: CharArray): OpenStoredBackup {
+        var staged: StoredHistory? = null
         try {
-            var createdAt: Instant? = null
-            val history = requireNotNull(context.contentResolver.openInputStream(uri)).buffered().use { input ->
-                store.writeHistory { sink -> createdAt = BackupCodec.open(input, password, sink) }
+            return withContext(Dispatchers.IO) {
+                var createdAt: Instant? = null
+                val history = requireNotNull(context.contentResolver.openInputStream(uri)).buffered().use { input ->
+                    store.writeHistory { sink -> createdAt = BackupCodec.open(input, password, sink) }
+                }
+                staged = history
+                OpenStoredBackup(requireNotNull(createdAt), history)
             }
-            OpenStoredBackup(requireNotNull(createdAt), history)
+        } catch (e: Throwable) {
+            // A cancelled withContext drops a finished result, so the spool is discarded here rather than by the caller.
+            staged?.let { withContext(NonCancellable + Dispatchers.IO) { runCatching { store.discardHistory(it.id) } } }
+                ?.exceptionOrNull()?.let(e::addSuppressed)
+            throw e
         } finally { password.fill('\u0000') }
     }
 }

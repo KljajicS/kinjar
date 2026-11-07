@@ -94,7 +94,8 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
 
     fun replace(history: FamilyHistory, quarantineInvalid: Boolean = false) = replace(history.source(), quarantineInvalid)
 
-    fun receive(payloads: List<ByteArray>, familyId: String, datasetId: String) {
+    /** True when an operation was newly stored; duplicates and quarantined payloads leave projections valid. */
+    fun receive(payloads: List<ByteArray>, familyId: String, datasetId: String): Boolean {
         val incoming = payloads.map { bytes ->
             try { OperationCodec.decode(bytes) } catch (e: UnsupportedSyncVersion) { throw e }
             catch (_: IllegalArgumentException) { quarantine(QuarantinedOperation.from(bytes)); null }
@@ -110,12 +111,16 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
             incoming.filterNotNull().forEach { op -> op.events.forEach { (it.event as? LoanPaymentAdded)?.let { e -> found[e.payment.id] = e.payment } } }
             found
         }
+        var stored = false
         incoming.zip(payloads).forEach { (operation, bytes) ->
             if (operation != null) {
                 if (operation.familyId != familyId || operation.datasetId != datasetId) quarantine(QuarantinedOperation.from(bytes, "IDENTITY_MISMATCH"))
-                else acceptOrQuarantine(bytes, operation) { payments[it] }
+                else if (db.syncOperationQueries.byId(operation.id).executeAsOneOrNull()?.payload?.contentEquals(bytes) != true) {
+                    if (acceptOrQuarantine(bytes, operation) { payments[it] }) stored = true
+                }
             }
         }
+        return stored
     }
 
     fun quarantine(value: QuarantinedOperation) {

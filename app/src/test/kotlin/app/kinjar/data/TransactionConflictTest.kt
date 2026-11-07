@@ -36,6 +36,27 @@ class TransactionConflictTest {
 
     private fun amount() = db.txQueries.all().executeAsList().single { it.id == "t" }.amount
 
+    @Test fun `a form filled before an incoming correction can neither overwrite nor delete it`() = runTest {
+        enrolled()
+        val shown = requireNotNull(repo.transaction("t"))
+        receive(edit("two", "1300"))
+        assertEquals("1300.00", amount())
+        val pending = db.syncOutboxQueries.pending("family", "dataset").executeAsList().size
+
+        assertTrue(runCatching { repo.edit(shown.copy(merchant = "Market"), expected = shown) }.exceptionOrNull() is StaleTransaction)
+        assertTrue(runCatching { repo.delete("t", expected = shown) }.exceptionOrNull() is StaleTransaction)
+        assertEquals("1300.00", amount())
+        assertEquals("Groceries", db.txQueries.all().executeAsList().single().merchant)
+        assertEquals(pending, db.syncOutboxQueries.pending("family", "dataset").executeAsList().size)
+
+        val reloaded = requireNotNull(repo.transaction("t"))
+        repo.edit(reloaded.copy(merchant = "Market"), expected = reloaded)
+        assertEquals("1300.00", amount())
+        assertEquals("Market", db.txQueries.all().executeAsList().single().merchant)
+        repo.delete("t", expected = requireNotNull(repo.transaction("t")))
+        assertTrue(db.txQueries.all().executeAsList().isEmpty())
+    }
+
     @Test fun `keeping one version applies it whole, keeps the payer and blocks edits until then`() = runTest {
         enrolled()
         val a = edit("one", "1400")

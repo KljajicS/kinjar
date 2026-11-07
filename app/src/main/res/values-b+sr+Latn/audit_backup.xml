@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audit_backup_delete_copy">Obriši kopiju</string>
+    <string name="audit_backup_delete_copy_title">Obrisati ovu zadržanu kopiju?</string>
+    <string name="audit_backup_delete_copy_warning">Kopija se trajno uklanja sa ovog telefona. Trenutne finansije se ne menjaju. Prvo je izvezi ako bi ti kasnije mogla zatrebati.</string>
+</resources>

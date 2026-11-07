@@ -15,8 +15,8 @@ data class CategoryChange(val categoryId: String?, val current: Money, val previ
     val delta: Money get() = current - previous
 
     /** Null when nothing was spent before: shown as new spending rather than an infinite percentage. */
-    val percent: Int? get() = if (previous.isZero) null else
-        delta.amount.multiply(BigDecimal(100)).divide(previous.amount, 0, RoundingMode.HALF_UP).toInt()
+    val percent: BigDecimal? get() = if (previous.isZero) null else
+        delta.amount.multiply(BigDecimal(100)).divide(previous.amount, 0, RoundingMode.HALF_UP)
 }
 
 data class InsightsSummary(

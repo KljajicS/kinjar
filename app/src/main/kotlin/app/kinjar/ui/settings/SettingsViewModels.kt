@@ -79,7 +79,7 @@ class SettingsViewModel @Inject constructor(private val repo: BudgetRepository, 
         if (s.name.isBlank()) return
         writes.run(finish = false) {
             repo.renameMember(id, s.name)
-            _state.update { it.copy(saved = true) }
+            _state.update { it.copy(saved = it.name == s.name) }
         }
     }
 }

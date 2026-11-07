@@ -12,11 +12,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import app.kinjar.R
+import app.kinjar.data.DiagnosticOperation
+import app.kinjar.data.Diagnostics
 import app.kinjar.ui.theme.LocalColors
 
 data class WriteState(val busy: Boolean = false, val failed: Boolean = false, val finished: Boolean = false)
 
-class WriteOperation(private val scope: CoroutineScope) {
+class WriteOperation(private val scope: CoroutineScope, private val diagnosticOperation: DiagnosticOperation = DiagnosticOperation.UI_WRITE) {
     private val mutableState = MutableStateFlow(WriteState())
     val state: StateFlow<WriteState> = mutableState
 
@@ -35,7 +37,8 @@ class WriteOperation(private val scope: CoroutineScope) {
             } catch (e: CancellationException) {
                 mutableState.value = WriteState()
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Diagnostics.report(diagnosticOperation, e)
                 mutableState.value = WriteState(failed = true)
             }
         }

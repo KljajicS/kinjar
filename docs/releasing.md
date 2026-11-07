@@ -2,6 +2,10 @@
 
 Tagged releases publish a signed release APK, `kinjar-release.apk`. Every release must use the same retained signing key. CI fails when signing configuration is missing instead of publishing an APK signed with a temporary debug key.
 
+Each release also retains `kinjar-mapping.txt` from that exact minified build and `SHA256SUMS` covering both files. Keep them with the APK and tag; mapping files from another build cannot reliably retrace a crash. Application diagnostics contain only fixed operation/error categories and are rate-limited. They never include financial values, receipt URLs, account identifiers, exception messages, or stack traces.
+
+Firestore test dependencies are pinned by `firebase/package-lock.json`. Install with `npm --prefix firebase ci --ignore-scripts`. Review lockfile changes when updating dependencies so rerunning a release uses the same resolved tooling.
+
 The workflow runs on version-tag pushes only. New tags run workflow validation, lint, JVM tests and the debug build, followed by the signed-release job. Branch pushes and pull requests do not trigger it; updates to existing tags skip both jobs. The workflow creates the GitHub release itself. Use tags such as `v0.3.0`; the release title strips the leading `v`, giving `0.3.0`. Run `make lint-workflows` before changing workflows; it uses installed actionlint or downloads a checksum-pinned Linux x86-64 binary to temporary storage.
 
 Configure repository Actions secrets:

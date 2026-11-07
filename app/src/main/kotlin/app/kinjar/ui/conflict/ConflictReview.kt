@@ -1,5 +1,6 @@
 package app.kinjar.ui.conflict
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -66,30 +67,53 @@ fun ConflictReview(state: ReviewState, review: TransactionReview, vm: Transactio
             Text(stringResource(R.string.conflict_title), style = sans(15, FontWeight.Medium), color = c.text)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (state.failed) ConflictCheckFailed(R.string.audit_conflict_check_failed, vm::retry)
             if (review.versions.isEmpty()) {
                 Text(stringResource(R.string.conflict_waiting), style = BodyStyle, color = c.muted)
                 return@Column
             }
             Text(stringResource(R.string.conflict_body), style = BodyStyle, color = c.muted)
-            VersionCard(stringResource(R.string.conflict_current), review.current, state, null, !writes.busy) { keeping = CURRENT }
+            VersionCard(stringResource(R.string.conflict_current), review.current, state, null, !writes.busy && !state.failed) { keeping = CURRENT }
             val otherPhone = stringResource(R.string.conflict_other_phone)
             val thisPhone = stringResource(R.string.conflict_this_phone)
             review.versions.forEach { v ->
                 val author = listOfNotNull(v.author ?: otherPhone.takeIf { !v.thisPhone }, thisPhone.takeIf { v.thisPhone },
                     time.format(v.madeAt.atZone(ZoneId.systemDefault()))).joinToString(" · ")
-                VersionCard(author, v.transaction, state, stringResource(R.string.conflict_cannot_apply).takeIf { !v.keepable }, !writes.busy,
+                VersionCard(author, v.transaction, state, stringResource(R.string.conflict_cannot_apply).takeIf { !v.keepable }, !writes.busy && !state.failed,
                     onKeep = if (v.keepable) ({ keeping = v.operationId }) else null)
             }
             Text(stringResource(R.string.conflict_edit_after), style = CaptionStyle, color = c.muted)
         }
     }
 
-    keeping?.let { id ->
+    keeping?.takeUnless { state.failed }?.let { id ->
         ConfirmDialog(stringResource(R.string.conflict_keep_title), stringResource(R.string.conflict_keep), writes.busy,
             onConfirm = { if (id == CURRENT) vm.keepCurrent() else vm.keep(id) }, onDismiss = { keeping = null }) {
             Text(stringResource(R.string.conflict_keep_body), style = sans(14), color = c.text)
             WriteFeedback(vm.writes, R.string.conflict_failed)
         }
+    }
+}
+
+/** Stands in for the edit form while it is unknown whether the transaction has held versions. */
+@Composable
+fun ConflictCheckFailedScreen(onRetry: () -> Unit, onClose: () -> Unit) {
+    val c = LocalColors.current
+    Column(
+        Modifier.fillMaxSize().background(c.bg).padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        RoundIconButton(Icons.Default.Close, stringResource(R.string.add_close), onClose)
+        ConflictCheckFailed(R.string.audit_conflict_check_failed, onRetry)
+    }
+}
+
+@Composable
+fun ConflictCheckFailed(@StringRes message: Int, onRetry: () -> Unit) {
+    val c = LocalColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(message), style = BodyStyle, color = c.orange)
+        TextButton(onClick = onRetry) { Text(stringResource(R.string.audit_finance_retry), color = c.primary) }
     }
 }
 

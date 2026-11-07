@@ -9,6 +9,11 @@ service cloud.firestore {
     function userPath(uid) { return /databases/$(database)/documents/users/$(uid); }
     function statePath(fid, did) { return /databases/$(database)/documents/families/$(fid)/datasets/$(did); }
     function opPath(fid, did, oid) { return /databases/$(database)/documents/families/$(fid)/datasets/$(did)/operations/$(oid); }
+    function claimPath(fid, iid) { return /databases/$(database)/documents/families/$(fid)/claims/$(iid); }
+    // Provisioned only with administrator credentials; clients can read their own entry but never write one.
+    function admitted() {
+      return get(/databases/$(database)/documents/admission/$(request.auth.uid)).data.enabled == true;
+    }
     function member(fid) {
       return signedIn() && request.auth.uid in get(familyPath(fid)).data.members
         && get(familyPath(fid)).data.status != 'DELETING';
@@ -20,7 +25,8 @@ service cloud.firestore {
     function invitedAt(fid, sid) {
       let path = /databases/$(database)/documents/families/$(fid)/invites/$(sid);
       return signedIn() && exists(path) && get(path).data.status == 'PENDING'
-        && get(path).data.email == request.auth.token.email && get(path).data.createdAt + duration.value(6, 'd') > request.time;
+        && get(path).data.email == request.auth.token.email && get(path).data.createdAt + duration.value(6, 'd') > request.time
+        && get(path).data.inviter in get(familyPath(fid)).data.admins;
     }
     function invited(fid) {
       return invitedAt(fid, '0') || invitedAt(fid, '1') || invitedAt(fid, '2')
@@ -66,6 +72,10 @@ service cloud.firestore {
       return user.status == 'ACTIVE' && archivedBy(uid, user.familyId, target);
     }
 
+    match /admission/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+    }
+
     match /slots/{id} {
       allow get: if signedIn();
       allow create: if signedIn() && slot(id) && request.resource.data.keys().hasOnly(['familyId', 'owner'])
@@ -103,7 +113,7 @@ service cloud.firestore {
     match /families/{fid} {
       allow get: if member(fid) || deletingOwner(fid) || invited(fid);
       allow list: if signedIn() && resource.data.owner == request.auth.uid && resource.data.status == 'ARCHIVED';
-      allow create: if signedIn() && identifier(fid) && familyShape(request.resource.data) && noFamily(request.auth.uid)
+      allow create: if signedIn() && admitted() && identifier(fid) && familyShape(request.resource.data) && noFamily(request.auth.uid)
         && request.resource.data.owner == request.auth.uid && request.resource.data.admins == [request.auth.uid]
         && request.resource.data.members.keys().hasOnly([request.auth.uid])
         && identifier(request.resource.data.members[request.auth.uid])
@@ -123,6 +133,7 @@ service cloud.firestore {
           && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
           && !(request.auth.uid in resource.data.members) && identifier(request.resource.data.members[request.auth.uid])
           && invite.status == 'PENDING' && invite.email == request.auth.token.email && invite.createdAt + duration.value(6, 'd') > request.time
+          && invite.inviter in resource.data.admins
           && after.status == 'ACCEPTED' && after.uid == request.auth.uid && linkedAfter(request.auth.uid, fid);
       }
       function archiving() {
@@ -251,6 +262,7 @@ service cloud.firestore {
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
             || (resource.data.status == 'PENDING' && resource.data.email == request.auth.token.email
               && resource.data.createdAt + duration.value(6, 'd') > request.time && request.resource.data.status == 'ACCEPTED'
+              && resource.data.inviter in get(familyPath(fid)).data.admins
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'uid'])
               && linkedAfter(request.auth.uid, fid)));
@@ -262,8 +274,23 @@ service cloud.firestore {
         allow create: if member(fid) && open(fid) && smallSlot(sid)
           && request.resource.data.keys().hasOnly(['uid', 'installId', 'name', 'createdAt'])
           && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId)
-          && request.resource.data.name is string && request.resource.data.name.size() <= 80 && request.resource.data.createdAt == request.time;
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80 && request.resource.data.createdAt == request.time
+          && getAfter(claimPath(fid, request.resource.data.installId)).data.uid == request.auth.uid;
         allow delete: if deletingOwner(fid) || (open(fid) && (admin(fid) || (member(fid) && resource.data.uid == request.auth.uid)));
+      }
+
+      // Operation IDs are installId:sequence, so an installation ID belongs permanently to the first account that claims it.
+      // Claims are never updated and outlive device-slot and membership removal; only family deletion clears them.
+      match /claims/{iid} {
+        allow get: if member(fid) || deletingOwner(fid);
+        allow list: if deletingOwner(fid);
+        allow create: if member(fid) && open(fid) && identifier(iid)
+          && request.resource.data.keys().hasOnly(['uid', 'installSlot', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid && request.resource.data.createdAt == request.time
+          && smallSlot(request.resource.data.installSlot)
+          && getAfter(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.uid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.installId == iid;
+        allow delete: if deletingOwner(fid);
       }
 
       match /datasets/{did} {
@@ -383,6 +410,7 @@ service cloud.firestore {
             && smallSlot(request.resource.data.installSlot)
             && get(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.uid == request.auth.uid
             && get(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.installId == request.resource.data.installId
+            && get(claimPath(fid, request.resource.data.installId)).data.uid == request.auth.uid
             && oid == request.resource.data.installId + ':' + string(request.resource.data.sequence)
             && request.resource.data.payload is bytes && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
             && request.resource.data.cost is int && request.resource.data.cost >= request.resource.data.payload.size()

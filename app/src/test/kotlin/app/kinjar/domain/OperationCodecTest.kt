@@ -98,6 +98,22 @@ class OperationCodecTest {
         assertThrows(IllegalArgumentException::class.java) { OperationCodec.encode(op(parents = ids(1_000) + "peer:9999999999999999999")) }
     }
 
+    @Test fun `reference budget covers parents and rejections together before references are built`() {
+        val compact = wire(rejected = """[{"install":"gone","ranges":[1,5]}]""")
+        val decoded = OperationCodec.decode(compact, 1_006)
+        assertEquals(1_001 to 5, decoded.parents.size to decoded.rejected.size)
+        assertArrayEquals(compact, OperationCodec.encode(decoded))
+        val explicit = OperationCodec.encode(op(parents = ids(3), rejected = ids(2, "gone")))
+        assertEquals(1, versionOf(explicit))
+        assertEquals(op(parents = ids(3), rejected = ids(2, "gone")), OperationCodec.decode(explicit, 5))
+        val hostile = wire(parents = """[{"install":"peer","ranges":[1,100000]}]""", rejected = """[{"install":"gone","ranges":[1,100000]}]""")
+        listOf(compact to 0L, compact to 1_000L, compact to 1_005L, explicit to 4L, hostile to 0L, hostile to 199_999L).forEach { (bytes, budget) ->
+            val error = assertThrows("$budget", IllegalArgumentException::class.java) { OperationCodec.decode(bytes, budget) }
+            assertFalse(error is UnsupportedSyncVersion)
+        }
+        assertEquals(200_000, OperationCodec.decode(hostile, 200_000).let { it.parents.size + it.rejected.size })
+    }
+
     @Test(timeout = 10_000) fun `malformed or hostile ranges fail without expanding`() {
         val max = Long.MAX_VALUE
         val parents = listOf(

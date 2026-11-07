@@ -49,7 +49,7 @@ data class SyncOperation(
         require(version == requiredVersion(parents, rejected, events) && sequence > 0)
         require(listOf(familyId, datasetId, authorUid, installId).all { it.matches(Regex("[A-Za-z0-9_-]{1,128}")) })
         require(resources.size <= 1_000 && parents.size <= MAX_REFERENCES && rejected.size <= MAX_REFERENCES)
-        require(parents.all(::validOperationId) && rejected.all(::validOperationId))
+        require(validReferences(parents) && validReferences(rejected))
         require(id !in parents && id !in rejected)
         require(resources.keys.all { it.length in 1..256 })
         require(events.size <= 1_000 && (events.isNotEmpty() || rejected.isNotEmpty()))
@@ -73,6 +73,9 @@ private const val MAX_REFERENCES = 100_000
 private val OPERATION_ID = Regex("[A-Za-z0-9_-]{1,128}:[1-9][0-9]{0,18}")
 
 private fun validOperationId(value: String): Boolean = value.matches(OPERATION_ID)
+
+// Decoded ranges were validated without expansion: an identifier-shaped installation and sequences of at least 1.
+private fun validReferences(ids: Set<String>): Boolean = ids is ReferenceSet || ids.all(::validOperationId)
 
 // Version 2 sends references as start,end pairs of maximal contiguous sequence runs, grouped by installation in ascending order.
 @Serializable
@@ -102,8 +105,9 @@ private fun toRanges(ids: Set<String>): List<ReferenceRanges> = if (ids is Refer
             ReferenceRanges(install, ranges)
         }
 
-private fun fromRanges(groups: List<ReferenceRanges>): Set<String> {
+private fun fromRanges(groups: List<ReferenceRanges>, budget: Long): Set<String> {
     require(groups.zipWithNext().all { (a, b) -> a.install < b.install }) { "Installations must be unique and ordered" }
+    val limit = minOf(MAX_REFERENCES.toLong(), budget)
     var total = 0L
     groups.forEach { group ->
         require(group.install.matches(Regex("[A-Za-z0-9_-]{1,128}"))) { "Invalid installation" }
@@ -113,7 +117,7 @@ private fun fromRanges(groups: List<ReferenceRanges>): Set<String> {
             val start = ranges[i]
             val end = ranges[i + 1]
             require(start in 1..end && (i == 0 || start - 1 > ranges[i - 1])) { "Reference ranges must be ordered, disjoint and not adjacent" }
-            require(end - start < MAX_REFERENCES - total) { "Too many references" }
+            require(end - start < limit - total) { "Too many references" }
             total += end - start + 1
         }
     }
@@ -168,7 +172,8 @@ object OperationCodec {
         require(it.size <= MAX_BYTES) { "Sync operation too large" }
     }
 
-    fun decode(bytes: ByteArray): SyncOperation {
+    /** Rejects payloads whose parent and rejection references together exceed [maxReferences], before building them. */
+    fun decode(bytes: ByteArray, maxReferences: Long = Long.MAX_VALUE): SyncOperation {
         require(bytes.size in 1..MAX_BYTES)
         val text = bytes.toString(Charsets.UTF_8)
         require(text.toByteArray(Charsets.UTF_8).contentEquals(bytes)) { "Invalid UTF-8" }
@@ -176,9 +181,13 @@ object OperationCodec {
         val version = root["version"]?.jsonPrimitive?.intOrNull
         require(version != null && version > 0) { "Invalid sync version" }
         if (version > 3) throw UnsupportedSyncVersion()
-        if (version == 1) return json.decodeFromString<SyncOperation>(text)
+        if (version == 1) return json.decodeFromString<SyncOperation>(text).also {
+            require(it.parents.size.toLong() + it.rejected.size <= maxReferences) { "Too many references" }
+        }
         val wire = json.decodeFromString<SyncOperationV2>(text)
+        val parents = fromRanges(wire.parents, maxReferences)
+        val rejected = fromRanges(wire.rejected, maxReferences - parents.size)
         return SyncOperation(wire.version, wire.familyId, wire.datasetId, wire.authorUid, wire.installId, wire.sequence,
-            fromRanges(wire.parents), wire.resources, wire.events, fromRanges(wire.rejected))
+            parents, wire.resources, wire.events, rejected)
     }
 }
