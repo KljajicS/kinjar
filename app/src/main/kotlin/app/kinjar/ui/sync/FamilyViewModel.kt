@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import javax.inject.Inject
+import kotlin.concurrent.thread
 
 data class ConflictItem(val operation: SyncOperation, val reason: String)
 data class RetainedCopy(val id: String, val createdAt: Instant)
@@ -84,7 +85,7 @@ class FamilyViewModel @Inject constructor(
             var previousPhase: SyncPhase? = null
             sync.status.collect { status ->
                 val wasRestoring = state.value.journalPhase == "RESTORE"
-                withContext(Dispatchers.IO) { loadLocal() }
+                loadLocal()
                 if (wasRestoring && state.value.journalPhase == null && status.phase in setOf(SyncPhase.READY, SyncPhase.CLEANUP_REQUIRED)) {
                     cancelBackupRestore()
                     writes.clearFailure()
@@ -153,7 +154,7 @@ class FamilyViewModel @Inject constructor(
         mutableState.update { it.copy(completedEnrollment = true) }
     }
     fun confirmReplacement() = run { sync.confirmReplacement(); load(); mutableState.update { it.copy(completedEnrollment = true) } }
-    fun cancelReplacement() = run { sync.cancelReplacement(); loadLocal() }
+    fun cancelReplacement() = run { withContext(Dispatchers.IO) { sync.cancelReplacement() }; loadLocal() }
     fun abandonRecovery() = run { sync.abandonRecovery(); loadLocal() }
     fun invite(email: String) = run { families.invite(requireFamily(), email); load(); mutableState.update { it.copy(notice = R.string.fbs_invitation_sent) } }
     fun cancelInvitations() = run { families.cancelInvitations(requireFamily()); load() }
@@ -165,7 +166,7 @@ class FamilyViewModel @Inject constructor(
     fun resumeRestore() = run { sync.resumeRestore(); cancelBackupRestore(); load(); mutableState.update { it.copy(notice = R.string.fbs_restored) } }
     fun cancelRestore() = run { sync.cancelRestore(requireFamily()); cancelBackupRestore(); load(); mutableState.update { it.copy(notice = R.string.fbs_restore_cancelled) } }
     fun cleanup() = run { sync.cleanupFamily(requireFamily()); load() }
-    fun discard(id: String) = run { store.discardConflictingChange(id); loadLocal(); sync.synchronize(); load() }
+    fun discard(id: String) = run { withContext(Dispatchers.IO) { store.discardConflictingChange(id) }; loadLocal(); sync.synchronize(); load() }
 
     fun loadArchives() = run {
         val uid = requireNotNull(auth.current()).uid
@@ -194,7 +195,7 @@ class FamilyViewModel @Inject constructor(
                 val history = if (archive != null) sync.archivedHistory(archive) else withContext(Dispatchers.IO) {
                     if (copy == null) store.captureHistory() else {
                         val uid = auth.current()?.uid ?: "local"
-                        requireNotNull(store.draftHistory(uid, copy)) { "Retained copy is unavailable" }
+                        requireNotNull(listOf(uid, "local").firstNotNullOfOrNull { store.draftHistory(it, copy) }) { "Retained copy is unavailable" }
                     }
                 }
                 try { backups.write(uri, history, password) }
@@ -234,7 +235,7 @@ class FamilyViewModel @Inject constructor(
         val backup = requireNotNull(opened)
         val digest = requireNotNull(restoreDigest)
         try {
-            if (store.read { db.syncSessionQueries.current().executeAsOneOrNull() } == null) {
+            if (withContext(Dispatchers.IO) { store.read { db.syncSessionQueries.current().executeAsOneOrNull() } } == null) {
                 withContext(Dispatchers.IO) { store.restoreLocal(backup.history, digest) }
                 handedOff = true
             } else if (state.value.journalPhase == "RESTORE") sync.resumeRestore()
@@ -280,13 +281,13 @@ class FamilyViewModel @Inject constructor(
                 else -> fallback
             }
             mutableState.update { it.copy(failureText = message) }
-            withContext(Dispatchers.IO) { loadLocal() }
+            loadLocal()
             throw e
         }
     }
 
     private suspend fun load() {
-        withContext(Dispatchers.IO) { loadLocal() }
+        loadLocal()
         val account = auth.current()
         if (account == null) {
             mutableState.update { it.copy(account = null, family = null, invitations = emptyList(), devices = emptyList(), archives = emptyList(), archivesLoaded = false) }
@@ -311,14 +312,16 @@ class FamilyViewModel @Inject constructor(
         mutableState.update { it.copy(account = account, family = family, invitations = invites, devices = devices, sessionMatchesCloud = matchesCloud) }
     }
 
-    private fun loadLocal() = store.read {
+    private suspend fun loadLocal() = withContext(Dispatchers.IO) { store.read {
         val conflicts = db.syncConflictQueries.all().executeAsList().mapNotNull { row ->
             db.syncOperationQueries.byId(row.operation_id).executeAsOneOrNull()?.let { ConflictItem(OperationCodec.decode(it.payload), row.reason) }
         }
         val session = db.syncSessionQueries.current().executeAsOneOrNull()
         val members = db.memberQueries.all().executeAsList()
         val uid = auth.current()?.uid ?: "local"
-        val copies = db.syncDraftQueries.draftInfo(uid).executeAsList().map { RetainedCopy(it.id, Instant.ofEpochMilli(it.created_at)) }
+        // Copies saved without a session belong to this device, so they stay visible after any sign-in.
+        val copies = setOf(uid, "local").flatMap { db.syncDraftQueries.draftInfo(it).executeAsList() }
+            .sortedByDescending { it.created_at }.map { RetainedCopy(it.id, Instant.ofEpochMilli(it.created_at)) }
         val journal = db.restoreJournalQueries.journalInfo().executeAsOneOrNull()
         mutableState.update { it.copy(names = members.associate { m -> m.id to m.display_name }, conflicts = conflicts, copies = copies,
             quarantined = db.syncQuarantineQueries.all().executeAsList().size,
@@ -327,12 +330,13 @@ class FamilyViewModel @Inject constructor(
             backupDate = if (journal?.phase == "RESTORE") null else it.backupDate,
             sessionMatchesAccount = session != null && session.uid == uid,
             enrolled = session != null, hasLocalMember = members.isNotEmpty()) }
-    }
+    } }
 
     override fun onCleared() {
         exportPassword?.fill('\u0000')
         exportPassword = null
-        opened?.history?.takeUnless { handedOff }?.let { store.releaseHistory(it.id) }
+        // releaseHistory waits on the store lock and viewModelScope is already cancelled here.
+        opened?.history?.takeUnless { handedOff }?.let { thread(name = "release-history") { store.releaseHistory(it.id) } }
         opened = null
     }
 }

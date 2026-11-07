@@ -2,6 +2,8 @@ package app.kinjar.data.backup
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import app.kinjar.data.EventStore
 import app.kinjar.data.StoredHistory
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -10,15 +12,37 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import javax.inject.Inject
 
-class BackupFiles @Inject constructor(@ApplicationContext private val context: Context, private val store: EventStore) {
-    suspend fun write(uri: Uri, history: StoredHistory, password: CharArray) = withContext(Dispatchers.IO) {
+class BackupFiles internal constructor(
+    private val context: Context,
+    private val store: EventStore,
+    private val deleteDocument: (Uri) -> Unit,
+) {
+    @Inject constructor(@ApplicationContext context: Context, store: EventStore) :
+        this(context, store, { check(DocumentsContract.deleteDocument(context.contentResolver, it)) { "Incomplete backup could not be removed" } })
+
+    // Only an initially empty destination is eligible for failed-export cleanup.
+    suspend fun write(uri: Uri, history: StoredHistory, password: CharArray) {
         try {
-            val written = requireNotNull(context.contentResolver.openOutputStream(uri, "wt")).buffered().use {
-                BackupCodec.seal(store.historySource(history.id), it, password)
+            withContext(Dispatchers.IO) {
+                val created = isEmpty(uri)
+                try {
+                    val written = requireNotNull(context.contentResolver.openOutputStream(uri, "wt")).buffered().use {
+                        BackupCodec.seal(store.historySource(history.id), it, password)
+                    }
+                    check(written.digest == history.digest) { "History changed while writing the backup" }
+                } catch (e: Throwable) {
+                    if (created) runCatching { deleteDocument(uri) }.exceptionOrNull()?.let { e.addSuppressed(it) }
+                    throw e
+                }
             }
-            check(written.digest == history.digest) { "History changed while writing the backup" }
         } finally { password.fill('\u0000') }
     }
+
+    private fun isEmpty(uri: Uri): Boolean = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use {
+            it.moveToFirst() && !it.isNull(0) && it.getLong(0) == 0L
+        }
+    }.getOrNull() == true
 
     /** The backup's history as a finished spool; a damaged or partial file leaves no spool behind. */
     suspend fun read(uri: Uri, password: CharArray): OpenStoredBackup = withContext(Dispatchers.IO) {

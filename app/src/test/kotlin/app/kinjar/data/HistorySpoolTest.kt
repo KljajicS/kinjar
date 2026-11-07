@@ -113,6 +113,22 @@ class HistorySpoolTest {
         assertEquals(setOf(captured.id, opened.id), spools().toSet())
     }
 
+    @Test fun `releasing a restore input before capture cannot replace finances with missing history`() = runTest {
+        store.append(account("a"))
+        val before = store.snapshot()
+        val incoming = store.writeHistory(sequenceOf(HistoryRecord.Baseline(
+            OperationEvent("import", "peer", 1, 1, account("b")))))
+        val digest = store.currentDigest()
+        store.releaseHistory(incoming.id)
+
+        assertThrows(IllegalArgumentException::class.java) { store.restoreLocal(incoming, digest) }
+
+        assertEquals(before, store.snapshot())
+        assertEquals(digest, store.currentDigest())
+        assertTrue(db.syncDraftQueries.draftInfo("local").executeAsList().isEmpty())
+        assertTrue(exists(incoming.id))
+    }
+
     @Test fun `activation stores baseline and retained copy as spools and consumes its inputs`() = runTest {
         store.append(account("a"))
         val prior = store.snapshot()
