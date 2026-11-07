@@ -224,7 +224,7 @@ class HistorySpoolTest {
     @Test fun `version 1 rows written before migration eleven survive it`() {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         javaClass.getResource("/schema-v5.sql")!!.readText().split(';').filter { it.isNotBlank() }.forEach { driver.execute(null, it, 0) }
-        KinjarDb.Schema.migrate(driver, 5, KinjarDb.Schema.version - 1)
+        KinjarDb.Schema.migrate(driver, 5, 11)
         val old = KinjarDb(driver)
         seedLegacyEvents(old, listOf(account("a")), Instant.EPOCH)
         val legacy = FamilyHistory(baseline = listOf(OperationEvent("legacy-0", "legacy", 1, 0, account("a"))), operations = emptyList())
@@ -232,7 +232,7 @@ class HistorySpoolTest {
         old.syncDraftQueries.save("copy", "user", "family", 1, HistoryCodec.encode(legacy))
         old.restoreJournalQueries.save("user", "family", "", "target", "token", "REPLACE",
             JsonObject(mapOf("history" to Json.encodeToJsonElement(FamilyHistory.serializer(), legacy))).toString().toByteArray())
-        KinjarDb.Schema.migrate(driver, KinjarDb.Schema.version - 1, KinjarDb.Schema.version)
+        KinjarDb.Schema.migrate(driver, 11, KinjarDb.Schema.version)
         val db = KinjarDb(driver)
         val migrated = EventStore(db, "local", clock, Projector(db))
         migrated.rebuild()

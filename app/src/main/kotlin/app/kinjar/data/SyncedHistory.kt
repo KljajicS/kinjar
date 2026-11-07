@@ -138,7 +138,9 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
 
     /** Replay inputs without payload weight: collisions only inspect the events of single-event operations. */
     fun operationViews(): List<SyncOperation> = db.syncOperationQueries.all { _, _, _, payload ->
-        OperationCodec.decode(payload).let { it.copy(familyId = "history", datasetId = "history", events = it.events.take(2)) }
+        OperationCodec.decode(payload).let {
+            it.copy(familyId = "history", datasetId = "history", events = if (it.version == 3) it.events else it.events.take(2))
+        }
     }.executeAsList()
 
     fun operation(id: String): SyncOperation = OperationCodec.decode(db.syncOperationQueries.byId(id).executeAsOne().payload)
@@ -150,7 +152,7 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
         val integrity = FinancialIntegrity()
         spool.records(baseline).chunked(5_000).forEach { chunk ->
             val events = chunk.map { (it as HistoryRecord.Baseline).event }
-            integrity.applyAtomically(events.map { it.event }, strict = false)
+            integrity.applyRecords(events, strict = false)
             events.forEach { projector.apply(it.record()) }
         }
         integrity.validate()
@@ -164,7 +166,7 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
                 db.syncConflictQueries.save(view.id, "WAITING_FOR_DEPENDENCY")
             } else {
                 val operation = operation(view.id)
-                val next = runCatching { integrity.applyAtomically(operation.events.map { it.event }, strict = true) }
+                val next = runCatching { integrity.applyRecords(operation.events, strict = true) }
                 if (next.isFailure) {
                     invalid += operation.id
                     db.syncConflictQueries.save(operation.id, "INVALID_FINANCIAL_CHANGE")

@@ -1,0 +1,13 @@
+CREATE TABLE receipt_deletion (
+    transaction_id TEXT NOT NULL PRIMARY KEY,
+    event_id TEXT NOT NULL
+);
+
+byTransaction:
+SELECT event_id FROM receipt_deletion WHERE transaction_id = ?;
+
+save:
+INSERT OR REPLACE INTO receipt_deletion(transaction_id, event_id) VALUES (?, ?);
+
+deleteAll:
+DELETE FROM receipt_deletion;

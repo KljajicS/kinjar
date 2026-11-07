@@ -10,12 +10,13 @@ class FinancialIntegrity private constructor(
     private val adjustments: MutableMap<String, LoanAdjustment>,
     private val receipts: MutableMap<String, Receipt>,
     private val removedPayments: MutableSet<String>,
+    private val deletions: MutableMap<String, String>,
 ) {
-    constructor() : this(mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableSetOf())
+    constructor() : this(mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableSetOf(), mutableMapOf())
 
     fun applying(events: List<Event>, strict: Boolean): FinancialIntegrity {
         val next = FinancialIntegrity(accounts.toMutableMap(), transactions.toMutableMap(), loans.toMutableMap(), payments.toMutableMap(),
-            adjustments.toMutableMap(), receipts.toMutableMap(), removedPayments.toMutableSet())
+            adjustments.toMutableMap(), receipts.toMutableMap(), removedPayments.toMutableSet(), deletions.toMutableMap())
         events.forEach { next.apply(it, strict) }
         if (strict) next.validate()
         return next
@@ -23,6 +24,14 @@ class FinancialIntegrity private constructor(
 
     /** Rollback only touched entries when a command fails, rather than copying the entire financial history. */
     fun applyAtomically(events: List<Event>, strict: Boolean) {
+        applyAtomically(events, strict, emptyMap())
+    }
+
+    fun applyRecords(records: List<OperationEvent>, strict: Boolean) {
+        applyAtomically(records.map { it.event }, strict, records.indices.associateWith { records[it].id })
+    }
+
+    private fun applyAtomically(events: List<Event>, strict: Boolean, ids: Map<Int, String>) {
         val undo = mutableListOf<() -> Unit>()
         fun <T> remember(map: MutableMap<String, T>, id: String) {
             val before = map[id]
@@ -41,7 +50,11 @@ class FinancialIntegrity private constructor(
                     event.receipt?.let { remember(receipts, it.id) }
                 }
                 is TransactionEdited -> { remember(transactions, event.transaction.id); changedTransactions += event.transaction.id }
-                is TransactionDeleted -> { remember(transactions, event.transactionId); changedTransactions += event.transactionId }
+                is TransactionDeleted -> {
+                    remember(transactions, event.transactionId)
+                    remember(deletions, event.transactionId)
+                    changedTransactions += event.transactionId
+                }
                 is LoanCreated -> remember(loans, event.loan.id)
                 is LoanUpdated -> remember(loans, event.loan.id)
                 is LoanArchived -> remember(loans, event.loanId)
@@ -57,7 +70,7 @@ class FinancialIntegrity private constructor(
             }
         }
         try {
-            events.forEach { apply(it, strict) }
+            events.forEachIndexed { index, event -> apply(event, strict, ids[index]) }
             if (strict) {
                 validateTransactions(if (changedAccounts) transactions.values else changedTransactions.mapNotNull(transactions::get))
                 validateLoans()
@@ -88,7 +101,7 @@ class FinancialIntegrity private constructor(
         }
     }
 
-    private fun apply(event: Event, strict: Boolean) {
+    private fun apply(event: Event, strict: Boolean, id: String? = null) {
         when (event) {
             is AccountCreated -> accounts.putIfAbsent(event.account.id, event.account)
             is AccountUpdated -> accounts[event.account.id]?.let { accounts[it.id] = event.account.copy(archived = it.archived) }
@@ -97,7 +110,9 @@ class FinancialIntegrity private constructor(
                 if (strict) require(transactions[event.transaction.id]?.let { it == event.transaction } != false) { "Conflicting duplicate transaction" }
                 val prior = event.receipt?.let { receipts[it.id] }
                 if (strict && prior != null) require(prior == event.receipt) { "Conflicting duplicate receipt" }
-                if (prior == null) {
+                val restoring = event.receiptDeletionId != null && event.receiptDeletionId == deletions[event.transaction.id] &&
+                    event.transaction.id !in transactions
+                if (prior == null || restoring) {
                     if (strict) require(accounts[event.transaction.accountId]?.archived == false) { "Archived transaction account" }
                     event.receipt?.let { receipts[it.id] = it }
                     transactions.putIfAbsent(event.transaction.id, event.transaction)
@@ -107,7 +122,10 @@ class FinancialIntegrity private constructor(
                 if (strict) require(event.transaction.id in transactions) { "Transaction was deleted" }
                 if (event.transaction.id in transactions) transactions[event.transaction.id] = event.transaction
             }
-            is TransactionDeleted -> transactions.remove(event.transactionId)
+            is TransactionDeleted -> {
+                transactions.remove(event.transactionId)
+                if (id != null) deletions[event.transactionId] = id else deletions.remove(event.transactionId)
+            }
             is LoanCreated -> loans.putIfAbsent(event.loan.id, event.loan)
             is LoanUpdated -> loans[event.loan.id]?.let {
                 if (strict) require(event.loan.opening == it.opening && event.loan.start == it.start)

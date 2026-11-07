@@ -41,12 +41,12 @@ data class SyncOperation(
     constructor(
         familyId: String, datasetId: String, authorUid: String, installId: String, sequence: Long,
         parents: Set<String>, resources: Map<String, ResourceAccess>, events: List<OperationEvent>, rejected: Set<String> = emptySet(),
-    ) : this(requiredVersion(parents, rejected), familyId, datasetId, authorUid, installId, sequence, parents, resources, events, rejected)
+    ) : this(requiredVersion(parents, rejected, events), familyId, datasetId, authorUid, installId, sequence, parents, resources, events, rejected)
 
     val id: String get() = "$installId:$sequence"
 
     init {
-        require(version == requiredVersion(parents, rejected) && sequence > 0)
+        require(version == requiredVersion(parents, rejected, events) && sequence > 0)
         require(listOf(familyId, datasetId, authorUid, installId).all { it.matches(Regex("[A-Za-z0-9_-]{1,128}")) })
         require(resources.size <= 1_000 && parents.size <= MAX_REFERENCES && rejected.size <= MAX_REFERENCES)
         require(parents.all(::validOperationId) && rejected.all(::validOperationId))
@@ -60,8 +60,12 @@ data class SyncOperation(
     }
 }
 
-// Version 1 readers cap parents and rejected at 1000, so larger operations announce version 2 and older apps ask for an update instead of quarantining them.
-private fun requiredVersion(parents: Set<String>, rejected: Set<String>): Int = if (parents.size > 1_000 || rejected.size > 1_000) 2 else 1
+// Older readers must request an update before replaying a receipt restoration they cannot interpret.
+private fun requiredVersion(parents: Set<String>, rejected: Set<String>, events: List<OperationEvent>): Int = when {
+    events.any { (it.event as? TransactionAdded)?.receiptDeletionId != null } -> 3
+    parents.size > 1_000 || rejected.size > 1_000 -> 2
+    else -> 1
+}
 
 // Per-command validation budget, independent of the number of records in a history stream.
 private const val MAX_REFERENCES = 100_000
@@ -171,7 +175,7 @@ object OperationCodec {
         val root = json.parseToJsonElement(text).jsonObject
         val version = root["version"]?.jsonPrimitive?.intOrNull
         require(version != null && version > 0) { "Invalid sync version" }
-        if (version > 2) throw UnsupportedSyncVersion()
+        if (version > 3) throw UnsupportedSyncVersion()
         if (version == 1) return json.decodeFromString<SyncOperation>(text)
         val wire = json.decodeFromString<SyncOperationV2>(text)
         return SyncOperation(wire.version, wire.familyId, wire.datasetId, wire.authorUid, wire.installId, wire.sequence,

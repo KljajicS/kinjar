@@ -2,6 +2,8 @@ package app.kinjar.domain
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.YearMonth
@@ -58,7 +60,13 @@ data class AccountUpdated(val account: Account) : Event
 data class MemberRenamed(val memberId: String, val displayName: String) : Event
 
 @Serializable @SerialName("TransactionAdded")
-data class TransactionAdded(val transaction: Transaction, val receipt: Receipt? = null) : Event
+data class TransactionAdded(
+    val transaction: Transaction,
+    val receipt: Receipt? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val receiptDeletionId: String? = null,
+) : Event
 
 @Serializable @SerialName("TransactionEdited")
 data class TransactionEdited(val transaction: Transaction) : Event

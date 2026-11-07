@@ -207,7 +207,14 @@ class BudgetRepository(
     suspend fun add(t: Transaction) { store.append(TransactionAdded(t)) { loans.requireUnlinked(t.id); require(t.type != TransactionType.LOAN_RECEIPT); validateTransaction(t) } }
 
     suspend fun hasReceipt(id: String): Boolean = withContext(Dispatchers.IO) {
-        db.receiptQueries.byId(id).executeAsOneOrNull() != null
+        db.receiptQueries.activeById(id).executeAsOneOrNull() != null
+    }
+
+    suspend fun receiptForTransaction(transactionId: String): Receipt? = withContext(Dispatchers.IO) {
+        db.receiptQueries.byTransaction(transactionId).executeAsOneOrNull()?.let {
+            Receipt(it.fiscal_url, it.issuer, it.invoice_number, it.merchant, LocalDate.parse(it.date),
+                Money.of(it.total, Currency.RSD), app.kinjar.domain.EventJson.decodeFromString(it.items_json))
+        }
     }
 
     suspend fun receiptCategory(issuer: String): String? = withContext(Dispatchers.IO) {
@@ -217,9 +224,11 @@ class BudgetRepository(
     suspend fun addReceipt(t: Transaction, receipt: Receipt) {
         require(t.id == receipt.transactionId && t.source == TransactionSource.RECEIPT && t.type == TransactionType.EXPENSE)
         require(t.money.currency == Currency.RSD && receipt.total.currency == Currency.RSD)
-        store.append(TransactionAdded(t, receipt)) {
+        val deletionId = withContext(Dispatchers.IO) { latestReceiptDeletion(db, t.id) }
+        store.append(TransactionAdded(t, receipt, deletionId)) {
             loans.requireUnlinked(t.id)
-            if (db.receiptQueries.byId(receipt.id).executeAsOneOrNull() != null) throw DuplicateReceipt()
+            if (db.receiptQueries.activeById(receipt.id).executeAsOneOrNull() != null) throw DuplicateReceipt()
+            require(deletionId == latestReceiptDeletion(db, t.id)) { "Receipt deletion changed; scan again" }
             val account = db.accountQueries.byId(t.accountId).executeAsOneOrNull()
             if (account == null || account.archived != 0L || account.currency != "RSD") throw InvalidReceiptAccount()
             if (t.categoryId != null && db.categoryQueries.active().executeAsList().none { it.id == t.categoryId }) {

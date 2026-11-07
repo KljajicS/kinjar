@@ -1,0 +1,18 @@
+<resources>
+    <string name="transaction_details">Transaction details</string>
+    <string name="transaction_edit">Edit</string>
+    <string name="transaction_unavailable">Unavailable</string>
+    <string name="receipt_details">Receipt details</string>
+    <string name="receipt_hide">Hide receipt details</string>
+    <string name="receipt_identity">PIB: %1$s\nInvoice: %2$s\nDate: %3$s</string>
+    <string name="receipt_item">%1$s × %2$s RSD</string>
+    <string name="receipt_money">%1$s RSD</string>
+    <string name="receipt_total">Original total: %1$s RSD</string>
+    <string name="receipt_open">Open official receipt</string>
+    <string name="receipt_open_failed">Could not open browser. Select and copy the receipt link above.</string>
+    <string name="receipt_invalid_link">The saved receipt link is invalid and cannot be opened.</string>
+    <string name="receipt_delete">Delete expense</string>
+    <string name="receipt_delete_title">Delete expense?</string>
+    <string name="receipt_keep">Keep expense</string>
+    <string name="receipt_warning">WARNING</string>
+</resources>

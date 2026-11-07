@@ -16,6 +16,12 @@ INSERT INTO receipt VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 byId:
 SELECT * FROM receipt WHERE id = ?;
 
+byTransaction:
+SELECT * FROM receipt WHERE transaction_id = ?;
+
+activeById:
+SELECT receipt.* FROM receipt JOIN tx ON tx.id = receipt.transaction_id WHERE receipt.id = ?;
+
 suggestCategory:
 SELECT tx.category_id FROM receipt
 JOIN tx ON tx.id = receipt.transaction_id

@@ -87,7 +87,7 @@ class ScanViewModelTest {
         assertNull(vm.state.value.receipt)
     }
 
-    @Test fun `already saved receipt is rejected before opening review`() = runTest(dispatcher) {
+    @Test fun `active receipt is rejected but deleted expense can be scanned again`() = runTest(dispatcher) {
         repo.setUp("Family", listOf(Account("cash", "Cash", Currency.RSD, AccountKind.SPENDING)))
         repo.addReceipt(Transaction(receipt.transactionId, TransactionType.EXPENSE, receipt.total, "cash", null,
             null, receipt.date, "", receipt.merchant, "member", TransactionSource.RECEIPT), receipt)
@@ -96,5 +96,11 @@ class ScanViewModelTest {
         vm.state.first { it.stage == ScanStage.ERROR }
         assertEquals(R.string.scan_duplicate, vm.state.value.error)
         assertFalse(vm.state.value.canRetry)
+        repo.delete(receipt.transactionId)
+        vm.reset()
+        vm.scanned(url)
+        vm.state.first { it.stage == ScanStage.REVIEW }
+        assertEquals(receipt, vm.state.value.receipt)
+        assertNull(repo.transaction(receipt.transactionId))
     }
 }

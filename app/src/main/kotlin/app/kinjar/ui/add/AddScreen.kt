@@ -1,5 +1,6 @@
 package app.kinjar.ui.add
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -78,21 +81,23 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Serves new entries, bill payments and, on the edit route, corrections of an existing transaction. */
 @Composable
 fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts: TransactionConflictViewModel = hiltViewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
     val review by conflicts.review.collectAsStateWithLifecycle()
     var reviewed by rememberSaveable { mutableStateOf(false) }
+    var editing by rememberSaveable { mutableStateOf(false) }
     val pending = review.review
     LaunchedEffect(s.saved) { if (s.saved) onClose() }
+    BackHandler(enabled = editing && pending == null && !reviewed) { if (!s.saving) editing = false }
     // The form was filled before the decision; once settled here or on another phone, it may show a replaced value.
     LaunchedEffect(pending != null) { if (pending != null) reviewed = true else if (reviewed) onClose() }
     when {
         !review.loaded -> Box(Modifier.fillMaxSize().background(LocalColors.current.bg))
         pending != null -> ConflictReview(review, pending, conflicts, onClose)
         reviewed -> Unit
-        else -> AddContent(s, onClose, vm::setType, vm::press, vm::setCategory, vm::setAccount,
+        s.editing != null && !s.loading && !s.loadFailed && !editing -> TransactionDetails(s, onClose, onEdit = { editing = true })
+        else -> AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::press, vm::setCategory, vm::setAccount,
             vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad)
     }
 }
@@ -107,7 +112,7 @@ fun AddContent(
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
     val separator = DecimalFormatSymbols(locale).decimalSeparator
-    val readOnly = s.missing || s.loanLocked
+    val readOnly = s.missing || s.loanLocked || s.loading || s.loadFailed
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
     Column(
@@ -132,6 +137,8 @@ fun AddContent(
                 TextButton(onClick = onRetry) { Text(stringResource(R.string.audit_finance_retry)) }
             }
             when {
+                s.loading -> CircularProgressIndicator(color = c.primary)
+                s.loadFailed -> Unit
                 s.missing -> Text(stringResource(R.string.audit_finance_missing), style = sans(15), color = c.orange)
                 s.loanLocked -> Text(stringResource(R.string.audit_finance_loan_locked), style = sans(15), color = c.orange)
                 else -> Fields(s, locale, separator, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip) { confirmDelete = true }
@@ -171,7 +178,10 @@ private fun Fields(
         }
     }
 
-    if (s.type == TransactionType.EXPENSE) CategoryGrid(s.categories, s.categoryId, onCategory)
+    if (s.type == TransactionType.EXPENSE) {
+        if (s.editing != null) CategoryBox(s.categories, s.categoryId, onCategory)
+        else CategoryGrid(s.categories, s.categoryId, onCategory)
+    }
 
     if (s.type == TransactionType.TRANSFER) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -201,20 +211,38 @@ private fun Fields(
     }
 
     FieldBox(stringResource(R.string.add_merchant), s.merchant, onMerchant)
-    s.receipt?.let { receipt ->
+    (s.receipt ?: s.savedReceipt)?.let { receipt ->
         Text(stringResource(R.string.scan_original, formatAmount(receipt.total, locale = locale), receipt.items.size), style = sans(12), color = c.muted)
     }
+    s.savedReceipt?.let { app.kinjar.ui.scan.ReceiptDetails(it) }
     if (s.bill != null) {
         app.kinjar.ui.theme.DangerLink(stringResource(R.string.add_skip_bill), onClick = onSkip)
     }
     if (s.editing != null) {
-        app.kinjar.ui.theme.DangerLink(stringResource(R.string.audit_finance_delete), enabled = !s.saving, onClick = onDelete)
+        app.kinjar.ui.theme.DangerLink(stringResource(if (s.editing.source == TransactionSource.RECEIPT) R.string.receipt_delete else R.string.audit_finance_delete), enabled = !s.saving, onClick = onDelete)
     }
 }
 
 @Composable
 private fun DeleteDialog(source: TransactionSource, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val c = LocalColors.current
+    if (source == TransactionSource.RECEIPT) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) onDismiss() },
+            containerColor = c.bg,
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = c.orange) },
+            title = { Text(stringResource(R.string.receipt_delete_title), style = sans(18, FontWeight.SemiBold), color = c.text) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.receipt_warning), style = sans(16, FontWeight.SemiBold), color = c.orange)
+                    Text(stringResource(R.string.audit_finance_delete_receipt), style = sans(14), color = c.text)
+                }
+            },
+            confirmButton = { TextButton(onClick = onConfirm, enabled = !busy) { Text(stringResource(R.string.receipt_delete), color = if (busy) c.muted else c.orange) } },
+            dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.receipt_keep), color = c.text) } },
+        )
+        return
+    }
     val body = listOfNotNull(
         stringResource(R.string.audit_finance_delete_body),
         when (source) {
@@ -246,6 +274,37 @@ private fun TypeSwitch(selected: TransactionType, onSelect: (TransactionType) ->
                     stringResource(t.label()), style = sans(14, FontWeight.Medium), color = if (active) c.text else c.muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryBox(categories: List<app.kinjar.domain.Category>, selectedId: String?, onSelect: (String?) -> Unit) {
+    val c = LocalColors.current
+    var open by remember { mutableStateOf(false) }
+    val selected = categories.firstOrNull { it.id == selectedId }
+    val label = stringResource(R.string.scan_category)
+    val value = selected?.let { categoryDisplayName(it.id, it.name) }
+        ?: stringResource(if (selectedId == null) R.string.loan_uncategorized else R.string.scan_category_changed)
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedBox(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = "$label, $value" },
+            radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp), onClick = { open = true }) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(label, style = CaptionStyle, color = c.muted)
+                    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        selected?.let { Box(Modifier.size(8.dp).background(colorOf(it.color), CircleShape)) }
+                        Text(value, style = sans(14, FontWeight.Medium), color = c.text)
+                    }
+                }
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = c.muted)
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.loan_uncategorized), style = sans(14)) }, onClick = { onSelect(null); open = false })
+            categories.forEach { category ->
+                DropdownMenuItem(text = { Text(categoryDisplayName(category.id, category.name), style = sans(14)) }, onClick = { onSelect(category.id); open = false })
             }
         }
     }
