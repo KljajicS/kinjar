@@ -65,7 +65,7 @@ object ConflictResolver {
         conflicts.removeAll(dependentConflicts)
         val blocked = (conflicts + dependentConflicts).toMutableSet()
         ordered.forEach { op ->
-            if (op.parents.any { it in blocked } || (op.rejected.isEmpty() && op.parents.any { it in rejected })) blocked += op.id
+            if (op.id !in rejected && (op.parents.any { it in blocked } || (op.rejected.isEmpty() && op.parents.any { it in rejected }))) blocked += op.id
         }
         return OperationReplay(
             applicable = ordered.filter { it.id !in blocked && it.id !in rejected },
@@ -76,7 +76,7 @@ object ConflictResolver {
         )
     }
 
-    private fun collides(a: SyncOperation, b: SyncOperation): Boolean {
+    internal fun collides(a: SyncOperation, b: SyncOperation): Boolean {
         if (a.events.size == 1 && b.events.size == 1) {
             val first = a.events.single().event
             val second = b.events.single().event

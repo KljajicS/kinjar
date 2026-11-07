@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setup_choice_hint">Sign in to save your finances in the cloud, or keep them on this phone. Family sharing is optional.</string>
+    <string name="setup_local">Use without signing in</string>
+    <string name="setup_local_hint">Choose your name and accounts. You can enable family sync later.</string>
+    <string name="setup_family_accounts">Choose your accounts</string>
+    <string name="setup_family_accounts_hint">Choose accounts for your finances. They will sync privately with your Google account until you choose to share with family.</string>
+    <string name="setup_cloud_start">Continue</string>
+    <string name="setup_accounts_saved">Accounts saved on this phone. Continue to finish cloud setup.</string>
+</resources>

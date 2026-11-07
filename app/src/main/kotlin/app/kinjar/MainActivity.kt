@@ -107,6 +107,10 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(app.kinjar.ui.withSerbianLatin(newBase))
+    }
+
     @Inject lateinit var appLock: AppLock
     @Inject lateinit var sync: dagger.Lazy<app.kinjar.data.sync.SyncCoordinator>
     private lateinit var prompter: LockPrompter
@@ -269,17 +273,24 @@ fun KinjarRoot(root: RootViewModel) {
                 SettingsScreen(
                     onBack = { nav.popBackStack() },
                     onCategories = { nav.navigate(Routes.CATEGORIES) },
-                    onAccounts = { nav.navigate(Tab.ACCOUNTS.route) { launchSingleTop = true } },
+                    onProfile = { nav.navigate(Routes.PROFILE) },
                     onRecurring = { nav.navigate(Routes.RECURRING) },
                     onRates = { nav.navigate(Routes.EXCHANGE_RATES) },
-                    onFamily = { nav.navigate(Routes.FAMILY) },
+                    onFamily = { nav.navigate(Routes.family()) },
                     onBackup = { nav.navigate(Routes.BACKUP) },
                 )
             }
-            composable(Routes.FAMILY) {
+            composable(Routes.PROFILE) { app.kinjar.ui.settings.ProfileScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.FAMILY, arguments = listOf(navArgument("signIn") { type = androidx.navigation.NavType.BoolType; defaultValue = false })) { entry ->
                 app.kinjar.ui.sync.FamilyScreen(onBack = { nav.popBackStack() },
                     onContinue = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } },
-                    onBackup = { nav.navigate(Routes.BACKUP) })
+                    onBackup = { nav.navigate(Routes.BACKUP) },
+                    startSignIn = entry.arguments?.getBoolean("signIn") == true,
+                    onCreate = { nav.navigate(Routes.CLOUD_SETUP) { launchSingleTop = true } })
+            }
+            composable(Routes.CLOUD_SETUP) {
+                app.kinjar.ui.setup.FamilySetupScreen(onBack = { nav.popBackStack() },
+                    onDone = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } })
             }
             composable(Routes.BACKUP) {
                 app.kinjar.ui.sync.BackupScreen(onBack = { nav.popBackStack() },
@@ -329,7 +340,7 @@ fun KinjarRoot(root: RootViewModel) {
             composable(Routes.EDIT_TRANSACTION) { AddScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.SETUP) {
                 SetupScreen(onDone = { nav.navigate(Tab.HOME.route) { popUpTo(Routes.SETUP) { inclusive = true } } },
-                    onFamily = { nav.navigate(Routes.FAMILY) }, onBackup = { nav.navigate(Routes.BACKUP) })
+                    onFamily = { nav.navigate(Routes.family(signIn = true)) }, onBackup = { nav.navigate(Routes.BACKUP) })
             }
             composable(
                 Routes.ADD,

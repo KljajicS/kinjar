@@ -50,22 +50,50 @@ fun SetupScreen(onDone: () -> Unit, onFamily: () -> Unit, onBackup: () -> Unit, 
     val resources = LocalContext.current.resources
     LaunchedEffect(state.done) { if (state.done) onDone() }
 
-    var adding by rememberSaveable { mutableStateOf(false) }
-    var newName by rememberSaveable { mutableStateOf("") }
-    var newCurrency by rememberSaveable { mutableStateOf(Currency.RSD) }
+    var localSetup by rememberSaveable { mutableStateOf(!app.kinjar.BuildConfig.FIREBASE_SYNC_ENABLED) }
+    val writes by vm.writes.state.collectAsStateWithLifecycle()
+    androidx.activity.compose.BackHandler(enabled = writes.busy || (localSetup && app.kinjar.BuildConfig.FIREBASE_SYNC_ENABLED)) {
+        if (!writes.busy) localSetup = false
+    }
 
     Column(
         Modifier.fillMaxSize().background(c.bg).imePadding().verticalScroll(rememberScrollState()).padding(start = 20.dp, top = 24.dp, end = 20.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(stringResource(R.string.setup_title), style = TitleStyle, color = c.text)
-        if (app.kinjar.BuildConfig.FIREBASE_SYNC_ENABLED) androidx.compose.material3.TextButton(onClick = onFamily) { Text(stringResource(R.string.fbs_join_or_recover)) }
-        androidx.compose.material3.TextButton(onClick = onBackup) { Text(stringResource(R.string.fbs_import)) }
+        if (localSetup && app.kinjar.BuildConfig.FIREBASE_SYNC_ENABLED) {
+            app.kinjar.ui.settings.ScreenHeader(stringResource(R.string.setup_local)) { if (!writes.busy) localSetup = false }
+        } else Text(stringResource(R.string.setup_title), style = TitleStyle, color = c.text)
+        if (!app.kinjar.BuildConfig.FIREBASE_SYNC_ENABLED) {
+            androidx.compose.material3.TextButton(onClick = onBackup, enabled = !writes.busy) { Text(stringResource(R.string.fbs_import)) }
+        }
+        if (!localSetup) {
+            Text(stringResource(R.string.setup_choice_hint), style = app.kinjar.ui.theme.BodyStyle, color = c.muted)
+            PrimaryButton(stringResource(R.string.fbs_google), onClick = onFamily)
+            OutlinedBox(Modifier.fillMaxWidth(), radius = 16, padding = PaddingValues(18.dp), onClick = { localSetup = true }) {
+                Text(stringResource(R.string.setup_local), style = sans(16, FontWeight.SemiBold), color = c.text)
+                Text(stringResource(R.string.setup_local_hint), style = app.kinjar.ui.theme.CaptionStyle, color = c.muted)
+            }
+            androidx.compose.material3.TextButton(onClick = onBackup) { Text(stringResource(R.string.fbs_import)) }
+            return@Column
+        }
         FieldBox(stringResource(R.string.setup_name_label), state.name, vm::setName)
+        SetupAccounts(state.accounts, vm::toggleAccount, vm::addAccount)
+        Spacer(Modifier.size(10.dp))
+        WriteFeedback(vm.writes)
+        PrimaryButton(stringResource(R.string.setup_done), enabled = state.canFinish && !writes.busy, onClick = { vm.finish { resources.getString(it) } })
+    }
+}
 
+@Composable
+internal fun SetupAccounts(accounts: List<SetupAccount>, onToggle: (Int) -> Unit, onAdd: (String, Currency) -> Unit) {
+    val c = LocalColors.current
+    var adding by rememberSaveable { mutableStateOf(false) }
+    var newName by rememberSaveable { mutableStateOf("") }
+    var newCurrency by rememberSaveable { mutableStateOf(Currency.RSD) }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(stringResource(R.string.setup_accounts_title), style = SectionStyle, color = c.text, modifier = Modifier.padding(top = 6.dp))
-        state.accounts.forEachIndexed { i, a ->
-            OutlinedBox(Modifier.fillMaxWidth(), radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 14.dp), selected = a.enabled, onClick = { vm.toggleAccount(i) }) {
+        accounts.forEachIndexed { i, a ->
+            OutlinedBox(Modifier.fillMaxWidth(), radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 14.dp), selected = a.enabled, onClick = { onToggle(i) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(a.label?.let { stringResource(it) } ?: a.name, style = sans(14, FontWeight.Medium), color = c.text, modifier = Modifier.weight(1f))
                     Text(a.currency.name, style = mono(13), color = c.muted)
@@ -78,15 +106,12 @@ fun SetupScreen(onDone: () -> Unit, onFamily: () -> Unit, onBackup: () -> Unit, 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Currency.entries.forEach { cur -> SelectPill(cur.name, newCurrency == cur, { newCurrency = cur }, style = mono(13)) }
             }
-            OutlinedBox(Modifier.fillMaxWidth(), radius = 14, padding = PaddingValues(14.dp), onClick = { vm.addAccount(newName, newCurrency); newName = ""; adding = false }) {
+            OutlinedBox(Modifier.fillMaxWidth(), radius = 14, padding = PaddingValues(14.dp), onClick = { onAdd(newName, newCurrency); newName = ""; adding = false }) {
                 Text(stringResource(R.string.setup_add_account), style = sans(14, FontWeight.Medium), color = c.primary, modifier = Modifier.align(Alignment.CenterHorizontally))
             }
         } else {
             AddButton(stringResource(R.string.setup_add_account)) { adding = true }
         }
 
-        Spacer(Modifier.size(10.dp))
-        WriteFeedback(vm.writes)
-        PrimaryButton(stringResource(R.string.setup_done), enabled = state.canFinish && !vm.writes.state.collectAsStateWithLifecycle().value.busy, onClick = { vm.finish { resources.getString(it) } })
     }
 }

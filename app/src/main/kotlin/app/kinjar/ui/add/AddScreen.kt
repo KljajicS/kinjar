@@ -59,6 +59,8 @@ import app.kinjar.domain.Currency
 import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.ui.categoryDisplayName
+import app.kinjar.ui.conflict.ConflictReview
+import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.ui.formatAmount
 import app.kinjar.ui.monthLocale
 import app.kinjar.ui.theme.KinjarDatePickerDialog
@@ -78,11 +80,21 @@ import java.util.Locale
 
 /** Serves new entries, bill payments and, on the edit route, corrections of an existing transaction. */
 @Composable
-fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel()) {
+fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts: TransactionConflictViewModel = hiltViewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
+    val review by conflicts.review.collectAsStateWithLifecycle()
+    var reviewed by rememberSaveable { mutableStateOf(false) }
+    val pending = review.review
     LaunchedEffect(s.saved) { if (s.saved) onClose() }
-    AddContent(s, onClose, vm::setType, vm::press, vm::setCategory, vm::setAccount,
-        vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad)
+    // The form was filled before the decision; once settled here or on another phone, it may show a replaced value.
+    LaunchedEffect(pending != null) { if (pending != null) reviewed = true else if (reviewed) onClose() }
+    when {
+        !review.loaded -> Box(Modifier.fillMaxSize().background(LocalColors.current.bg))
+        pending != null -> ConflictReview(review, pending, conflicts, onClose)
+        reviewed -> Unit
+        else -> AddContent(s, onClose, vm::setType, vm::press, vm::setCategory, vm::setAccount,
+            vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad)
+    }
 }
 
 @Composable

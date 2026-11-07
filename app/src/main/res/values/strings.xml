@@ -144,7 +144,6 @@
     <string name="settings_title">Settings</string>
     <string name="settings_name">Your name</string>
     <string name="settings_categories">Categories</string>
-    <string name="settings_accounts">Accounts</string>
     <string name="settings_save_name">Save name</string>
     <string name="settings_theme">Appearance</string>
     <string name="theme_system">System</string>

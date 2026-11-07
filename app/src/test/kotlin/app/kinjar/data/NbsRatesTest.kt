@@ -32,9 +32,17 @@ class NbsRatesTest {
         assertEquals(parsed, NbsParser.parse(doc.html()))
     }
 
+    @Test fun `live list dates without leading zeros parse`() {
+        assertEquals(LocalDate.of(2026, 11, 6), NbsParser.parse(fixture.replace("15.10.2026.", "6.11.2026.")).date)
+        assertEquals(LocalDate.of(2027, 1, 5), NbsParser.parse(fixture.replace("15.10.2026.", "5.1.2027.")).date)
+        assertEquals(LocalDate.of(2026, 11, 6), NbsParser.parse(fixture.replace("15.10.2026.", "06.11.2026.")).date)
+    }
+
     @Test fun `malformed incomplete duplicate and invalid lists are rejected`() {
         val bad = listOf(
             fixture.replace("15.10.2026.", "31.02.2026."),
+            fixture.replace("15.10.2026.", "31.2.2026."),
+            fixture.replace("15.10.2026.", "115.10.2026."),
             fixture.replace("<td>USD</td>", "<td>XXX</td>"),
             fixture.replace("117,3931", "0"),
             fixture.replace("117,3931", "-117,3931"),
@@ -111,6 +119,25 @@ class NbsRatesTest {
         assertEquals(2, calls)
         refresh.refresh(true)
         assertEquals(3, calls)
+        assertEquals(cached, repo.snapshots.first())
+    }
+
+    @Test fun `interrupted refresh keeps cache and does not start failure cooldown`() = runTest {
+        val clock = FixedClock(Instant.parse("2026-10-15T10:00:00Z"), ZoneId.of("Europe/Belgrade"))
+        val db = testDb()
+        val repo = RateRepository(db, EventStore(db, "local", clock, Projector(db)), clock)
+        val list = NbsParser.parse(fixture)
+        repo.cache(list.rates, list.date)
+        val cached = repo.snapshots.first()
+        val entered = CompletableDeferred<Unit>()
+        val attempts = object : RateAttempts { override var lastAttempt: Instant? = null }
+        val refresh = RateRefresh(repo, RateLookup { entered.complete(Unit); CompletableDeferred<NbsRateList>().await() }, attempts, clock)
+        val running = async(Dispatchers.Default) { refresh.refresh(true) }
+        entered.await()
+        running.cancel()
+        running.join()
+        assertNull(attempts.lastAttempt)
+        assertEquals(RateRefreshState(), refresh.state.value)
         assertEquals(cached, repo.snapshots.first())
     }
 }

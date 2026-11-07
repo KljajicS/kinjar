@@ -3,6 +3,7 @@ package app.kinjar.ui.home
 import app.kinjar.ui.theme.AddButton
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
+import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.data.RecentTx
 import app.kinjar.data.StarterCategories
 import app.kinjar.domain.Currency
@@ -71,8 +74,10 @@ fun HomeScreen(
     onAdd: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
     onGoal: (String) -> Unit,
     onEditTransaction: (String) -> Unit = {}, vm: HomeViewModel = hiltViewModel(),
+    conflicts: TransactionConflictViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val held by conflicts.held.collectAsStateWithLifecycle()
     val failed by vm.failed.collectAsStateWithLifecycle()
     val c = LocalColors.current
     val s = state
@@ -81,6 +86,7 @@ fun HomeScreen(
         return
     }
     val locale = LocalLocale.current.platformLocale
+    val recent = held.mergeInto(s.recent)
 
     LazyColumn(
         Modifier.fillMaxSize().background(c.bg),
@@ -113,10 +119,12 @@ fun HomeScreen(
                     Text(stringResource(R.string.home_recent), style = SectionStyle, color = c.text, modifier = Modifier.weight(1f))
                     TextButton(onClick = onActivity) { Text(stringResource(R.string.home_see_all), color = c.primary) }
                 }
-                if (s.recent.isEmpty()) Text(stringResource(R.string.home_empty), style = BodyStyle, color = c.muted)
+                if (recent.isEmpty()) Text(stringResource(R.string.home_empty), style = BodyStyle, color = c.muted)
             }
         }
-        items(s.recent, key = { it.transaction.id }) { RecentRow(it, s.accountNames, s.currentMemberId, s.today, onEditTransaction) }
+        items(recent, key = { it.transaction.id }) {
+            RecentRow(it, s.accountNames, s.currentMemberId, s.today, onEditTransaction, held = it.transaction.id in held.ids)
+        }
     }
 }
 
@@ -246,7 +254,7 @@ private fun HomeGoal(p: app.kinjar.domain.GoalProgress, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: String?, today: LocalDate, onEdit: (String) -> Unit) {
+internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: String?, today: LocalDate, onEdit: (String) -> Unit, held: Boolean = false) {
     val c = LocalColors.current
     val t = r.transaction
     val category = t.categoryId?.let { id -> categoryDisplayName(id, r.categoryName) }
@@ -271,7 +279,9 @@ internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: Strin
     }
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp)
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.audit_finance_edit_hint)) { onEdit(t.id) },
+            .then(if (held) Modifier.border(2.dp, c.red, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp)) else Modifier)
+            .clickable(role = Role.Button, onClickLabel = stringResource(if (held) R.string.conflict_title else R.string.audit_finance_edit_hint)) { onEdit(t.id) }
+            .then(if (held) Modifier.padding(10.dp) else Modifier),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(40.dp).background(accent.copy(alpha = c.tintAlpha), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
@@ -280,6 +290,7 @@ internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: Strin
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = sans(15, FontWeight.Medium), color = c.text, maxLines = 1)
             Text(listOfNotNull(category, account, who.ifBlank { null }, stringResource(source)).joinToString(" · "), style = LabelStyle, color = c.muted, maxLines = 1)
+            if (held) Text(stringResource(R.string.conflict_flag), style = LabelStyle, color = c.red, maxLines = 1)
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("${formatAmount(signed, sign = t.type != TransactionType.TRANSFER, locale = LocalLocale.current.platformLocale)} ${t.money.currency}", style = mono(15), color = if (t.type == TransactionType.INCOME) c.green else c.text)

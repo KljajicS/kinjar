@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_flag">Potrebna provera</string>
+    <string name="conflict_title">Izaberi verziju</string>
+    <string name="conflict_body">Ova transakcija je izmenjena na više telefona. Verzija koju zadržiš zamenjuje ostale na svim telefonima.</string>
+    <string name="conflict_current">Pre ovih izmena</string>
+    <string name="conflict_this_phone">Ovaj telefon</string>
+    <string name="conflict_other_phone">Drugi telefon</string>
+    <string name="conflict_no_transaction">Bez transakcije</string>
+    <string name="conflict_cannot_apply">Ova verzija ne može da se primeni na trenutne finansije.</string>
+    <string name="conflict_keep">Zadrži ovu verziju</string>
+    <string name="conflict_keep_title">Zadržati ovu verziju?</string>
+    <string name="conflict_keep_body">Ostale verzije se uklanjaju na svim telefonima. Izmene sačuvane zajedno, kao otplata kredita i njen trošak, ostaju zajedno.</string>
+    <string name="conflict_edit_after">Za drugačiju vrednost zadrži jednu verziju, pa izmeni transakciju.</string>
+    <string name="conflict_waiting">Čeka raniju izmenu sa drugog telefona. Sinhronizuj ponovo kasnije.</string>
+    <string name="conflict_failed">Verzija nije zadržana. Sinhronizuj, pa pokušaj ponovo.</string>
+</resources>

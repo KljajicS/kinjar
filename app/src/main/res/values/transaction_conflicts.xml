@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_flag">Needs review</string>
+    <string name="conflict_title">Choose a version</string>
+    <string name="conflict_body">This transaction was changed on more than one phone. The version you keep replaces the others on every phone.</string>
+    <string name="conflict_current">Before these changes</string>
+    <string name="conflict_this_phone">This phone</string>
+    <string name="conflict_other_phone">Another phone</string>
+    <string name="conflict_no_transaction">No transaction</string>
+    <string name="conflict_cannot_apply">This version cannot be applied to current finances.</string>
+    <string name="conflict_keep">Keep this version</string>
+    <string name="conflict_keep_title">Keep this version?</string>
+    <string name="conflict_keep_body">The other versions are removed on every phone. Changes saved together, such as a loan payment and its expense, stay together.</string>
+    <string name="conflict_edit_after">To enter a different value, keep one version, then edit the transaction.</string>
+    <string name="conflict_waiting">Waiting for an earlier change from another phone. Sync again later.</string>
+    <string name="conflict_failed">Version not kept. Sync, then try again.</string>
+</resources>

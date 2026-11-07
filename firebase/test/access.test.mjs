@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch, Bytes, Timestamp, serverTimestamp, setLogLevel, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, collection, query, where, Bytes, Timestamp, serverTimestamp, setLogLevel, onSnapshot } from 'firebase/firestore';
 
 setLogLevel('silent');
 
@@ -385,4 +385,116 @@ test('family deletion requires removal proofs and complete cleanup before releas
   finish.delete(doc(d, 'families/family'));
   finish.delete(doc(d, 'slots/0'));
   await assertSucceeds(finish.commit());
+});
+
+const invitation = (email, createdAt = Date.now()) => ({ familyId: 'family', email, inviter: 'owner', inviterEmail: 'owner@example.com',
+  status: 'PENDING', uid: '', createdAt: Timestamp.fromMillis(createdAt) });
+async function seedPersonal(members = { wife: 'm-wife' }, invitedAt = Date.now()) {
+  await seed();
+  await env.withSecurityRulesDisabled(async c => {
+    const d = c.firestore();
+    await setDoc(doc(d, 'families/personal'), { ...family(members), owner: 'wife', admins: ['wife'], slot: '1' });
+    await setDoc(doc(d, 'slots/1'), { familyId: 'personal', owner: 'wife' });
+    await setDoc(doc(d, 'families/personal/datasets/current'), state());
+    await setDoc(doc(d, 'families/personal/installs/0'), { uid: 'wife', installId: 'phone' });
+    for (const [uid, memberId] of Object.entries(members)) {
+      await setDoc(doc(d, `users/${uid}`), { familyId: 'personal', memberId, status: 'ACTIVE' });
+    }
+    await setDoc(doc(d, 'families/family/invites/0'), invitation('wife@example.com', invitedAt));
+  });
+}
+function switchFamily(d, { archive = true, join = true } = {}) {
+  const b = writeBatch(d);
+  if (archive) b.update(doc(d, 'families/personal'), { status: 'ARCHIVED', action: 'archive', target: 'family', inviteSlot: '' });
+  if (join) {
+    b.update(doc(d, 'families/family'), { members: { owner: 'm-owner', wife: 'm-joined' }, action: 'join', target: 'wife', inviteSlot: '0' });
+    b.update(doc(d, 'families/family/invites/0'), { status: 'ACCEPTED', uid: 'wife' });
+  }
+  b.set(doc(d, 'users/wife'), { familyId: 'family', memberId: 'm-joined', status: 'ACTIVE' });
+  return b.commit();
+}
+function uploadPersonal(d, sequence) {
+  const b = writeBatch(d);
+  b.set(doc(d, `families/personal/datasets/current/operations/phone:${sequence}`),
+    { ...operation(), uid: 'wife', installId: 'phone', sequence });
+  b.update(doc(d, 'families/personal/datasets/current'), { ...state(), count: sequence, bytes: 3 * sequence,
+    dailyCount: sequence, lastOpId: `phone:${sequence}` });
+  return b.commit();
+}
+async function personalStatus() {
+  let status;
+  await env.withSecurityRulesDisabled(async c => { status = (await getDoc(doc(c.firestore(), 'families/personal'))).data().status; });
+  return status;
+}
+
+test('personal workspace joins an invited family by archiving, keeping its history readable to its owner only', async () => {
+  await seedPersonal();
+  const d = db('wife');
+  await assertSucceeds(uploadPersonal(d, 1));
+  await assertSucceeds(switchFamily(d));
+  const archive = (await getDoc(doc(d, 'families/personal'))).data();
+  assert.equal(archive.status, 'ARCHIVED');
+  assert.deepEqual(archive.members, { wife: 'm-wife' });
+  await assertSucceeds(getDoc(doc(d, 'families/personal/datasets/current/operations/phone:1')));
+  await assertSucceeds(getDoc(doc(d, 'families/family/datasets/current')));
+  await assertFails(getDoc(doc(db('owner'), 'families/personal/datasets/current')));
+  const archived = query(collection(d, 'families'), where('owner', '==', 'wife'), where('status', '==', 'ARCHIVED'));
+  assert.deepEqual((await getDocs(archived)).docs.map(it => it.id), ['personal']);
+  await assertFails(getDocs(query(collection(db('owner'), 'families'), where('owner', '==', 'wife'), where('status', '==', 'ARCHIVED'))));
+  assert.equal((await getDoc(doc(d, 'slots/1'))).data().familyId, 'personal');
+  await assertFails(switchFamily(d));
+});
+
+test('archived workspace freezes uploads, devices, invitations, roles and status changes', async () => {
+  await seedPersonal();
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/personal/invites/0'),
+    { ...invitation('kid@example.com'), familyId: 'personal', inviter: 'wife', inviterEmail: 'wife@example.com' }));
+  const d = db('wife');
+  await assertSucceeds(switchFamily(d));
+  await assertFails(uploadPersonal(d, 1));
+  await assertFails(setDoc(doc(d, 'families/personal/installs/1'), { uid: 'wife', installId: 'other', name: 'Phone', createdAt: serverTimestamp() }));
+  await assertFails(deleteDoc(doc(d, 'families/personal/installs/0')));
+  await assertFails(setDoc(doc(d, 'families/personal/invites/1'),
+    { ...invitation('kid@example.com'), familyId: 'personal', inviter: 'wife', inviterEmail: 'wife@example.com', createdAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(d, 'families/personal/invites/0'), { status: 'CANCELLED' }));
+  await assertFails(updateDoc(doc(d, 'families/personal'), { status: 'ACTIVE', action: 'activate' }));
+  await assertFails(updateDoc(doc(d, 'families/personal'), { status: 'DELETING', action: 'delete', deletionPhase: 0 }));
+  const kid = db('kid');
+  const join = writeBatch(kid);
+  join.update(doc(kid, 'families/personal'), { members: { wife: 'm-wife', kid: 'm-kid' }, action: 'join', target: 'kid', inviteSlot: '0' });
+  join.update(doc(kid, 'families/personal/invites/0'), { status: 'ACCEPTED', uid: 'kid' });
+  join.set(doc(kid, 'users/kid'), { familyId: 'personal', memberId: 'm-kid', status: 'ACTIVE' });
+  await assertFails(join.commit());
+});
+
+test('account pointer cannot switch without archiving and archiving cannot strand the account', async () => {
+  await seedPersonal();
+  const d = db('wife');
+  await assertFails(switchFamily(d, { archive: false }));
+  await assertFails(switchFamily(d, { join: false }));
+  await assertFails(updateDoc(doc(d, 'families/personal'), { status: 'ARCHIVED', action: 'archive', target: 'family' }));
+  await assertFails(setDoc(doc(d, 'users/wife'), { familyId: 'family', memberId: 'm-joined', status: 'ACTIVE' }));
+  assert.equal(await personalStatus(), 'ACTIVE');
+});
+
+test('shared workspace cannot be archived by its owner and nobody else can archive a personal one', async () => {
+  await seedPersonal({ wife: 'm-wife', kid: 'm-kid' });
+  await assertFails(switchFamily(db('wife')));
+  assert.equal(await personalStatus(), 'ACTIVE');
+  await env.clearFirestore();
+  await seedPersonal();
+  await assertFails(updateDoc(doc(db('owner'), 'families/personal'), { status: 'ARCHIVED', action: 'archive', target: 'family' }));
+  assert.equal(await personalStatus(), 'ACTIVE');
+});
+
+test('expired or cancelled invitation leaves the personal workspace active and linked', async () => {
+  await seedPersonal(undefined, Date.now() - 7 * 86400000);
+  await assertFails(switchFamily(db('wife')));
+  assert.equal(await personalStatus(), 'ACTIVE');
+  await env.clearFirestore();
+  await seedPersonal();
+  await assertSucceeds(updateDoc(doc(db('owner'), 'families/family/invites/0'), { status: 'CANCELLED' }));
+  await assertFails(switchFamily(db('wife')));
+  assert.equal(await personalStatus(), 'ACTIVE');
+  assert.equal((await getDoc(doc(db('wife'), 'users/wife'))).data().familyId, 'personal');
 });

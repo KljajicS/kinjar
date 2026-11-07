@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
+import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.domain.Transaction
 import app.kinjar.domain.TransactionType
 import app.kinjar.ui.categoryDisplayName
@@ -63,8 +64,10 @@ internal fun matchesActivity(t: Transaction, from: LocalDate?, to: LocalDate?, c
         (category == null || t.categoryId == category) && (type == null || t.type.name == type)
 
 @Composable
-fun ActivityScreen(onBack: () -> Unit, onEdit: (String) -> Unit, vm: HomeViewModel = hiltViewModel()) {
+fun ActivityScreen(onBack: () -> Unit, onEdit: (String) -> Unit, vm: HomeViewModel = hiltViewModel(),
+                   conflicts: TransactionConflictViewModel = hiltViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val held by conflicts.held.collectAsStateWithLifecycle()
     val failed by vm.failed.collectAsStateWithLifecycle()
     val c = LocalColors.current
     var from by rememberSaveable { mutableStateOf<String?>(null) }
@@ -77,8 +80,8 @@ fun ActivityScreen(onBack: () -> Unit, onEdit: (String) -> Unit, vm: HomeViewMod
     val end = to?.let(LocalDate::parse)
     val locale = monthLocale(LocalLocale.current.platformLocale)
     val dateFormat = remember(locale) { DateTimeFormatter.ofPattern("d MMM yyyy", locale) }
-    val rows = remember(s?.recent, from, to, category, type) {
-        s?.recent.orEmpty().filter { matchesActivity(it.transaction, start, end, category, type) }
+    val rows = remember(s?.recent, held, from, to, category, type) {
+        held.mergeInto(s?.recent.orEmpty()).filter { matchesActivity(it.transaction, start, end, category, type) }
     }
     LazyColumn(
         Modifier.fillMaxSize().background(c.bg),
@@ -126,7 +129,9 @@ fun ActivityScreen(onBack: () -> Unit, onEdit: (String) -> Unit, vm: HomeViewMod
             }
             if (failed) item { LoadFailedBanner(vm::retry) }
             if (rows.isEmpty()) item { Text(stringResource(R.string.activity_empty), style = BodyStyle, color = c.muted) }
-            items(rows, key = { it.transaction.id }) { RecentRow(it, s.accountNames, s.currentMemberId, s.today, onEdit) }
+            items(rows, key = { it.transaction.id }) {
+                RecentRow(it, s.accountNames, s.currentMemberId, s.today, onEdit, held = it.transaction.id in held.ids)
+            }
         }
     }
     if (picking) KinjarDateRangePickerDialog(

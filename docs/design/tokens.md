@@ -23,6 +23,7 @@ Extracted from `screens.html` (the Claude Design export). Compose code in `app/s
 | primarySoft | #ECEEFE | rgba(140,150,255,0.18) | selected category background |
 | green | #1B7A57 | #4CC79A | income, synced dot |
 | orange | #A8520E | #F0A05A | over budget |
+| red | #B3261E | #FF8A80 | transaction conflict outline and label |
 
 Category colors (same in both themes): Groceries #3D4BD6, Bills #D06A1E, Transport #1A8A7B, Eating out #7B55C7, Household #6E747D, Kids #B8467F, Fun #A88412, Health #2A7FC0, Other #6E747D. Avatars use the color at 12% (light) or 18% (dark) alpha behind the letter.
 

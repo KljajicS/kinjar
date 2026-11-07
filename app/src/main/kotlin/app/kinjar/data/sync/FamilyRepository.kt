@@ -6,6 +6,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.util.Date
@@ -17,9 +18,15 @@ data class FamilyMembership(val familyId: String, val memberId: String, val remo
 data class FamilyInfo(
     val id: String, val owner: String, val admins: List<String>, val members: Map<String, String>,
     val activeDataset: String, val generation: Long, val status: String,
-)
+    val otherDataset: String = "",
+) {
+    fun isPersonal(uid: String?): Boolean = uid != null && owner == uid && members.keys == setOf(uid)
+}
 data class FamilyInvitation(val familyId: String, val slot: String, val expiresAt: Instant, val inviterEmail: String)
 data class FamilyDevice(val slot: String, val uid: String, val installId: String, val name: String)
+
+/** The personal workspace was not archived and the invitation was not accepted; retrying the same switch cannot succeed. */
+class FamilySwitchRejected : IllegalStateException("Invitation or personal workspace is no longer eligible")
 
 @Singleton
 class FamilyRepository @Inject constructor(private val services: FirebaseServices) {
@@ -37,24 +44,79 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
 
     suspend fun create(memberId: String, id: String, dataset: String): FamilyInfo {
         val user = uid()
-        db.runTransaction { transaction ->
+        val created = db.runTransaction { transaction ->
             check(uid() == user)
             val userRef = db.collection("users").document(user)
             val existing = transaction.get(userRef)
-            if (existing.getString("familyId") == id && existing.getString("status") == "ACTIVE") return@runTransaction
+            if (existing.getString("familyId") == id && existing.getString("status") == "ACTIVE") return@runTransaction true
             check(!existing.exists() || existing.getString("status") == "REMOVED") { "Account already belongs to a family" }
             val slots = (0..9).map { db.collection("slots").document(it.toString()) }
             val slot = slots.zip(slots.map { transaction.get(it) }).firstOrNull { !it.second.exists() }?.first
-                ?: error("Family capacity reached")
+                ?: return@runTransaction false
             val data = mapOf("owner" to user, "admins" to listOf(user), "members" to mapOf(user to memberId),
                 "slot" to slot.id, "activeDataset" to dataset, "otherDataset" to "", "generation" to 1L,
                 "status" to "INITIALIZING", "action" to "create", "target" to "", "inviteSlot" to "")
             transaction.set(slot, mapOf("familyId" to id, "owner" to user))
             transaction.set(family(id), data)
             transaction.set(userRef, mapOf("familyId" to id, "memberId" to memberId, "status" to "ACTIVE"))
+            true
         }.await()
+        if (!created) throw SyncCapacityReached()
         return info(id)
     }
+
+    /** Owned archived workspaces; archives keep their admission slot, so at most ten exist. */
+    suspend fun archived(): List<FamilyInfo> = db.collection("families").whereEqualTo("owner", uid())
+        .whereEqualTo("status", "ARCHIVED").limit(10).get(Source.SERVER).await().documents.map(::decode)
+
+    /**
+     * Archives the caller's personal workspace [sourceFamilyId] and accepts the invitation in [slot] of
+     * [targetFamilyId] in one commit. Idempotent: a commit whose response was lost is recognized by [memberId].
+     * Throws [FamilySwitchRejected] only when nothing was committed and retrying cannot succeed.
+     */
+    suspend fun joinFromPersonal(sourceFamilyId: String, targetFamilyId: String, slot: String, memberId: String) {
+        val user = uid()
+        val email = services.auth.currentUser?.email
+        val outcome = try {
+            db.runTransaction { tx ->
+                check(uid() == user)
+                val userRef = db.collection("users").document(user)
+                val account = tx.get(userRef)
+                if (account.getString("familyId") == targetFamilyId && account.getString("memberId") == memberId
+                    && account.getString("status") == "ACTIVE") return@runTransaction SwitchOutcome.COMMITTED
+                val sourceRef = family(sourceFamilyId)
+                val targetRef = family(targetFamilyId)
+                val inviteRef = targetRef.collection("invites").document(slot)
+                val sourceDocument = tx.get(sourceRef)
+                val targetDocument = tx.get(targetRef)
+                val invite = tx.get(inviteRef)
+                val source = runCatching { decode(sourceDocument) }.getOrNull()
+                val target = runCatching { decode(targetDocument) }.getOrNull()
+                val created = invite.getTimestamp("createdAt")?.seconds ?: 0L
+                if (account.getString("familyId") != sourceFamilyId || account.getString("status") != "ACTIVE"
+                    || source == null || !source.isPersonal(user) || source.admins != listOf(user) || source.status != "ACTIVE"
+                    || target == null || target.status != "ACTIVE" || user in target.members || sourceFamilyId == targetFamilyId
+                    || invite.getString("email") != email || invite.getString("status") != "PENDING"
+                    || created + 6 * 86400 <= Instant.now().epochSecond) return@runTransaction SwitchOutcome.REJECTED
+                if (target.members.size >= 6) return@runTransaction SwitchOutcome.FULL
+                tx.update(sourceRef, mapOf("status" to "ARCHIVED", "action" to "archive", "target" to targetFamilyId, "inviteSlot" to ""))
+                tx.update(targetRef, mapOf("members" to (target.members + (user to memberId)), "action" to "join", "target" to user, "inviteSlot" to slot))
+                tx.update(inviteRef, mapOf("status" to "ACCEPTED", "uid" to user))
+                tx.set(userRef, mapOf("familyId" to targetFamilyId, "memberId" to memberId, "status" to "ACTIVE"))
+                SwitchOutcome.COMMITTED
+            }.await()
+        } catch (e: FirebaseFirestoreException) {
+            if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) throw FamilySwitchRejected()
+            throw e
+        }
+        when (outcome) {
+            SwitchOutcome.REJECTED -> throw FamilySwitchRejected()
+            SwitchOutcome.FULL -> throw SyncCapacityReached()
+            SwitchOutcome.COMMITTED -> Unit
+        }
+    }
+
+    private enum class SwitchOutcome { COMMITTED, REJECTED, FULL }
 
     suspend fun invitations(): List<FamilyInvitation> {
         val email = requireNotNull(services.auth.currentUser?.email)
@@ -75,7 +137,8 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
             check(user in info.admins && info.status == "ACTIVE")
             val slots = (0..5).map { root.collection("invites").document(it.toString()) }
             val saved = slots.map { transaction.get(it) }
-            check(saved.none { it.getString("email") == normalized && it.getString("status") == "PENDING" }) { "Invitation already pending" }
+            if (saved.any { it.getString("email") == normalized && it.getString("status") == "PENDING"
+                    && (it.getTimestamp("createdAt")?.seconds ?: 0) + 6 * 86400 > Instant.now().epochSecond }) return@runTransaction
             val target = slots.zip(saved).firstOrNull { !it.second.exists() }?.first ?: error("Invitation capacity reached")
             transaction.set(target, mapOf("familyId" to familyId, "email" to normalized, "inviter" to user,
                 "inviterEmail" to requireNotNull(services.auth.currentUser?.email),
@@ -190,6 +253,7 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
         val members = rawMembers.entries.associate { requireNotNull(it.key as? String) to requireNotNull(it.value as? String) }
         val admins = (document.get("admins") as? List<*>)?.map { requireNotNull(it as? String) } ?: error("Invalid administrators")
         return FamilyInfo(document.id, requireNotNull(document.getString("owner")), admins, members,
-            requireNotNull(document.getString("activeDataset")), requireNotNull(document.getLong("generation")), requireNotNull(document.getString("status")))
+            requireNotNull(document.getString("activeDataset")), requireNotNull(document.getLong("generation")), requireNotNull(document.getString("status")),
+            document.getString("otherDataset") ?: "")
     }
 }

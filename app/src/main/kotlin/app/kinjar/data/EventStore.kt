@@ -15,6 +15,7 @@ import app.kinjar.domain.OperationEvent
 import app.kinjar.domain.SyncOperation
 import app.kinjar.domain.ConflictResolver
 import app.kinjar.domain.FamilyHistory
+import app.kinjar.domain.HeldChanges
 import app.kinjar.domain.HistoryCodec
 import java.time.Instant
 
@@ -34,7 +35,7 @@ class EventStore(
             db.transactionWithResult {
                 if (skipIf()) return@transactionWithResult emptyList()
                 validate()
-                check(db.restoreJournalQueries.current().executeAsOneOrNull()?.phase !in setOf("CREATE", "RESTORE")) { "Finish family setup or restore before editing finances" }
+                check(db.restoreJournalQueries.current().executeAsOneOrNull()?.phase !in setOf("CREATE", "RESTORE", "SWITCH")) { "Finish family setup or restore before editing finances" }
                 val session = db.syncSessionQueries.current().executeAsOneOrNull()
                 if (session != null) {
                     check(session.install_id == deviceId) { "Installation must recover its session" }
@@ -115,7 +116,7 @@ class EventStore(
         require(db.restoreJournalQueries.current().executeAsOneOrNull() == null) { "Cancel pending recovery before restoring a file" }
         require(db.syncSessionQueries.current().executeAsOneOrNull() == null) { "Restore shared family data while signed in" }
         val before = HistoryCodec.encode(synced.snapshot())
-        require(HistoryCodec.digest(before) == expectedLocalDigest) { "Local data changed; confirm again" }
+        if (HistoryCodec.digest(before) != expectedLocalDigest) throw app.kinjar.domain.LocalHistoryChanged()
         db.syncDraftQueries.save(newId(), "local", "", clock.now().toEpochMilli(), before)
         synced.replace(history)
     }
@@ -123,7 +124,7 @@ class EventStore(
     fun activate(uid: String, familyId: String, datasetId: String, memberId: String, generation: Long,
                  history: FamilyHistory, expectedLocalDigest: String, preserveDraft: Boolean) = read {
         val prior = HistoryCodec.encode(synced.snapshot())
-        check(HistoryCodec.digest(prior) == expectedLocalDigest) { "Local data changed; confirm replacement again" }
+        if (HistoryCodec.digest(prior) != expectedLocalDigest) throw app.kinjar.domain.LocalHistoryChanged()
         if (preserveDraft && db.eventQueries.count().executeAsOne() > 0) {
             val priorSession = db.syncSessionQueries.current().executeAsOneOrNull()
             db.syncDraftQueries.save(newId(), priorSession?.uid ?: uid, priorSession?.family_id ?: "", clock.now().toEpochMilli(), prior)
@@ -144,21 +145,54 @@ class EventStore(
         db.syncCheckpointQueries.save(datasetId, checkpointSeconds, checkpointNanos, checkpointId)
     }
 
-    fun discardConflictingChange(id: String) = read {
+    fun discardConflictingChange(id: String) = discardConflictingChanges(setOf(id))
+
+    /** Rejects every listed held change, and what depends on them, in one resolution. */
+    fun discardConflictingChanges(ids: Set<String>) = read { reject(ids, knownOperations()) }
+
+    /** Keeps [id] by rejecting, in one resolution, the held changes that compete with it directly. */
+    fun keepConflictingChange(id: String) = read {
+        val known = knownOperations()
+        val held = HeldChanges(known, db.syncConflictQueries.all().executeAsList().associate { it.operation_id to it.reason })
+        require(held.keepable(id)) { "Change cannot be kept" }
+        reject(held.competitors(id), known)
+    }
+
+    private fun knownOperations() = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
+
+    private fun reject(ids: Set<String>, known: List<SyncOperation>) {
         val session = requireNotNull(db.syncSessionQueries.current().executeAsOneOrNull())
         check(session.status == "ACTIVE" && session.install_id == deviceId)
-        val known = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
-        require(known.any { it.id == id })
-        check(db.syncConflictQueries.all().executeAsList().any { it.operation_id == id })
-        val rejected = mutableSetOf(id)
+        check(db.restoreJournalQueries.current().executeAsOneOrNull()?.phase !in setOf("CREATE", "RESTORE", "SWITCH")) { "Finish family setup or restore before editing finances" }
+        require(ids.isNotEmpty() && ids.all { id -> known.any { it.id == id } })
+        val held = db.syncConflictQueries.all().executeAsList().map { it.operation_id }.toSet()
+        check(ids.all(held::contains))
+        val rejected = ids.toMutableSet()
         do { val before = rejected.size; known.filter { it.parents.any(rejected::contains) }.forEach { rejected += it.id } } while (before != rejected.size)
         val resources = known.filter { it.id in rejected }.flatMap { it.resources.keys }.associateWith { app.kinjar.domain.ResourceAccess.WRITE }
+        val parents = ConflictResolver.parentsFor(known, resources) + rejected
+        // Replay lets a resolution supersede earlier ones on the same records, so their rejections are restated.
+        val ancestors = ancestors(parents, known)
+        val effective = ConflictResolver.replay(known.map { it.copy(familyId = "history", datasetId = "history") }).rejected
+        val restated = known.filter { it.id in ancestors && it.rejected.isNotEmpty() && it.resources.keys.any(resources::containsKey) }
+            .flatMapTo(mutableSetOf()) { it.rejected }.intersect(effective)
         val operation = SyncOperation(familyId = session.family_id, datasetId = session.dataset_id, authorUid = session.uid,
             installId = deviceId, sequence = Math.addExact(db.syncOperationQueries.lastSequence(deviceId).executeAsOne().MAX ?: 0L, 1L),
-            parents = ConflictResolver.parentsFor(known, resources) + rejected, resources = resources, events = emptyList(), rejected = rejected)
+            parents = parents, resources = resources, events = emptyList(), rejected = rejected + restated)
         db.syncOperationQueries.insert(operation.id, deviceId, operation.sequence, OperationCodec.encode(operation))
         db.syncOutboxQueries.enqueue(operation.id, session.family_id, session.dataset_id)
         synced.rebuild()
+    }
+
+    private fun ancestors(ids: Set<String>, known: List<SyncOperation>): Set<String> {
+        val nodes = known.associateBy { it.id }
+        val found = mutableSetOf<String>()
+        val pending = ArrayDeque(ids)
+        while (pending.isNotEmpty()) {
+            val id = pending.removeFirst()
+            if (found.add(id)) nodes[id]?.parents?.let(pending::addAll)
+        }
+        return found
     }
 
     fun clearRemovedFamily(uid: String, familyId: String) = read {

@@ -18,6 +18,7 @@ data class KinjarColors(
     val primarySoft: Color,
     val green: Color,
     val orange: Color,
+    val red: Color,
     val tintAlpha: Float,
     val dark: Boolean,
 )
@@ -34,6 +35,7 @@ val LightColors = KinjarColors(
     primarySoft = Color(0xFFECEEFE),
     green = Color(0xFF1B7A57),
     orange = Color(0xFFA8520E),
+    red = Color(0xFFB3261E),
     tintAlpha = 0.12f,
     dark = false,
 )
@@ -50,6 +52,7 @@ val DarkColors = KinjarColors(
     primarySoft = Color(0x2E8C96FF),
     green = Color(0xFF4CC79A),
     orange = Color(0xFFF0A05A),
+    red = Color(0xFFFF8A80),
     tintAlpha = 0.18f,
     dark = true,
 )

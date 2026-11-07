@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setup_choice_hint">Prijavite se da čuvate finansije u oblaku ili ih čuvajte na ovom telefonu. Deljenje sa porodicom je opciono.</string>
+    <string name="setup_local">Nastavi bez prijavljivanja</string>
+    <string name="setup_local_hint">Izaberite ime i račune. Sinhronizaciju porodice možete uključiti kasnije.</string>
+    <string name="setup_family_accounts">Izaberite račune</string>
+    <string name="setup_family_accounts_hint">Izaberite račune za svoje finansije. Sinhronizuju se preko vašeg Google naloga dok ne odlučite da ih delite sa porodicom.</string>
+    <string name="setup_cloud_start">Nastavi</string>
+    <string name="setup_accounts_saved">Računi su sačuvani na ovom telefonu. Nastavite da završite podešavanje oblaka.</string>
+</resources>

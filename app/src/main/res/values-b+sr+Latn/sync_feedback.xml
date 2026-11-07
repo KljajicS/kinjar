@@ -1,0 +1,18 @@
+<resources>
+    <string name="fbs_invitation_sent">Pozivnica je spremna. Član porodice treba da se prijavi tim Google nalogom.</string>
+    <string name="fbs_restored">Finansije su vraćene.</string>
+    <string name="fbs_restore_cancelled">Vraćanje je otkazano. Prethodne porodične finansije ostaju aktivne.</string>
+    <string name="fbs_backup_open_failed">Rezervna kopija nije otvorena. Proverite lozinku i izaberite ispravnu kinjar kopiju.</string>
+    <string name="fbs_local_changed">Finansije su promenjene dok ste pregledali kopiju. Ponovo pregledajte upozorenje i potvrdite zamenu.</string>
+    <string name="fbs_permission_failed">Vaš nalog nema dozvolu za ovu radnju. Proverite ulogu u porodici i prijavu, pa pokušajte ponovo.</string>
+    <string name="fbs_connection_failed">Firebase nije dostupan. Proverite vezu i pokušajte ponovo. Podaci su sačuvani.</string>
+    <string name="fbs_file_failed">Datoteka nije pročitana ili sačuvana. Izaberite dostupnu datoteku ili lokaciju i pokušajte ponovo.</string>
+    <string name="fbs_admin_restore">Samo administrator porodice može da zameni zajedničke finansije. I dalje možete izvesti rezervnu kopiju.</string>
+    <string name="fbs_retry">Pokušaj ponovo</string>
+    <string name="fbs_recovery_other_account">Oporavak pripada drugom Google nalogu na ovom telefonu. Odjavite se i prijavite nalogom koji ga je pokrenuo da biste nastavili. Trenutni podaci su sačuvani.</string>
+    <string name="fbs_restore_timeout">Ako telefon koji vraća podatke nije dostupan, administrator može otkazati postupak nakon 25 minuta i zadržati prethodne finansije.</string>
+    <string name="fbs_restore_progress">Vraćanje finansija je u toku. Ako se prekine, postupak se nastavlja automatski kada se aplikacija ponovo poveže.</string>
+    <string name="fbs_restore_maintenance">Finansije su vraćene. Preostali rad u pozadini nastaviće se automatski.</string>
+    <string name="fbs_restore_waiting">Administrator vraća porodične finansije. Vaši trenutni podaci ostaju dok zamena ne bude spremna.</string>
+    <string name="fbs_join_replace_warning">Pridružiti se porodici i preuzeti njene finansije na ovaj telefon? Postojeće lokalne finansije biće zamenjene i sačuvane odvojeno za izvoz. Neće biti otpremljene.</string>
+</resources>

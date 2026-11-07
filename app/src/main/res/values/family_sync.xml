@@ -7,7 +7,7 @@
     <string name="fbs_quarantined">%1$d invalid changes are held separately and included in backups. Other changes can sync. Ask an administrator to review or restore the family if dependent changes remain blocked.</string>
     <string name="fbs_family">Family</string>
     <string name="fbs_backups">Backup and restore</string>
-    <string name="fbs_optional">Optional family sync</string>
+    <string name="fbs_optional">Optional cloud sync</string>
     <string name="fbs_privacy">Sync stores family finances in Firebase. Google and project administrators can read them. Shared free capacity is limited.</string>
     <string name="fbs_unavailable">Family sync is unavailable in this build. Local finances and file backups remain available.</string>
     <string name="fbs_google">Continue with Google</string>
@@ -20,7 +20,7 @@
     <string name="fbs_resume_delete">Finish family deletion</string>
     <string name="fbs_use_family">Use family data</string>
     <string name="fbs_replace">Replace finances?</string>
-    <string name="fbs_replace_warning">Family data will replace finances on this phone. Your previous local data is kept separately for export. It will not be uploaded automatically.</string>
+    <string name="fbs_replace_warning">Cloud data will replace finances on this phone. Your previous local data is kept separately for export. It will not be uploaded automatically.</string>
     <string name="fbs_recover">Get family data</string>
     <string name="fbs_sync_now">Sync now</string>
     <string name="fbs_invite">Invite a family member</string>

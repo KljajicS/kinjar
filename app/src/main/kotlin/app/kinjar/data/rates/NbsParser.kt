@@ -14,9 +14,9 @@ data class NbsRateList(val date: LocalDate, val rates: Map<Currency, BigDecimal>
 object NbsParser {
     fun parse(html: String): NbsRateList {
         val document = Jsoup.parse(html)
-        val dates = document.select("h6").flatMap { Regex("\\b\\d{2}\\.\\d{2}\\.\\d{4}\\.").findAll(it.text()).map { match -> match.value }.toList() }
+        val dates = document.select("h6").flatMap { Regex("\\b\\d{1,2}\\.\\d{1,2}\\.\\d{4}\\.").findAll(it.text()).map { match -> match.value }.toList() }
         require(dates.size == 1)
-        val date = LocalDate.parse(dates.single(), DateTimeFormatter.ofPattern("dd.MM.uuuu.").withResolverStyle(ResolverStyle.STRICT))
+        val date = LocalDate.parse(dates.single(), DateTimeFormatter.ofPattern("d.M.uuuu.").withResolverStyle(ResolverStyle.STRICT))
         val rates = mutableMapOf<Currency, BigDecimal>()
         for (row in document.select("table tbody tr")) {
             val cells = row.select("td").map { it.text().trim() }

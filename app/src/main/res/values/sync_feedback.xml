@@ -1,0 +1,18 @@
+<resources>
+    <string name="fbs_invitation_sent">Invitation ready. Ask your family member to sign in with that Google account.</string>
+    <string name="fbs_restored">Finances restored.</string>
+    <string name="fbs_restore_cancelled">Restore canceled. Previous family finances remain active.</string>
+    <string name="fbs_backup_open_failed">Could not open this backup. Check the passphrase and choose a valid kinjar backup.</string>
+    <string name="fbs_local_changed">Finances changed while you reviewed this backup. Review the replacement warning and confirm again.</string>
+    <string name="fbs_permission_failed">Your account cannot perform this action. Check your family role and sign-in, then retry.</string>
+    <string name="fbs_connection_failed">Could not reach Firebase. Check your connection, then retry. Your data is kept.</string>
+    <string name="fbs_file_failed">Could not read or save this file. Choose an accessible file or location, then retry.</string>
+    <string name="fbs_admin_restore">Only a family administrator can replace shared finances. You can still export a backup.</string>
+    <string name="fbs_retry">Retry</string>
+    <string name="fbs_recovery_other_account">Recovery belongs to another Google account on this phone. Sign out, then sign in with the account that started it to continue. Current data is kept.</string>
+    <string name="fbs_restore_timeout">If the restoring phone is unavailable, an administrator can cancel after 25 minutes and keep the previous finances.</string>
+    <string name="fbs_restore_progress">Restoring finances. If interrupted, recovery continues automatically when the app reconnects.</string>
+    <string name="fbs_restore_maintenance">Finances restored. Remaining background work will retry automatically.</string>
+    <string name="fbs_restore_waiting">An administrator is restoring family finances. Your current data is kept until the replacement is ready.</string>
+    <string name="fbs_join_replace_warning">Join this family and use its finances on this phone? Existing local finances will be replaced and kept separately for export. They will not be uploaded.</string>
+</resources>

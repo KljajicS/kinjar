@@ -1,0 +1,23 @@
+<resources>
+    <string name="fd_account_actions">Radnje naloga</string>
+    <string name="fd_family_actions">Radnje porodice</string>
+    <string name="fd_phone_actions">Radnje telefona</string>
+    <string name="fd_count">%1$s (%2$d)</string>
+    <string name="fd_expanded">Prošireno</string>
+    <string name="fd_collapsed">Skupljeno</string>
+    <string name="fd_new_family">Sinhronizacija u oblaku</string>
+    <string name="fd_create_hint">Sinhronizuj finansije sa svojim Google nalogom. Kasnije ih možeš podeliti sa porodicom.</string>
+    <string name="fd_enable">Uključi sinhronizaciju u oblaku</string>
+    <string name="fd_personal_title">Lični oblak</string>
+    <string name="fd_personal_hint">Finansije još nisu podeljene sa porodicom. Pozvana osoba dobija pristup svim postojećim finansijama u ovom prostoru.</string>
+    <string name="fd_share">Podeli sa porodicom</string>
+    <string name="fd_backup_hint">Šifrovane rezervne kopije i vraćanje</string>
+    <string name="fd_other_account">Finansije na ovom telefonu pripadaju drugom Google nalogu. Prijavite se tim nalogom da nastavite sinhronizaciju. Nisu otpremljene na ovaj nalog.</string>
+    <string name="fd_join_personal_warning">Finansije porodice će zameniti finansije na ovom telefonu. Vaši lični podaci u oblaku ostaju u arhivi samo za čitanje i ne dele se sa porodicom. Kopija lokalnih podataka ostaje sačuvana za izvoz.</string>
+    <string name="fd_join_progress">Pridruživanje porodici. Vaše lične finansije ostaju sačuvane dok podaci porodice ne budu spremni.</string>
+    <string name="fd_archives">Arhive ličnih podataka u oblaku</string>
+    <string name="fd_archives_hint">Lični podaci sačuvani pre pridruživanja porodici. Izvezite šifrovanu datoteku da ih sačuvate ili vratite.</string>
+    <string name="fd_show_archives">Prikaži arhive</string>
+    <string name="fd_no_archives">Nema arhiviranih ličnih podataka.</string>
+    <string name="fd_export_archive">Izvezi arhivu %1$d</string>
+</resources>

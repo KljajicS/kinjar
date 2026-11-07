@@ -28,6 +28,9 @@ data class SetupState(
     val done: Boolean = false,
 ) {
     val canFinish: Boolean get() = name.isNotBlank() && accounts.any { it.enabled }
+    fun selectedAccounts(localize: (Int) -> String? = { null }): List<Account> = accounts.filter { it.enabled }.map { a ->
+        Account(newId(), a.label?.let(localize) ?: a.name, a.currency)
+    }
 }
 
 @HiltViewModel
@@ -52,7 +55,7 @@ class SetupViewModel @Inject constructor(private val repo: BudgetRepository) : V
         writes.run {
             repo.setUp(
                 s.name.trim(),
-                s.accounts.filter { it.enabled }.map { a -> Account(newId(), a.label?.let(localize) ?: a.name, a.currency) },
+                s.selectedAccounts(localize),
             )
             _state.update { it.copy(done = true) }
         }

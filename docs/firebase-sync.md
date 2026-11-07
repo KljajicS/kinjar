@@ -53,16 +53,18 @@ Do not deploy to an inferred/default project. Wait for the invitation collection
 
 ## Family flow
 
-1. First phone: Settings, Family, Google sign-in, Create family. Existing local finances become the initial shared history.
-2. Administrator enters the other person's Google email and sends an invitation.
-3. Other phone signs in with that account, opens the invitation, downloads the history, then confirms replacement. Local data is preserved separately for export.
-4. New phone signs in with an existing member account and chooses Get family data. It receives the same warning and validation before replacement.
-5. Offline edits stay in the local outbox. Foreground sync and hourly background work retry online. Android may delay background work; it is not instant. Sync now reconciles the full bounded operation history; automatic runs use an overlapping incremental cursor.
-6. Conflicting complete commands wait in Family. Review both changes and discard the unwanted command and its dependents. Independent changes keep syncing.
+1. First launch offers Google sign-in or local setup with a name and accounts. A new Google account chooses accounts before enabling personal cloud sync; signing in from an existing local profile uploads its finances. Sharing is optional.
+2. The personal workspace owner chooses Share with family and invites the other person's Google email. The invitee will see all existing finances in that workspace.
+3. The other phone signs in, opens its invitation and confirms replacement before downloading and activating family finances. Its previous local data is preserved separately for export.
+4. A fresh phone signed in to an existing cloud account downloads its finances without creating duplicate accounts. If local finances already exist, replacement requires confirmation.
+5. Offline edits stay in the local outbox. Foreground sync and hourly background work retry online. Android may delay background work; it is not instant. Automatic runs use an overlapping incremental cursor; contextual retries reconcile the bounded operation history.
+6. Conflicted transactions have a red rounded outline and Needs review label in Recent and Activity. Open one to compare versions and keep the desired value. Non-transaction conflicts remain in Family. Independent changes keep syncing.
 
 Signing out keeps the local copy and pauses cloud access. Confirmed membership removal clears that family's local copy. Device-slot removal frees capacity but does not revoke the member's Google identity.
 
-Joining asks for membership confirmation before accepting an invitation. Cancelling the later data-replacement dialog leaves membership in place; an administrator can remove it. If creation or restore cannot finish, Stop recovery on this phone unlocks local editing without changing the cloud. An abandoned initial family can be deleted by its creator. An expired shared restore is cancelled and cleaned before starting another restore; there is no automatic lease takeover.
+An account with its own personal workspace can still accept an invitation. The personal workspace is archived, not deleted, in the same commit as the join. Its cloud history stays readable and exportable by its owner, and the phone keeps its previous local copy for export. Archives keep their admission slot, so ten archived or active workspaces exhaust public capacity until the project owner intervenes. A shared workspace cannot be archived this way. If the join is interrupted, local editing stays paused and the next synchronization resumes it; an expired or cancelled invitation leaves the personal workspace active. Another phone still holding the personal copy asks to replace it with the family data.
+
+Joining uses one confirmation before accepting an invitation and replacing finances. If initial cloud setup cannot finish, its contextual Stop recovery action unlocks local editing without changing the cloud. An abandoned initial family can be deleted by its creator. An interrupted restore resumes automatically, with retry and cancellation shown only when needed. An administrator can cancel an expired shared restore; there is no automatic lease takeover.
 
 Malformed operations are held separately, preserved in backups and excluded from financial replay. Independent valid operations continue. Newer protocol versions require an app update rather than being silently skipped. Invitations and restore leases start at server time. Daily quota writes use server timestamps and retry the alternate day counter when the phone clock disagrees; rules remain authoritative.
 
@@ -70,7 +72,7 @@ Malformed operations are held separately, preserved in backups and excluded from
 
 Settings, Backup and restore exports a password-protected file using Android's file picker. Use a unique passphrase, save it separately and verify the file on a spare installation. Local exports include pending changes but may lack another phone's unsent edits.
 
-Import authenticates the file before showing its date and asking to replace finances. Without an enrolled family it restores locally. Within a family, an administrator's restore replaces the shared dataset and keeps memberships. If interrupted, resume or cancel from Family; another administrator can cancel after the lease expires. Retired history cleanup must finish before another restore. Old local copies are available for separate export, never automatically reapplied.
+Import authenticates the file before showing its date and asking to replace finances. Without an enrolled family it restores locally. Within a family, an administrator's restore replaces the shared dataset and keeps memberships. Interrupted work resumes automatically, with contextual retry or cancellation in Family when needed; another administrator can cancel after the lease expires. Retired history cleanup runs automatically and must finish before another restore. Old local copies and personal cloud archives are available for separate export, never automatically reapplied.
 
 The app's file format accepts at most 64 MiB of serialized local history. Firebase enrollment/restore accepts at most 10 MiB. Reaching a cloud limit pauses uploads without deleting local data.
 

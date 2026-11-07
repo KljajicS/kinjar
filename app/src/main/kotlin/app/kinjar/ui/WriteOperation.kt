@@ -20,6 +20,10 @@ class WriteOperation(private val scope: CoroutineScope) {
     private val mutableState = MutableStateFlow(WriteState())
     val state: StateFlow<WriteState> = mutableState
 
+    fun clearFailure() {
+        if (!mutableState.value.busy) mutableState.value = mutableState.value.copy(failed = false)
+    }
+
     fun run(finish: Boolean = true, action: suspend () -> Unit) {
         val current = mutableState.value
         if (current.busy || current.finished) return

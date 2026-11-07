@@ -1,0 +1,23 @@
+<resources>
+    <string name="fd_account_actions">Account actions</string>
+    <string name="fd_family_actions">Family actions</string>
+    <string name="fd_phone_actions">Phone actions</string>
+    <string name="fd_count">%1$s (%2$d)</string>
+    <string name="fd_expanded">Expanded</string>
+    <string name="fd_collapsed">Collapsed</string>
+    <string name="fd_new_family">Cloud sync</string>
+    <string name="fd_create_hint">Sync finances to your Google account. You can share them with family later.</string>
+    <string name="fd_enable">Turn on cloud sync</string>
+    <string name="fd_personal_title">Personal cloud</string>
+    <string name="fd_personal_hint">Your finances are not shared with family yet. Inviting someone gives them access to all existing finances in this workspace.</string>
+    <string name="fd_share">Share with family</string>
+    <string name="fd_backup_hint">Encrypted file backups and restore</string>
+    <string name="fd_other_account">Finances on this phone belong to another Google account. Sign in with that account to continue syncing. They have not been uploaded to this account.</string>
+    <string name="fd_join_personal_warning">Family finances will replace finances on this phone. Your personal cloud data stays in a read-only archive and is not shared with the family. A copy of local data is kept for export.</string>
+    <string name="fd_join_progress">Joining family. Your personal finances stay saved until the family data is ready.</string>
+    <string name="fd_archives">Personal cloud archives</string>
+    <string name="fd_archives_hint">Personal data saved before joining a family. Export an encrypted file to keep or restore it.</string>
+    <string name="fd_show_archives">Show archives</string>
+    <string name="fd_no_archives">No archived personal data.</string>
+    <string name="fd_export_archive">Export archive %1$d</string>
+</resources>

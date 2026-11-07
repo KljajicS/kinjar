@@ -7,7 +7,7 @@
     <string name="fbs_quarantined">Neispravne promene (%1$d) čuvaju se zasebno i uključene su u rezervne kopije. Ostale promene mogu da se usklade. Zamoli administratora da proveri ili vrati porodicu ako zavisne promene ostanu blokirane.</string>
     <string name="fbs_family">Porodica</string>
     <string name="fbs_backups">Rezervna kopija i vraćanje</string>
-    <string name="fbs_optional">Opciona sinhronizacija porodice</string>
+    <string name="fbs_optional">Opciona sinhronizacija u oblaku</string>
     <string name="fbs_privacy">Sinhronizacija čuva porodične finansije u Firebase-u. Google i administratori projekta mogu da ih čitaju. Zajednički besplatan kapacitet je ograničen.</string>
     <string name="fbs_unavailable">Porodična sinhronizacija nije dostupna u ovoj verziji. Lokalne finansije i rezervne kopije su dostupne.</string>
     <string name="fbs_google">Nastavi preko Google-a</string>
@@ -20,7 +20,7 @@
     <string name="fbs_resume_delete">Završi brisanje porodice</string>
     <string name="fbs_use_family">Koristi podatke porodice</string>
     <string name="fbs_replace">Zameni finansije?</string>
-    <string name="fbs_replace_warning">Podaci porodice će zameniti finansije na ovom telefonu. Prethodni lokalni podaci ostaju odvojeno sačuvani za izvoz. Neće se automatski poslati.</string>
+    <string name="fbs_replace_warning">Podaci iz oblaka će zameniti finansije na ovom telefonu. Prethodni lokalni podaci ostaju odvojeno sačuvani za izvoz. Neće se automatski poslati.</string>
     <string name="fbs_recover">Preuzmi podatke porodice</string>
     <string name="fbs_sync_now">Sinhronizuj sada</string>
     <string name="fbs_invite">Pozovi člana porodice</string>

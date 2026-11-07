@@ -23,15 +23,14 @@ class RateRefresh(private val repo: RateRepository, private val lookup: RateLook
     val state = mutableState.asStateFlow()
 
     suspend fun refresh(manual: Boolean = false) = withContext(Dispatchers.IO) {
+        val now = clock.now()
         if (!mutex.tryLock()) return@withContext
         try {
-            val now = clock.now()
             if (!manual) {
                 val lastSuccess = repo.snapshots.first().cached.values.minOfOrNull { it.fetchedAt }
                 if (!due(now, lastSuccess, attempts.lastAttempt)) return@withContext
             }
             mutableState.value = RateRefreshState(busy = true)
-            attempts.lastAttempt = now
             val list = lookup.fetch()
             repo.cache(list.rates, list.date)
             mutableState.value = RateRefreshState()
@@ -39,6 +38,7 @@ class RateRefresh(private val repo: RateRepository, private val lookup: RateLook
             mutableState.value = RateRefreshState()
             throw e
         } catch (_: Exception) {
+            attempts.lastAttempt = now
             mutableState.value = RateRefreshState(failed = true)
         } finally {
             mutex.unlock()

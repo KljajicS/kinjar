@@ -37,7 +37,7 @@ service cloud.firestore {
         && d.members.keys().hasAll(d.admins) && slot(d.slot)
         && identifier(d.activeDataset) && (d.otherDataset == '' || identifier(d.otherDataset))
         && d.generation is int && d.generation >= 1 && d.generation <= 2147483647
-        && d.status in ['INITIALIZING', 'ACTIVE', 'RESTORING', 'DELETING']
+        && d.status in ['INITIALIZING', 'ACTIVE', 'RESTORING', 'DELETING', 'ARCHIVED']
         && d.action is string && d.action.size() <= 16 && d.target is string && d.target.size() <= 128
         && d.inviteSlot is string && d.inviteSlot.size() <= 1
         && (!('restoreToken' in d) || identifier(d.restoreToken))
@@ -52,6 +52,18 @@ service cloud.firestore {
     }
     function noFamily(uid) {
       return !exists(userPath(uid)) || get(userPath(uid)).data.status == 'REMOVED';
+    }
+    function open(fid) { return get(familyPath(fid)).data.status != 'ARCHIVED'; }
+    // A personal workspace is archived, never deleted, in the same commit that moves its owner to target.
+    function archivedBy(uid, source, target) {
+      let before = get(familyPath(source)).data;
+      let after = getAfter(familyPath(source)).data;
+      return source != target && before.status == 'ACTIVE' && after.status == 'ARCHIVED'
+        && after.action == 'archive' && after.target == target && after.owner == uid;
+    }
+    function switchingFrom(uid, target) {
+      let user = get(userPath(uid)).data;
+      return user.status == 'ACTIVE' && archivedBy(uid, user.familyId, target);
     }
 
     match /slots/{id} {
@@ -82,11 +94,15 @@ service cloud.firestore {
             && request.resource.data.memberId == resource.data.memberId
             && admin(resource.data.familyId)
             && (!(uid in getAfter(familyPath(resource.data.familyId)).data.members)
-              || getAfter(familyPath(resource.data.familyId)).data.status == 'DELETING')));
+              || getAfter(familyPath(resource.data.familyId)).data.status == 'DELETING'))
+          || (request.auth.uid == uid && resource.data.status == 'ACTIVE' && request.resource.data.status == 'ACTIVE'
+            && archivedBy(uid, resource.data.familyId, request.resource.data.familyId)
+            && getAfter(familyPath(request.resource.data.familyId)).data.members[uid] == request.resource.data.memberId));
     }
 
     match /families/{fid} {
       allow get: if member(fid) || deletingOwner(fid) || invited(fid);
+      allow list: if signedIn() && resource.data.owner == request.auth.uid && resource.data.status == 'ARCHIVED';
       allow create: if signedIn() && identifier(fid) && familyShape(request.resource.data) && noFamily(request.auth.uid)
         && request.resource.data.owner == request.auth.uid && request.resource.data.admins == [request.auth.uid]
         && request.resource.data.members.keys().hasOnly([request.auth.uid])
@@ -100,13 +116,25 @@ service cloud.firestore {
       function joining() {
         let invite = get(/databases/$(database)/documents/families/$(fid)/invites/$(request.resource.data.inviteSlot)).data;
         let after = getAfter(/databases/$(database)/documents/families/$(fid)/invites/$(request.resource.data.inviteSlot)).data;
-        return signedIn() && resource.data.status == 'ACTIVE' && noFamily(request.auth.uid)
+        return signedIn() && resource.data.status == 'ACTIVE'
+          && (noFamily(request.auth.uid) || switchingFrom(request.auth.uid, fid))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'action', 'target', 'inviteSlot'])
           && request.resource.data.action == 'join' && request.resource.data.target == request.auth.uid
           && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
           && !(request.auth.uid in resource.data.members) && identifier(request.resource.data.members[request.auth.uid])
           && invite.status == 'PENDING' && invite.email == request.auth.token.email && invite.createdAt + duration.value(6, 'd') > request.time
           && after.status == 'ACCEPTED' && after.uid == request.auth.uid && linkedAfter(request.auth.uid, fid);
+      }
+      function archiving() {
+        let user = getAfter(userPath(request.auth.uid)).data;
+        let target = getAfter(familyPath(user.familyId)).data;
+        return resource.data.status == 'ACTIVE' && resource.data.owner == request.auth.uid
+          && resource.data.admins == [request.auth.uid] && resource.data.members.keys().hasOnly([request.auth.uid])
+          && request.resource.data.status == 'ARCHIVED' && request.resource.data.inviteSlot == ''
+          && request.resource.data.target == user.familyId && user.familyId != fid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'action', 'target', 'inviteSlot'])
+          && get(userPath(request.auth.uid)).data.familyId == fid && get(userPath(request.auth.uid)).data.status == 'ACTIVE'
+          && linkedAfter(request.auth.uid, user.familyId) && target.action == 'join' && target.target == request.auth.uid;
       }
       function removing() {
         let target = request.resource.data.target;
@@ -189,8 +217,9 @@ service cloud.firestore {
           && ((resource.data.deletionPhase == 0 && request.resource.data.deletionPhase == 1 && clearedSlots('invites'))
             || (resource.data.deletionPhase == 1 && request.resource.data.deletionPhase == 2 && clearedSlots('installs')));
       }
-      allow update: if signedIn() && familyShape(request.resource.data)
+      allow update: if signedIn() && familyShape(request.resource.data) && resource.data.status != 'ARCHIVED'
         && ((request.resource.data.action == 'join' && joining())
+          || (request.resource.data.action == 'archive' && archiving())
           || (request.resource.data.action == 'remove' && removing())
           || (request.resource.data.action in ['roles', 'transfer'] && roles())
           || (request.resource.data.action == 'activate' && activateInitial())
@@ -213,11 +242,11 @@ service cloud.firestore {
             && identifier(d.inviter) && d.inviterEmail is string && d.inviterEmail.size() <= 254
             && d.createdAt is timestamp && d.uid is string && d.uid.size() <= 128;
         }
-        allow create: if admin(fid) && shape(request.resource.data) && request.resource.data.inviter == request.auth.uid
+        allow create: if admin(fid) && open(fid) && shape(request.resource.data) && request.resource.data.inviter == request.auth.uid
           && request.resource.data.inviterEmail == request.auth.token.email
           && request.resource.data.status == 'PENDING' && request.resource.data.uid == ''
           && request.resource.data.createdAt == request.time;
-        allow update: if signedIn() && shape(request.resource.data)
+        allow update: if signedIn() && shape(request.resource.data) && open(fid)
           && ((admin(fid) && request.resource.data.status == 'CANCELLED'
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
             || (resource.data.status == 'PENDING' && resource.data.email == request.auth.token.email
@@ -225,16 +254,16 @@ service cloud.firestore {
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'uid'])
               && linkedAfter(request.auth.uid, fid)));
-        allow delete: if deletingOwner(fid) || (admin(fid) && resource.data.status != 'PENDING');
+        allow delete: if deletingOwner(fid) || (admin(fid) && open(fid) && resource.data.status != 'PENDING');
       }
 
       match /installs/{sid} {
         allow get, list: if member(fid) || deletingOwner(fid);
-        allow create: if member(fid) && smallSlot(sid)
+        allow create: if member(fid) && open(fid) && smallSlot(sid)
           && request.resource.data.keys().hasOnly(['uid', 'installId', 'name', 'createdAt'])
           && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId)
           && request.resource.data.name is string && request.resource.data.name.size() <= 80 && request.resource.data.createdAt == request.time;
-        allow delete: if deletingOwner(fid) || admin(fid) || (member(fid) && resource.data.uid == request.auth.uid);
+        allow delete: if deletingOwner(fid) || (open(fid) && (admin(fid) || (member(fid) && resource.data.uid == request.auth.uid)));
       }
 
       match /datasets/{did} {
