@@ -17,6 +17,6 @@ Keep a separate secure backup of the keystore and credentials. Never commit them
 
 Before tagging, increment `versionCode` and `versionName`, run `make lint test release`, and test an upgrade on a device containing existing transactions. Confirm that accounts, balances, receipts, goals and loan history survive the upgrade.
 
-Earlier CI releases used temporary debug keys. A new signing key cannot update those installations. Recover the exact original private key before promising an in-place upgrade; an APK contains its certificate, not its private key. Do not uninstall an existing installation containing financial data to bypass a signature mismatch. Data export/recovery is not implemented yet.
+Earlier CI releases used temporary debug keys. A new signing key cannot update those installations. Recover the exact original private key before promising an in-place upgrade; an APK contains its certificate, not its private key. Do not uninstall an existing installation containing financial data to bypass a signature mismatch. Current kinjar builds support password-protected backups and cloud recovery; verify an export can be restored on a spare installation before changing distribution keys.
 
 Releases up to 0.3.3 shipped as Family Budget Tracker with application ID `rs.budget`. kinjar uses `app.kinjar`, so it installs as a separate app: it does not upgrade those installations and does not read their data.

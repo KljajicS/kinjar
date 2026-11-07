@@ -2,34 +2,32 @@ package app.kinjar.data.backup
 
 import android.content.Context
 import android.net.Uri
-import app.kinjar.domain.FamilyHistory
+import app.kinjar.data.EventStore
+import app.kinjar.data.StoredHistory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
+import java.time.Instant
 import javax.inject.Inject
 
-class BackupFiles @Inject constructor(@ApplicationContext private val context: Context) {
-    suspend fun write(uri: Uri, history: FamilyHistory, password: CharArray) = withContext(Dispatchers.IO) {
+class BackupFiles @Inject constructor(@ApplicationContext private val context: Context, private val store: EventStore) {
+    suspend fun write(uri: Uri, history: StoredHistory, password: CharArray) = withContext(Dispatchers.IO) {
         try {
-            val bytes = BackupCodec.seal(history, password)
-            requireNotNull(context.contentResolver.openOutputStream(uri, "wt")).use { it.write(bytes); it.flush() }
+            val written = requireNotNull(context.contentResolver.openOutputStream(uri, "wt")).buffered().use {
+                BackupCodec.seal(store.historySource(history.id), it, password)
+            }
+            check(written.digest == history.digest) { "History changed while writing the backup" }
         } finally { password.fill('\u0000') }
     }
 
-    suspend fun read(uri: Uri, password: CharArray): OpenBackup = withContext(Dispatchers.IO) {
+    /** The backup's history as a finished spool; a damaged or partial file leaves no spool behind. */
+    suspend fun read(uri: Uri, password: CharArray): OpenStoredBackup = withContext(Dispatchers.IO) {
         try {
-            val output = ByteArrayOutputStream()
-            requireNotNull(context.contentResolver.openInputStream(uri)).use { stream ->
-                val buffer = ByteArray(8192)
-                while (true) {
-                    val count = stream.read(buffer)
-                    if (count < 0) break
-                    require(output.size() + count <= BackupCodec.MAX_BYTES) { "Backup exceeds size limit" }
-                    output.write(buffer, 0, count)
-                }
+            var createdAt: Instant? = null
+            val history = requireNotNull(context.contentResolver.openInputStream(uri)).buffered().use { input ->
+                store.writeHistory { sink -> createdAt = BackupCodec.open(input, password, sink) }
             }
-            BackupCodec.open(output.toByteArray(), password)
+            OpenStoredBackup(requireNotNull(createdAt), history)
         } finally { password.fill('\u0000') }
     }
 }

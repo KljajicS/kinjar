@@ -9,7 +9,7 @@ import app.kinjar.data.EventStore
 import app.kinjar.data.auth.FirebaseAuthRepository
 import app.kinjar.data.auth.GoogleAccount
 import app.kinjar.data.backup.BackupFiles
-import app.kinjar.data.backup.OpenBackup
+import app.kinjar.data.backup.OpenStoredBackup
 import app.kinjar.data.db.KinjarDb
 import app.kinjar.data.sync.*
 import app.kinjar.domain.*
@@ -74,7 +74,8 @@ class FamilyViewModel @Inject constructor(
     private var exportPassword: CharArray? = null
     private var exportCopy: String? = null
     private var exportArchive: String? = null
-    private var opened: OpenBackup? = null
+    private var opened: OpenStoredBackup? = null
+    private var handedOff = false
     private var restoreDigest: String? = null
 
     init {
@@ -191,12 +192,13 @@ class FamilyViewModel @Inject constructor(
             try {
                 requireNotNull(password) { "Enter the backup passphrase again" }
                 val history = if (archive != null) sync.archivedHistory(archive) else withContext(Dispatchers.IO) {
-                    if (copy == null) store.snapshot() else store.read {
+                    if (copy == null) store.captureHistory() else {
                         val uid = auth.current()?.uid ?: "local"
-                        HistoryCodec.decode(db.syncDraftQueries.all(uid).executeAsList().single { it.id == copy }.payload)
+                        requireNotNull(store.draftHistory(uid, copy)) { "Retained copy is unavailable" }
                     }
                 }
-                backups.write(uri, history, password)
+                try { backups.write(uri, history, password) }
+                finally { if (copy == null) withContext(Dispatchers.IO) { store.discardHistory(history.id) } }
                 mutableState.update { it.copy(savedBackup = true) }
             } finally { password?.fill('\u0000') }
         }
@@ -205,23 +207,48 @@ class FamilyViewModel @Inject constructor(
     fun inspectBackup(uri: Uri, password: CharArray) = run(R.string.fbs_backup_open_failed) {
         try {
             val backup = backups.read(uri, password)
-            withContext(Dispatchers.IO) { store.validateHistory(backup.history) }
-            opened = backup
-            restoreDigest = withContext(Dispatchers.IO) { HistoryCodec.digest(HistoryCodec.encode(store.snapshot())) }
+            try {
+                withContext(Dispatchers.IO) { store.validateHistory(backup.history) }
+                val digest = withContext(Dispatchers.IO) { store.currentDigest() }
+                cancelBackupRestore()
+                opened = backup
+                restoreDigest = digest
+            } catch (e: Exception) {
+                withContext(Dispatchers.IO) { store.discardHistory(backup.history.id) }
+                throw e
+            }
             mutableState.update { it.copy(backupDate = backup.createdAt) }
         } finally { password.fill('\u0000') }
     }
 
-    fun cancelBackupRestore() { opened = null; restoreDigest = null; mutableState.update { it.copy(backupDate = null) } }
+    /** Forgets the opened backup, discarding its staged history unless a restore took ownership of it. */
+    fun cancelBackupRestore() {
+        val unused = opened?.history?.takeUnless { handedOff }
+        opened = null
+        restoreDigest = null
+        handedOff = false
+        mutableState.update { it.copy(backupDate = null) }
+        if (unused != null) viewModelScope.launch(Dispatchers.IO) { store.discardHistory(unused.id) }
+    }
     fun confirmBackupRestore() = run {
         val backup = requireNotNull(opened)
         val digest = requireNotNull(restoreDigest)
         try {
-            if (store.read { db.syncSessionQueries.current().executeAsOneOrNull() } == null) withContext(Dispatchers.IO) { store.restoreLocal(backup.history, digest) }
-            else if (state.value.journalPhase == "RESTORE") sync.resumeRestore()
-            else sync.restoreFamily(backup.history, digest)
+            if (store.read { db.syncSessionQueries.current().executeAsOneOrNull() } == null) {
+                withContext(Dispatchers.IO) { store.restoreLocal(backup.history, digest) }
+                handedOff = true
+            } else if (state.value.journalPhase == "RESTORE") sync.resumeRestore()
+            else {
+                // A saved restore journal references this history even when a later step fails.
+                try { sync.restoreFamily(backup.history, digest) }
+                catch (e: Exception) {
+                    handedOff = withContext(Dispatchers.IO) { store.read { db.restoreJournalQueries.journalInfo().executeAsOneOrNull() != null } }
+                    throw e
+                }
+                handedOff = true
+            }
         } catch (e: LocalHistoryChanged) {
-            restoreDigest = HistoryCodec.digest(HistoryCodec.encode(store.snapshot()))
+            restoreDigest = withContext(Dispatchers.IO) { store.currentDigest() }
             throw e
         }
         cancelBackupRestore()
@@ -285,13 +312,14 @@ class FamilyViewModel @Inject constructor(
     }
 
     private fun loadLocal() = store.read {
-        val operations = db.syncOperationQueries.all().executeAsList().associate { it.id to OperationCodec.decode(it.payload) }
-        val conflicts = db.syncConflictQueries.all().executeAsList().mapNotNull { row -> operations[row.operation_id]?.let { ConflictItem(it, row.reason) } }
+        val conflicts = db.syncConflictQueries.all().executeAsList().mapNotNull { row ->
+            db.syncOperationQueries.byId(row.operation_id).executeAsOneOrNull()?.let { ConflictItem(OperationCodec.decode(it.payload), row.reason) }
+        }
         val session = db.syncSessionQueries.current().executeAsOneOrNull()
         val members = db.memberQueries.all().executeAsList()
         val uid = auth.current()?.uid ?: "local"
-        val copies = db.syncDraftQueries.all(uid).executeAsList().map { RetainedCopy(it.id, Instant.ofEpochMilli(it.created_at)) }
-        val journal = db.restoreJournalQueries.current().executeAsOneOrNull()
+        val copies = db.syncDraftQueries.draftInfo(uid).executeAsList().map { RetainedCopy(it.id, Instant.ofEpochMilli(it.created_at)) }
+        val journal = db.restoreJournalQueries.journalInfo().executeAsOneOrNull()
         mutableState.update { it.copy(names = members.associate { m -> m.id to m.display_name }, conflicts = conflicts, copies = copies,
             quarantined = db.syncQuarantineQueries.all().executeAsList().size,
             journalPhase = journal?.phase,
@@ -304,6 +332,7 @@ class FamilyViewModel @Inject constructor(
     override fun onCleared() {
         exportPassword?.fill('\u0000')
         exportPassword = null
+        opened?.history?.takeUnless { handedOff }?.let { store.releaseHistory(it.id) }
         opened = null
     }
 }

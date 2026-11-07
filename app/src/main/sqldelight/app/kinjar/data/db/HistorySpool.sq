@@ -1,0 +1,65 @@
+CREATE TABLE history_spool (
+    id TEXT NOT NULL PRIMARY KEY,
+    complete INTEGER NOT NULL DEFAULT 0,
+    next_position INTEGER NOT NULL DEFAULT 0,
+    baseline_count INTEGER NOT NULL DEFAULT 0,
+    operation_count INTEGER NOT NULL DEFAULT 0,
+    quarantine_count INTEGER NOT NULL DEFAULT 0,
+    digest TEXT NOT NULL DEFAULT '',
+    bytes INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE history_spool_record (
+    spool_id TEXT NOT NULL,
+    kind INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    record_key TEXT,
+    reason TEXT,
+    payload BLOB NOT NULL,
+    PRIMARY KEY (spool_id, kind, position)
+);
+
+CREATE UNIQUE INDEX history_spool_record_key ON history_spool_record(spool_id, kind, record_key);
+
+begin:
+INSERT INTO history_spool(id) VALUES (?);
+
+info:
+SELECT * FROM history_spool WHERE id = ?;
+
+insertRecord:
+INSERT INTO history_spool_record(spool_id, kind, position, record_key, reason, payload) VALUES (?, ?, ?, ?, ?, ?);
+
+advance:
+UPDATE history_spool SET next_position = next_position + 1,
+    baseline_count = baseline_count + :baseline,
+    operation_count = operation_count + :operations,
+    quarantine_count = quarantine_count + :quarantine
+WHERE id = :id AND complete = 0;
+
+recordByKey:
+SELECT payload FROM history_spool_record WHERE spool_id = ? AND kind = ? AND record_key = ?;
+
+countKind:
+SELECT count(*) FROM history_spool_record WHERE spool_id = ? AND kind = ?;
+
+spoolPage:
+SELECT kind, position, reason, payload FROM history_spool_record
+WHERE spool_id = :id AND kind = :kind AND position > :position
+ORDER BY position
+LIMIT :limit;
+
+complete:
+UPDATE history_spool SET complete = 1, digest = ?, bytes = ? WHERE id = ? AND complete = 0;
+
+unreferenced:
+SELECT id FROM history_spool
+WHERE id NOT IN (SELECT history_id FROM sync_baseline WHERE history_id IS NOT NULL)
+AND id NOT IN (SELECT history_id FROM sync_draft WHERE history_id IS NOT NULL)
+AND id NOT IN (SELECT history_id FROM restore_journal WHERE history_id IS NOT NULL);
+
+deleteRecords:
+DELETE FROM history_spool_record WHERE spool_id = ?;
+
+delete:
+DELETE FROM history_spool WHERE id = ?;

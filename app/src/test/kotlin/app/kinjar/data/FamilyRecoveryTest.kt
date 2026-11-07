@@ -217,7 +217,7 @@ class FamilyRecoveryTest {
     @Test fun `unsupported operation leaves entire import and checkpoint unchanged`() = runTest {
         store.append(account("a")); enroll()
         val future = OperationCodec.encode(operation("one", "Newer")).toString(Charsets.UTF_8)
-            .replace("\"version\":1", "\"version\":2").toByteArray()
+            .replace("\"version\":1", "\"version\":3").toByteArray()
         assertThrows(UnsupportedSyncVersion::class.java) {
             store.receive(listOf(OperationCodec.encode(operation("two", "Valid")), future), "user", "family", "dataset", 100, 0, "one:1")
         }

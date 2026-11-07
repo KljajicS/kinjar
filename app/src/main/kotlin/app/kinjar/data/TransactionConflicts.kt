@@ -73,7 +73,9 @@ class TransactionConflicts @Inject constructor(private val db: KinjarDb, private
     private fun heldChanges(): HeldChanges? {
         val reasons = db.syncConflictQueries.all().executeAsList().associate { it.operation_id to it.reason }
         if (reasons.isEmpty()) return null
-        return HeldChanges(db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }, reasons)
+        return HeldChanges(reasons.keys.mapNotNull { id ->
+            db.syncOperationQueries.byId(id).executeAsOneOrNull()?.let { OperationCodec.decode(it.payload) }
+        }, reasons)
     }
 
     private fun transaction(id: String): Transaction? = db.txQueries.all().executeAsList().firstOrNull { it.id == id }?.run {

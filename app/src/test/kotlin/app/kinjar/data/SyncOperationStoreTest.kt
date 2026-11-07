@@ -33,6 +33,39 @@ class SyncOperationStoreTest {
         assertEquals(setOf("device:1"), next.parents)
     }
 
+    @Test fun `account and category edits still sync after twenty thousand independent transactions from two phones`() = runTest {
+        activate()
+        store.appendAll(listOf(account("a"), CategoryCreated(Category("c", "Food", "#000000"))))
+        val date = java.time.LocalDate.of(2026, 11, 4)
+        val phones = listOf("0f8fad5b-d9cb-469f-a165-70867728950e", "7c9e6679-7425-40de-944b-e07fc1f90ae7")
+        val history = phones.flatMap { phone ->
+            (1..10_500L).map { seq ->
+                val tx = Transaction("$phone-t$seq", TransactionType.EXPENSE, Money.of("1", Currency.RSD), "a", null, "c", date, "", "", "member", TransactionSource.MANUAL)
+                SyncOperation(familyId = "family", datasetId = "dataset", authorUid = "peer", installId = phone, sequence = seq, parents = setOf("device:1"),
+                    resources = mapOf("transaction:$phone-t$seq" to ResourceAccess.WRITE, "account:a" to ResourceAccess.READ, "category:c" to ResourceAccess.READ),
+                    events = listOf(OperationEvent("$phone-$seq", phone, seq, seq, TransactionAdded(tx))))
+            }
+        }
+        val parents = history.mapTo(mutableSetOf()) { it.id }
+        assertTrue(parents.sumOf { it.length + 3 } > OperationCodec.MAX_BYTES)
+        db.transaction { history.forEach { db.syncOperationQueries.insert(it.id, it.installId, it.sequence, OperationCodec.encode(it)) } }
+
+        store.append(AccountUpdated(Account("a", "Renamed", Currency.RSD, AccountKind.SPENDING)))
+        store.append(CategoryUpdated(Category("c", "Groceries", "#000000")))
+
+        val saved = db.syncOperationQueries.all().executeAsList().filter { it.install_id == "device" }
+        assertEquals(listOf(1, 2, 2), saved.map { OperationCodec.decode(it.payload).version })
+        saved.drop(1).forEach { row ->
+            val operation = OperationCodec.decode(row.payload)
+            assertEquals(parents, operation.parents)
+            assertTrue(row.payload.size < 2_048)
+            assertArrayEquals(row.payload, OperationCodec.encode(operation))
+        }
+        assertEquals(saved.map { it.id }, db.syncOutboxQueries.pending("family", "dataset").executeAsList().map { it.id })
+        assertEquals("Renamed", db.accountQueries.active().executeAsList().single().name)
+        assertEquals("Groceries", db.categoryQueries.active().executeAsList().single().name)
+    }
+
     @Test fun `failed command leaves projections history and outbox untouched`() = runTest {
         activate()
         assertThrows(IllegalArgumentException::class.java) {

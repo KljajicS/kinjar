@@ -1,10 +1,16 @@
 package app.kinjar.data.sync
 
+import android.content.Context
 import app.kinjar.data.auth.FirebaseServices
 import app.kinjar.domain.FamilyHistory
 import app.kinjar.domain.HistoryCodec
+import app.kinjar.domain.HistoryRecord
+import app.kinjar.domain.HistorySource
+import app.kinjar.domain.HistoryStream
 import app.kinjar.domain.OperationCodec
+import app.kinjar.domain.OperationEvent
 import app.kinjar.domain.QuarantinedOperation
+import app.kinjar.domain.SyncOperation
 import app.kinjar.domain.UnsupportedSyncVersion
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.Blob
@@ -14,9 +20,14 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.Source
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.tasks.await
+import java.io.Closeable
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,32 +37,58 @@ data class CloudPage(val operations: List<ByteArray>, val cursor: CloudCursor?, 
 class SyncCapacityReached : IllegalStateException("Cloud capacity reached; changes remain on this phone")
 
 @Singleton
-class FirestoreTransport @Inject constructor(private val services: FirebaseServices) {
+class FirestoreTransport @Inject constructor(
+    private val services: FirebaseServices,
+    @ApplicationContext private val context: Context,
+) {
     private val db get() = services.firestore
     private fun family(id: String) = db.collection("families").document(id)
     private fun dataset(fid: String, did: String) = family(fid).collection("datasets").document(did)
     private fun checkUser(uid: String) { check(services.auth.currentUser?.uid == uid) { "Google account changed" } }
 
-    suspend fun initialize(uid: String, fid: String, did: String, history: FamilyHistory, restoreToken: String = "") {
+    /**
+     * Uploads [history] as a version 2 stream in [CHUNK_BYTES] chunks, resuming after interruption. The source is read
+     * twice, once for the manifest and once for upload, and both passes must produce the same bytes.
+     */
+    suspend fun initialize(uid: String, fid: String, did: String, history: HistorySource, restoreToken: String = "") {
         checkUser(uid)
-        val bytes = HistoryCodec.encode(history)
-        if (bytes.size > MAX_HISTORY_BYTES) throw SyncCapacityReached()
-        val chunks = (bytes.indices step CHUNK_BYTES).map { bytes.copyOfRange(it, minOf(it + CHUNK_BYTES, bytes.size)) }
-        val digest = HistoryCodec.digest(bytes)
+        val existing = dataset(fid, did).get(Source.SERVER).await()
+        checkUser(uid)
+        val version = if (existing.exists()) existing.getLong("historyVersion") ?: 1L else HISTORY_VERSION
+        if (version > HISTORY_VERSION) throw UnsupportedSyncVersion()
+        require(version in 1L..HISTORY_VERSION)
+        val legacy = if (version == 1L) File.createTempFile("legacy-bootstrap", ".spool", context.cacheDir) else null
+        try {
+            if (legacy != null) legacy.outputStream().buffered().use { HistoryCodec.write(history, it) }
+            initializeStream(uid, fid, did, restoreToken, version) {
+                if (legacy == null) historyPieces(history) else filePieces(legacy)
+            }
+        } finally { legacy?.delete() }
+    }
+
+    private suspend fun initializeStream(uid: String, fid: String, did: String, restoreToken: String, version: Long,
+                                         stream: () -> Sequence<ByteArray>) {
+        val manifest = StreamManifest.of(stream())
         val ref = dataset(fid, did)
         db.runTransaction { tx ->
             checkUser(uid)
             val saved = tx.get(ref)
             if (saved.exists()) {
-                require(saved.getString("digest") == digest && saved.getLong("expectedBytes") == bytes.size.toLong()) { "Bootstrap history changed" }
+                require((saved.getLong("historyVersion") ?: 1L) == version && saved.getString("digest") == manifest.digest
+                    && saved.getLong("expectedBytes") == manifest.bytes) { "Bootstrap history changed" }
             } else {
-                tx.set(ref, mapOf("count" to 0L, "bytes" to 0L, "day" to FieldValue.serverTimestamp(), "dailyCount" to 0L, "lastOpId" to "",
-                    "chunks" to 0L, "chunkBytes" to 0L, "expectedChunks" to chunks.size.toLong(), "expectedBytes" to bytes.size.toLong(),
-                    "digest" to digest, "lastChunk" to "", "sealed" to false) +
+                require(version == HISTORY_VERSION) { "Legacy bootstrap disappeared" }
+                tx.set(ref, mapOf("count" to 0L, "bytes" to 0L, "day" to FieldValue.serverTimestamp(), "dailyCount" to 0L, "dailyBytes" to 0L,
+                    "lastOpId" to "", "chunks" to 0L, "chunkBytes" to 0L, "expectedChunks" to manifest.chunks, "expectedBytes" to manifest.bytes,
+                    "digest" to manifest.digest, "lastChunk" to "", "sealed" to false, "historyVersion" to HISTORY_VERSION) +
                     if (restoreToken.isEmpty()) emptyMap() else mapOf("restoreToken" to restoreToken))
             }
         }.await()
-        chunks.forEachIndexed { index, chunk ->
+        val uploaded = StreamManifest.Builder()
+        for (chunk in chunked(stream())) {
+            val index = uploaded.chunks
+            uploaded.add(chunk)
+            require(uploaded.chunks <= manifest.chunks) { "Bootstrap history changed" }
             db.runTransaction { tx ->
                 checkUser(uid)
                 val state = tx.get(ref)
@@ -65,7 +102,8 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
                 }
             }.await()
         }
-        require(HistoryCodec.digest(HistoryCodec.encode(downloadBaseline(uid, fid, did, requireSealed = false))) == digest)
+        // Every stored chunk now equals this pass, so a matching digest proves the cloud holds the manifest's stream.
+        require(uploaded.build() == manifest) { "Bootstrap history changed" }
         db.runTransaction { tx ->
             checkUser(uid)
             val root = family(fid)
@@ -75,7 +113,7 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
             if (restoreToken.isEmpty()) require(f.getString("activeDataset") == did && f.getString("status") == "INITIALIZING")
             else require(f.getString("status") == "RESTORING" && f.getString("otherDataset") == did && f.getString("restoreToken") == restoreToken)
             run {
-                require(state.long("chunks") == chunks.size.toLong() && state.long("chunkBytes") == bytes.size.toLong())
+                require(state.long("chunks") == manifest.chunks && state.long("chunkBytes") == manifest.bytes)
                 tx.update(ref, "sealed", true)
                 if (restoreToken.isEmpty()) tx.update(root, mapOf("status" to "ACTIVE", "action" to "activate"))
                 else tx.update(root, mapOf("status" to "ACTIVE", "action" to "restored", "activeDataset" to did,
@@ -203,24 +241,38 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
         require(state.long("count") == 0L && state.long("bytes") == 0L && state.long("chunks") == 0L && state.long("chunkBytes") == 0L)
     }
 
-    suspend fun downloadBaseline(uid: String, fid: String, did: String, requireSealed: Boolean = true): FamilyHistory {
+    /**
+     * Downloads the sealed baseline into a cache file and verifies its size and digest before any record is parsed.
+     * The returned source reads that file and must be closed. Version 1 baselines were bounded by their release's
+     * rules and are converted in memory.
+     */
+    suspend fun downloadBaseline(uid: String, fid: String, did: String, requireSealed: Boolean = true): HistorySource {
         checkUser(uid)
         val ref = dataset(fid, did)
         val state = ref.get(Source.SERVER).await()
         require(!requireSealed || state.getBoolean("sealed") == true) { "Family initialization incomplete" }
-        val count = state.long("expectedChunks").also { require(it in 1..20) }.toInt()
-        val size = state.long("expectedBytes").also { require(it in 1..MAX_HISTORY_BYTES.toLong()) }.toInt()
-        require(state.long("chunks") == count.toLong() && state.long("chunkBytes") == size.toLong())
-        val output = ByteArrayOutputStream(size)
-        repeat(count) { index ->
-            checkUser(uid)
-            val chunk = requireNotNull(ref.collection("chunks").document(index.toString()).get(Source.SERVER).await().getBlob("payload")).toBytes()
-            require(chunk.size in 1..CHUNK_BYTES && output.size() + chunk.size <= size)
-            output.write(chunk)
+        val version = state.getLong("historyVersion") ?: 1L
+        if (version > HISTORY_VERSION) throw UnsupportedSyncVersion()
+        require(version >= 1L) { "Invalid dataset metadata" }
+        val count = state.long("expectedChunks")
+        val size = state.long("expectedBytes")
+        if (version == 1L) require(count <= MAX_LEGACY_CHUNKS && size <= HistoryCodec.MAX_BYTES) { "Invalid dataset metadata" }
+        require(state.long("chunks") == count && state.long("chunkBytes") == size)
+        val digest = requireNotNull(state.getString("digest"))
+        val file = File.createTempFile("baseline", ".spool", context.cacheDir)
+        val spool = try { ChunkSpool(file, count, size, digest) } catch (e: Throwable) { file.delete(); throw e }
+        try {
+            for (index in 0 until count) {
+                checkUser(uid)
+                spool.write(requireNotNull(ref.collection("chunks").document(index.toString()).get(Source.SERVER).await().getBlob("payload")).toBytes())
+            }
+            spool.finish()
+            if (version == 1L) return legacyHistorySource(HistoryCodec.decode(spool.file.readBytes())).also { spool.file.delete() }
+            return SpooledHistory(spool.file)
+        } catch (e: Throwable) {
+            spool.discard()
+            throw e
         }
-        val bytes = output.toByteArray()
-        require(bytes.size == size && HistoryCodec.digest(bytes) == state.getString("digest")) { "Incomplete or corrupt family history" }
-        return HistoryCodec.decode(bytes)
     }
 
     suspend fun register(uid: String, fid: String, installId: String): String {
@@ -258,6 +310,8 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
         checkUser(uid)
         val op = OperationCodec.decode(payload)
         require(op.authorUid == uid && op.familyId == fid && op.datasetId == did)
+        val cost = operationCost(op, payload.size)
+        if (cost > MAX_DAILY_BYTES) throw SyncCapacityReached()
         val ref = dataset(fid, did)
         db.runTransaction { tx ->
             checkUser(uid)
@@ -267,15 +321,16 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
             if (existing.exists()) {
                 require(existing.getBlob("payload")?.toBytes()?.contentEquals(payload) == true) { "Conflicting uploaded operation" }
             } else {
-                val count = state.long("count") + 1
-                val bytes = state.long("bytes") + payload.size
+                val count = Math.addExact(state.long("count"), 1)
+                val bytes = Math.addExact(state.long("bytes"), payload.size.toLong())
                 val sameDay = Math.floorDiv(requireNotNull(state.getTimestamp("day")).seconds, 86400) == Math.floorDiv(Instant.now().epochSecond, 86400)
                 val daily = if (sameDay != alternateDay) state.long("dailyCount") + 1 else 1
-                observeLimit(daily > 200)
-                if (count > 1000 || bytes + state.long("chunkBytes") > MAX_HISTORY_BYTES) throw SyncCapacityReached()
+                val dailyBytes = if (sameDay != alternateDay) Math.addExact(state.getLong("dailyBytes") ?: 0L, cost) else cost
+                observeLimit(daily > MAX_DAILY_OPERATIONS || dailyBytes > MAX_DAILY_BYTES)
                 tx.set(target, mapOf("uid" to uid, "installId" to op.installId, "installSlot" to slot,
-                    "sequence" to op.sequence, "payload" to Blob.fromBytes(payload), "createdAt" to FieldValue.serverTimestamp()))
-                tx.update(ref, mapOf("count" to count, "bytes" to bytes, "day" to FieldValue.serverTimestamp(), "dailyCount" to daily, "lastOpId" to op.id))
+                    "sequence" to op.sequence, "payload" to Blob.fromBytes(payload), "cost" to cost, "createdAt" to FieldValue.serverTimestamp()))
+                tx.update(ref, mapOf("count" to count, "bytes" to bytes, "day" to FieldValue.serverTimestamp(), "dailyCount" to daily,
+                    "dailyBytes" to dailyBytes, "lastOpId" to op.id))
             }
         }.await()
     }
@@ -293,7 +348,7 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
         val operations = documents.mapNotNull { doc ->
             val bytes = requireNotNull(doc.getBlob("payload")).toBytes()
             try {
-                val op = OperationCodec.decode(bytes)
+                val op = checkedOperation(bytes, doc.get("cost"))
                 require(op.id == doc.id && op.familyId == fid && op.datasetId == did && op.authorUid == doc.getString("uid")
                     && op.installId == doc.getString("installId") && op.sequence == doc.getLong("sequence"))
                 bytes
@@ -310,7 +365,139 @@ class FirestoreTransport @Inject constructor(private val services: FirebaseServi
     private fun DocumentSnapshot.long(name: String): Long = requireNotNull(getLong(name)) { "Invalid dataset metadata" }
 
     companion object {
-        const val MAX_HISTORY_BYTES = 10 * 1024 * 1024
         const val CHUNK_BYTES = 512 * 1024
+        const val MAX_DAILY_OPERATIONS = 200
+        const val MAX_DAILY_BYTES = 8L * 1024 * 1024
+        const val REFERENCE_COST = 32L
+        const val HISTORY_VERSION = 2L
+        // Datasets written by version 1 apps were capped by the rules of that release.
+        private const val MAX_LEGACY_CHUNKS = 128L
+
+        /** Daily budget charged for [operation]; compact version 2 references still cost what they expand to. */
+        fun operationCost(operation: SyncOperation, payloadSize: Int): Long =
+            payloadSize + REFERENCE_COST * (operation.parents.size.toLong() + operation.rejected.size)
+
+        /**
+         * Decodes a downloaded payload only after its stored cost is plausible, then requires the exact cost it was charged.
+         * Documents without a cost predate the budget and can only hold version 1 operations.
+         */
+        fun checkedOperation(payload: ByteArray, claimedCost: Any?): SyncOperation {
+            require(claimedCost == null || (claimedCost is Long && claimedCost in payload.size..MAX_DAILY_BYTES)) { "Invalid operation cost" }
+            val operation = OperationCodec.decode(payload)
+            require(if (claimedCost == null) operation.version == 1 else claimedCost == operationCost(operation, payload.size)) { "Operation cost mismatch" }
+            return operation
+        }
+    }
+}
+
+/** A verified baseline stream kept in a cache file; [close] deletes the file. */
+class SpooledHistory internal constructor(private val file: File) : HistorySource, Closeable {
+    override fun records(): Sequence<HistoryRecord> = sequence {
+        file.inputStream().buffered().use { yieldAll(HistoryStream.read(it)) }
+    }
+    override fun close() { file.delete() }
+}
+
+internal fun legacyHistorySource(history: FamilyHistory): HistorySource = object : HistorySource {
+    override fun records(): Sequence<HistoryRecord> = history.baseline.asSequence().map<OperationEvent, HistoryRecord> { HistoryRecord.Baseline(it) } +
+        history.operations.asSequence().map { HistoryRecord.Operation.of(Base64.getDecoder().decode(it)) } +
+        history.quarantine.asSequence().map { HistoryRecord.Quarantine(it) }
+}
+
+internal data class StreamManifest(val digest: String, val bytes: Long, val chunks: Long) {
+    class Builder {
+        private val sha = MessageDigest.getInstance("SHA-256")
+        var bytes = 0L
+            private set
+        var chunks = 0L
+            private set
+        fun add(chunk: ByteArray) {
+            sha.update(chunk)
+            bytes = Math.addExact(bytes, chunk.size.toLong())
+            chunks++
+        }
+        fun build() = StreamManifest(sha.digest().joinToString("") { "%02x".format(it) }, bytes, chunks)
+    }
+
+    companion object {
+        fun of(stream: Sequence<ByteArray>): StreamManifest =
+            Builder().apply { chunked(stream).forEach(::add) }.build().also { require(it.bytes in 1..MAX_STREAM_BYTES) { "Invalid history stream" } }
+    }
+}
+
+// Firestore rules compare stream sizes as integers that JavaScript clients must also represent exactly.
+internal const val MAX_STREAM_BYTES = 9_007_199_254_740_991L
+
+internal fun filePieces(file: File): Sequence<ByteArray> = sequence {
+    file.inputStream().buffered().use { input ->
+        val buffer = ByteArray(FirestoreTransport.CHUNK_BYTES)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (count > 0) yield(buffer.copyOf(count))
+        }
+    }
+}
+
+internal fun historyPieces(source: HistorySource): Sequence<ByteArray> = sequence {
+    val buffer = ByteArrayOutputStream()
+    val writer = HistoryStream.Writer(buffer)
+    yield(buffer.toByteArray())
+    buffer.reset()
+    for (record in source.records()) {
+        writer.write(record)
+        yield(buffer.toByteArray())
+        buffer.reset()
+    }
+    writer.finish()
+    yield(buffer.toByteArray())
+}
+
+/** Regroups stream pieces into full [FirestoreTransport.CHUNK_BYTES] chunks; only the last may be shorter. */
+internal fun chunked(stream: Sequence<ByteArray>, size: Int = FirestoreTransport.CHUNK_BYTES): Sequence<ByteArray> = sequence {
+    var buffer = ByteArray(size)
+    var at = 0
+    for (piece in stream) {
+        var offset = 0
+        while (offset < piece.size) {
+            val count = minOf(size - at, piece.size - offset)
+            piece.copyInto(buffer, at, offset, offset + count)
+            at += count
+            offset += count
+            if (at == size) {
+                yield(buffer)
+                buffer = ByteArray(size)
+                at = 0
+            }
+        }
+    }
+    if (at > 0) yield(buffer.copyOf(at))
+}
+
+/** Writes downloaded chunks to [file], rejecting anything beyond the manifest and verifying the digest at the end. */
+internal class ChunkSpool(val file: File, private val expectedChunks: Long, private val expectedBytes: Long, private val digest: String) {
+    init {
+        require(expectedChunks >= 1 && expectedBytes in expectedChunks..MAX_STREAM_BYTES
+            && (expectedBytes - 1) / FirestoreTransport.CHUNK_BYTES < expectedChunks) { "Invalid dataset metadata" }
+    }
+
+    private val output = file.outputStream().buffered()
+    private val received = StreamManifest.Builder()
+
+    fun write(chunk: ByteArray) {
+        require(chunk.size in 1..FirestoreTransport.CHUNK_BYTES && received.chunks < expectedChunks
+            && received.bytes + chunk.size <= expectedBytes) { "Incomplete or corrupt family history" }
+        received.add(chunk)
+        output.write(chunk)
+    }
+
+    fun finish() {
+        output.close()
+        require(received.build() == StreamManifest(digest, expectedBytes, expectedChunks)) { "Incomplete or corrupt family history" }
+    }
+
+    fun discard() {
+        runCatching { output.close() }
+        file.delete()
     }
 }

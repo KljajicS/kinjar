@@ -50,6 +50,16 @@ class ConflictResolverTest {
         assertEquals(listOf(a, next), ConflictResolver.replay(listOf(next, a)).applicable)
     }
 
+    @Test(timeout = 15_000) fun `compact missing parents stay waiting without building a missing node graph`() {
+        val parents = (1..100_000).mapTo(mutableSetOf()) { "missing:$it" }
+        val compact = OperationCodec.decode(OperationCodec.encode(op("offline", parents = parents)))
+        val operations = (1L..20L).map { compact.copy(sequence = it) }
+        val replay = ConflictResolver.replay(operations)
+        assertEquals(operations.map { it.id }.toSet(), replay.waiting)
+        assertTrue(replay.applicable.isEmpty())
+        assertEquals(operations.map { it.id }.toSet(), ConflictResolver.parentsFor(operations, mapOf("transaction:t" to ResourceAccess.WRITE)))
+    }
+
     @Test fun `concurrent choices must be resolved again`() {
         val a = op("a")
         val b = op("b")
@@ -64,7 +74,7 @@ class ConflictResolverTest {
         val original = op("a")
         val bytes = OperationCodec.encode(original)
         assertEquals(original, OperationCodec.decode(bytes))
-        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(bytes.toString(Charsets.UTF_8).replace("\"version\":1", "\"version\":2").toByteArray()) }
+        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(bytes.toString(Charsets.UTF_8).replace("\"version\":1", "\"version\":3").toByteArray()) }
     }
 
     @Test fun `invalid resolution cannot reject unobserved commands or block independent work`() {
@@ -86,5 +96,22 @@ class ConflictResolverTest {
             val error = assertThrows(IllegalArgumentException::class.java) { OperationCodec.decode(text.toByteArray()) }
             assertFalse(error is UnsupportedSyncVersion)
         }
+    }
+
+    @Test fun `twenty thousand transactions sharing an account replay with account edits and late offline conflicts`() {
+        val transactions = (1L..20_000L).map { seq -> op("phone", seq,
+            resources = mapOf("transaction:$seq" to ResourceAccess.WRITE, "account:cash" to ResourceAccess.READ)) }
+        val accountEdit = op("other", parents = transactions.mapTo(mutableSetOf()) { it.id },
+            resources = mapOf("account:cash" to ResourceAccess.WRITE))
+        val start = System.nanoTime()
+        val result = ConflictResolver.replay(transactions + accountEdit)
+        println("20,000 transactions and account edit replay: ${(System.nanoTime() - start) / 1_000_000} ms")
+        assertEquals(20_001, result.applicable.size)
+        assertTrue(result.conflicts.isEmpty())
+        assertTrue(result.waiting.isEmpty())
+        val offline = op("offline", resources = mapOf("transaction:offline" to ResourceAccess.WRITE, "account:cash" to ResourceAccess.READ))
+        val withOffline = ConflictResolver.replay(transactions + accountEdit + offline)
+        assertEquals(setOf(accountEdit.id, offline.id), withOffline.conflicts)
+        assertEquals(20_000, withOffline.applicable.size)
     }
 }

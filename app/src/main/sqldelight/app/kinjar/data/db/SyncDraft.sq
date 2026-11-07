@@ -3,14 +3,37 @@ CREATE TABLE sync_draft (
     uid TEXT NOT NULL,
     family_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    payload BLOB NOT NULL
+    payload BLOB NOT NULL,
+    history_id TEXT
 );
 
 all:
 SELECT * FROM sync_draft WHERE uid = ? ORDER BY created_at DESC;
 
+draftInfo:
+SELECT id, uid, family_id, created_at FROM sync_draft WHERE uid = ? ORDER BY created_at DESC;
+
+draftSize:
+SELECT length(payload) FROM sync_draft WHERE uid = :uid AND id = :id;
+
+draftChunk:
+SELECT CAST(substr(payload, CAST(:start AS INTEGER), CAST(:span AS INTEGER)) AS BLOB)
+FROM sync_draft WHERE uid = :uid AND id = :id;
+
 save:
-INSERT INTO sync_draft VALUES (?, ?, ?, ?, ?);
+INSERT INTO sync_draft(id, uid, family_id, created_at, payload) VALUES (?, ?, ?, ?, ?);
+
+saveStored:
+INSERT INTO sync_draft(id, uid, family_id, created_at, payload, history_id) VALUES (?, ?, ?, ?, CAST('' AS BLOB), ?);
+
+draftHistory:
+SELECT history_id FROM sync_draft WHERE uid = ? AND id = ?;
+
+familyHistories:
+SELECT history_id FROM sync_draft WHERE uid = ? AND family_id = ?;
+
+attachHistory:
+UPDATE sync_draft SET payload = CAST('' AS BLOB), history_id = :history WHERE uid = :uid AND id = :id;
 
 deleteAll:
 DELETE FROM sync_draft;

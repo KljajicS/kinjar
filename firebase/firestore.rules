@@ -269,11 +269,11 @@ service cloud.firestore {
       match /datasets/{did} {
         allow get: if member(fid) || deletingOwner(fid);
         function stateShape(d) {
-          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId', 'chunks', 'chunkBytes', 'expectedChunks', 'expectedBytes', 'digest', 'lastChunk', 'sealed', 'restoreToken'])
-            && d.count is int && d.count >= 0 && d.count <= 1000
-            && d.bytes is int && d.bytes >= 0 && d.bytes <= 10485760
-            && d.bytes + d.get('chunkBytes', 0) <= 10485760
+          return d.keys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'dailyBytes', 'lastOpId', 'chunks', 'chunkBytes', 'expectedChunks', 'expectedBytes', 'digest', 'lastChunk', 'sealed', 'restoreToken', 'historyVersion'])
+            && d.count is int && d.count >= 0
+            && d.bytes is int && d.bytes >= 0
             && d.day is timestamp && d.dailyCount is int && d.dailyCount >= 0 && d.dailyCount <= 200
+            && d.get('dailyBytes', 0) is int && d.get('dailyBytes', 0) >= 0 && d.get('dailyBytes', 0) <= 8388608
             && d.lastOpId is string && d.lastOpId.size() <= 160;
         }
         function day(value) { return int(value.toMillis() / 86400000); }
@@ -281,19 +281,25 @@ service cloud.firestore {
           let f = get(familyPath(fid)).data;
           return member(fid) && f.status == 'ACTIVE' && f.activeDataset == did;
         }
-        function increment(before, after, oid, payload) {
-          return stateShape(after) && after.count == before.count + 1 && after.bytes == before.bytes + payload.size()
-            && after.day == request.time && after.dailyCount == (day(before.day) == day(request.time) ? before.dailyCount + 1 : 1)
+        // Count and byte budgets reset together; datasets written before dailyBytes existed start from zero.
+        function increment(before, after, oid, op) {
+          let sameDay = day(before.day) == day(request.time);
+          return stateShape(after) && after.count == before.count + 1 && after.bytes == before.bytes + op.payload.size()
+            && after.day == request.time && after.dailyCount == (sameDay ? before.dailyCount + 1 : 1)
+            && after.dailyBytes == (sameDay ? before.get('dailyBytes', 0) + op.cost : op.cost)
             && after.lastOpId == oid
-            && after.diff(before).affectedKeys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'lastOpId']);
+            && after.diff(before).affectedKeys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'dailyBytes', 'lastOpId']);
         }
         function manifest(d) {
-          return d.expectedChunks is int && d.expectedChunks >= 1 && d.expectedChunks <= 20
-            && d.expectedBytes is int && d.expectedBytes > 0 && d.expectedBytes <= 10485760
+          return (d.get('historyVersion', 1) == 2 ||
+              (d.get('historyVersion', 1) == 1 && d.expectedChunks <= 128 && d.expectedBytes <= 67108864))
+            && d.expectedBytes is int && d.expectedBytes > 0 && d.expectedBytes <= 9007199254740991
+            && d.expectedChunks is int && d.expectedChunks >= 1 && d.expectedChunks <= d.expectedBytes
+            && int((d.expectedBytes - 1) / 524288) < d.expectedChunks
             && d.digest is string && d.digest.matches('[0-9a-f]{64}')
             && d.chunks is int && d.chunks >= 0 && d.chunks <= d.expectedChunks
             && d.chunkBytes is int && d.chunkBytes >= 0 && d.chunkBytes <= d.expectedBytes
-            && d.lastChunk is string && d.lastChunk.size() <= 2 && d.sealed is bool;
+            && d.lastChunk is string && d.lastChunk.size() <= 16 && d.sealed is bool;
         }
         function initializing() {
           let f = get(familyPath(fid)).data;
@@ -319,15 +325,16 @@ service cloud.firestore {
             && getAfter(familyPath(fid)).data.activeDataset == did;
         }
         allow create: if initializing() && stateShape(request.resource.data)
+          && request.resource.data.historyVersion == 2
           && request.resource.data.get('restoreToken', '') == get(familyPath(fid)).data.get('restoreToken', '')
           && request.resource.data.count == 0 && request.resource.data.bytes == 0
-          && request.resource.data.dailyCount == 0 && request.resource.data.day == request.time
+          && request.resource.data.dailyCount == 0 && request.resource.data.dailyBytes == 0 && request.resource.data.day == request.time
           && request.resource.data.lastOpId == '' && manifest(request.resource.data)
           && request.resource.data.chunks == 0 && request.resource.data.chunkBytes == 0 && request.resource.data.sealed == false;
         allow update: if writable() && stateShape(request.resource.data)
           && !exists(opPath(fid, did, request.resource.data.lastOpId))
           && increment(resource.data, request.resource.data, request.resource.data.lastOpId,
-            getAfter(opPath(fid, did, request.resource.data.lastOpId)).data.payload)
+            getAfter(opPath(fid, did, request.resource.data.lastOpId)).data)
           || (initializing() && (sealing() ||
             (!exists(/databases/$(database)/documents/families/$(fid)/datasets/$(did)/chunks/$(request.resource.data.lastChunk))
               && chunkIncrement(resource.data, request.resource.data, request.resource.data.lastChunk,
@@ -357,7 +364,7 @@ service cloud.firestore {
 
         match /chunks/{cid} {
           allow get, list: if deletingOwner(fid) || (member(fid) && (get(familyPath(fid)).data.activeDataset == did || admin(fid)));
-          allow create: if initializing() && cid.matches('[0-9]{1,2}') && string(int(cid)) == cid
+          allow create: if initializing() && cid.matches('[0-9]{1,16}') && string(int(cid)) == cid
             && request.resource.data.keys().hasOnly(['payload']) && request.resource.data.payload is bytes
             && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
             && int(cid) < get(statePath(fid, did)).data.expectedChunks
@@ -369,7 +376,7 @@ service cloud.firestore {
         match /operations/{oid} {
           allow get, list: if deletingOwner(fid) || (member(fid) && (get(familyPath(fid)).data.activeDataset == did || admin(fid)));
           allow create: if writable()
-            && request.resource.data.keys().hasOnly(['uid', 'installId', 'installSlot', 'sequence', 'payload', 'createdAt'])
+            && request.resource.data.keys().hasOnly(['uid', 'installId', 'installSlot', 'sequence', 'payload', 'cost', 'createdAt'])
             && request.resource.data.uid == request.auth.uid && identifier(request.resource.data.installId)
             && request.resource.data.sequence is int && request.resource.data.sequence > 0
             && request.resource.data.sequence <= 2147483647
@@ -378,8 +385,10 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/families/$(fid)/installs/$(request.resource.data.installSlot)).data.installId == request.resource.data.installId
             && oid == request.resource.data.installId + ':' + string(request.resource.data.sequence)
             && request.resource.data.payload is bytes && request.resource.data.payload.size() > 0 && request.resource.data.payload.size() <= 524288
+            && request.resource.data.cost is int && request.resource.data.cost >= request.resource.data.payload.size()
+            && request.resource.data.cost <= 8388608
             && request.resource.data.createdAt == request.time
-            && increment(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, oid, request.resource.data.payload);
+            && increment(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, oid, request.resource.data);
           allow delete: if retired() && getAfter(statePath(fid, did)).data.lastOpId == oid
             && decrement(get(statePath(fid, did)).data, getAfter(statePath(fid, did)).data, resource.data.payload);
         }

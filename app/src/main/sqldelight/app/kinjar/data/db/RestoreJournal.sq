@@ -6,14 +6,36 @@ CREATE TABLE restore_journal (
     target_dataset TEXT NOT NULL,
     token TEXT NOT NULL,
     phase TEXT NOT NULL,
-    manifest BLOB NOT NULL
+    manifest BLOB NOT NULL,
+    history_id TEXT
 );
 
 current:
 SELECT * FROM restore_journal WHERE singleton = 1;
 
+journalInfo:
+SELECT uid, family_id, source_dataset, target_dataset, token, phase FROM restore_journal WHERE singleton = 1;
+
+manifestSize:
+SELECT length(manifest) FROM restore_journal WHERE singleton = 1;
+
+manifestChunk:
+SELECT CAST(substr(manifest, CAST(:start AS INTEGER), CAST(:span AS INTEGER)) AS BLOB)
+FROM restore_journal WHERE singleton = 1;
+
 save:
-INSERT OR REPLACE INTO restore_journal VALUES (1, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO restore_journal(singleton, uid, family_id, source_dataset, target_dataset, token, phase, manifest)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?);
+
+saveStored:
+INSERT OR REPLACE INTO restore_journal(singleton, uid, family_id, source_dataset, target_dataset, token, phase, manifest, history_id)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?);
+
+journalHistory:
+SELECT history_id FROM restore_journal WHERE singleton = 1;
+
+attachHistory:
+UPDATE restore_journal SET manifest = ?, history_id = ? WHERE singleton = 1;
 
 deleteAll:
 DELETE FROM restore_journal;

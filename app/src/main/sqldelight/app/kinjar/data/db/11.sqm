@@ -1,0 +1,26 @@
+CREATE TABLE history_spool (
+    id TEXT NOT NULL PRIMARY KEY,
+    complete INTEGER NOT NULL DEFAULT 0,
+    next_position INTEGER NOT NULL DEFAULT 0,
+    baseline_count INTEGER NOT NULL DEFAULT 0,
+    operation_count INTEGER NOT NULL DEFAULT 0,
+    quarantine_count INTEGER NOT NULL DEFAULT 0,
+    digest TEXT NOT NULL DEFAULT '',
+    bytes INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE history_spool_record (
+    spool_id TEXT NOT NULL,
+    kind INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    record_key TEXT,
+    reason TEXT,
+    payload BLOB NOT NULL,
+    PRIMARY KEY (spool_id, kind, position)
+);
+
+CREATE UNIQUE INDEX history_spool_record_key ON history_spool_record(spool_id, kind, record_key);
+
+ALTER TABLE sync_baseline ADD COLUMN history_id TEXT;
+ALTER TABLE sync_draft ADD COLUMN history_id TEXT;
+ALTER TABLE restore_journal ADD COLUMN history_id TEXT;

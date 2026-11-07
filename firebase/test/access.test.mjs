@@ -20,9 +20,10 @@ function db(uid, provider = 'google.com') {
 }
 const family = (members = { owner: 'm-owner' }) => ({ owner: 'owner', admins: ['owner'], members, slot: '0',
   activeDataset: 'current', otherDataset: '', generation: 1, status: 'ACTIVE', action: 'create', target: '', inviteSlot: '' });
-const state = () => ({ count: 0, bytes: 0, day: serverTimestamp(), dailyCount: 0, lastOpId: '' });
+const legacyState = () => ({ count: 0, bytes: 0, day: serverTimestamp(), dailyCount: 0, lastOpId: '' });
+const state = () => ({ ...legacyState(), dailyBytes: 0 });
 const initialState = () => ({ ...state(), chunks: 0, chunkBytes: 0, expectedChunks: 1,
-  expectedBytes: 3, digest: '0'.repeat(64), lastChunk: '', sealed: false });
+  expectedBytes: 3, digest: '0'.repeat(64), lastChunk: '', sealed: false, historyVersion: 2 });
 async function seed(members, overrides = {}) {
   await env.withSecurityRulesDisabled(async context => {
     const d = context.firestore();
@@ -37,14 +38,26 @@ async function seed(members, overrides = {}) {
 }
 function operation() {
   return { uid: 'owner', installId: 'device', installSlot: '0', sequence: 1,
-    payload: Bytes.fromUint8Array(new Uint8Array([1, 2, 3])), createdAt: serverTimestamp() };
+    payload: Bytes.fromUint8Array(new Uint8Array([1, 2, 3])), cost: 3, createdAt: serverTimestamp() };
 }
 function upload(d, options = {}) {
+  const id = options.id ?? 'device:1';
   const batch = writeBatch(d);
-  batch.set(doc(d, 'families/family/datasets/current/operations/device:1'), { ...operation(), ...options.operation });
-  batch.update(doc(d, 'families/family/datasets/current'), { ...state(), count: 1, bytes: 3, dailyCount: 1,
-    lastOpId: 'device:1', ...options.state });
+  batch.set(doc(d, `families/family/datasets/current/operations/${id}`), { ...operation(), sequence: Number(id.split(':')[1]), ...options.operation });
+  batch.update(doc(d, 'families/family/datasets/current'), { ...state(), count: 1, bytes: 3, dailyCount: 1, dailyBytes: 3,
+    lastOpId: id, ...options.state });
   return batch;
+}
+// The write shape of app versions released before operation costs and the daily byte budget.
+function legacyUpload(d) {
+  const { cost, ...op } = operation();
+  const batch = writeBatch(d);
+  batch.set(doc(d, 'families/family/datasets/current/operations/device:1'), op);
+  batch.update(doc(d, 'families/family/datasets/current'), { ...legacyState(), count: 1, bytes: 3, dailyCount: 1, lastOpId: 'device:1' });
+  return batch;
+}
+async function setState(data, path = 'families/family/datasets/current') {
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), path), data));
 }
 
 test('member uploads immutable content with exact coupled counters', async () => {
@@ -159,20 +172,90 @@ test('owner can appoint admin but cannot transfer ownership to outsider', async 
   await assertSucceeds(transfer.commit());
   await assertFails(updateDoc(doc(d, 'families/family'), { admins: ['owner'], action: 'roles' }));
 });
-test('state caps bound both document count and payload bytes', async () => {
+test('lifetime operation count and bytes do not stop subsequent uploads', async () => {
   await seed();
   const d = db('owner');
-  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), count: 1000 }));
-  await assertFails(upload(d, { state: { count: 1001 } }).commit());
-  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), bytes: 10485760 }));
-  await assertFails(upload(d, { state: { bytes: 10485763 } }).commit());
+  await setState({ ...state(), count: 100000, bytes: 104857600 });
+  await assertSucceeds(upload(d, { state: { count: 100001, bytes: 104857603 } }).commit());
+  const saved = (await getDoc(doc(d, 'families/family/datasets/current'))).data();
+  assert.equal(saved.count, 100001);
+  assert.equal(saved.bytes, 104857603);
+  await assertFails(updateDoc(doc(d, 'families/family/datasets/current'), { count: 0, bytes: 0 }));
+});
+test('individual operation size remains bounded without a cumulative history cap', async () => {
+  await seed();
+  const size = 524289;
+  await assertFails(upload(db('owner'), { operation: { payload: Bytes.fromUint8Array(new Uint8Array(size)), cost: size },
+    state: { bytes: size, dailyBytes: size } }).commit());
 });
 test('daily usage resets only on server day change', async () => {
   await seed();
   const yesterday = Timestamp.fromMillis(Date.now() - 86400000);
-  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/current'), { ...state(), day: yesterday, dailyCount: 200 }));
+  await setState({ ...state(), day: yesterday, dailyCount: 200, dailyBytes: 8388608 });
   await assertFails(upload(db('owner'), { state: { day: yesterday, dailyCount: 1 } }).commit());
   await assertSucceeds(upload(db('owner')).commit());
+});
+test('operation cost covers its payload and stays within one day of bytes', async () => {
+  await seed();
+  const d = db('owner');
+  await assertFails(upload(d, { operation: { cost: 2 }, state: { dailyBytes: 2 } }).commit());
+  await assertFails(upload(d, { operation: { cost: 8388609 }, state: { dailyBytes: 8388609 } }).commit());
+  await assertFails(upload(d, { operation: { cost: 4000 }, state: { dailyBytes: 3 } }).commit());
+  await assertFails(upload(d, { operation: { cost: '3' } }).commit());
+  await assertSucceeds(upload(d, { operation: { cost: 8388608 }, state: { dailyBytes: 8388608 } }).commit());
+  assert.equal((await getDoc(doc(d, 'families/family/datasets/current/operations/device:1'))).data().cost, 8388608);
+});
+test('daily byte budget blocks uploads past eight MiB until the next server day', async () => {
+  await seed();
+  const d = db('owner');
+  await setState({ ...state(), dailyCount: 5, dailyBytes: 8388605 });
+  await assertFails(upload(d, { operation: { cost: 4 }, state: { dailyCount: 6, dailyBytes: 8388609 } }).commit());
+  await assertSucceeds(upload(d, { state: { dailyCount: 6, dailyBytes: 8388608 } }).commit());
+  await assertFails(upload(d, { id: 'device:2', state: { count: 2, bytes: 6, dailyCount: 7, dailyBytes: 3 } }).commit());
+  const yesterday = Timestamp.fromMillis(Date.now() - 86400000);
+  await setState({ ...state(), day: yesterday, dailyCount: 7, dailyBytes: 8388608 });
+  await assertSucceeds(upload(d, { id: 'device:2', state: { count: 1, bytes: 3, dailyCount: 1, dailyBytes: 3 } }).commit());
+});
+test('daily count and byte budgets reset together', async () => {
+  await seed();
+  const d = db('owner');
+  await setState({ ...state(), dailyCount: 10, dailyBytes: 1000 });
+  await assertFails(upload(d, { state: { dailyCount: 11, dailyBytes: 3 } }).commit());
+  await assertFails(upload(d, { state: { dailyCount: 1, dailyBytes: 1003 } }).commit());
+  const yesterday = Timestamp.fromMillis(Date.now() - 86400000);
+  await setState({ ...state(), day: yesterday, dailyCount: 10, dailyBytes: 1000 });
+  await assertFails(upload(d, { state: { dailyCount: 1, dailyBytes: 1003 } }).commit());
+  await assertFails(upload(d, { state: { dailyCount: 11, dailyBytes: 3 } }).commit());
+  await assertSucceeds(upload(d, { state: { dailyCount: 1, dailyBytes: 3 } }).commit());
+});
+test('dataset without daily bytes starts its budget at zero and refuses the old write shape', async () => {
+  await seed();
+  const d = db('owner');
+  await setState({ ...legacyState(), count: 7, bytes: 21, dailyCount: 7 });
+  await assertFails(legacyUpload(d).commit());
+  await assertFails(upload(d, { state: { count: 8, bytes: 24, dailyCount: 8, dailyBytes: 4 } }).commit());
+  await assertSucceeds(upload(d, { state: { count: 8, bytes: 24, dailyCount: 8, dailyBytes: 3 } }).commit());
+  assert.equal((await getDoc(doc(d, 'families/family/datasets/current'))).data().dailyBytes, 3);
+});
+test('cleanup decrements cannot reset the daily budget', async () => {
+  await seed(undefined, { otherDataset: 'old' });
+  const d = db('owner');
+  const stateRef = doc(d, 'families/family/datasets/old');
+  await setState({ ...state(), count: 1, bytes: 3, dailyCount: 200, dailyBytes: 8388608, lastOpId: 'device:1' }, 'families/family/datasets/old');
+  await env.withSecurityRulesDisabled(async c => setDoc(doc(c.firestore(), 'families/family/datasets/old/operations/device:1'), operation()));
+  const remove = (extra) => {
+    const b = writeBatch(d);
+    b.delete(doc(d, 'families/family/datasets/old/operations/device:1'));
+    b.update(stateRef, { count: 0, bytes: 0, lastOpId: 'device:1', ...extra });
+    return b.commit();
+  };
+  await assertFails(remove({ dailyBytes: 0 }));
+  await assertFails(remove({ dailyCount: 0 }));
+  await assertFails(remove({ day: Timestamp.fromMillis(0) }));
+  await assertSucceeds(remove());
+  const saved = (await getDoc(stateRef)).data();
+  assert.equal(saved.dailyBytes, 8388608);
+  assert.equal(saved.dailyCount, 200);
 });
 test('invitation creation is bounded and cannot name another inviter', async () => {
   await seed();
@@ -315,6 +398,77 @@ test('restore fences old uploads and atomically activates complete data without 
   await assertFails(upload(d).commit());
   await assertFails(startRestore(d, 'another'));
 });
+test('version 2 restore streams past the former 128 chunk and 64 MiB caps without partial activation', async () => {
+  await seed();
+  const d = db('owner');
+  await assertSucceeds(startRestore(d));
+  const stateRef = doc(d, 'families/family/datasets/replacement');
+  const chunkCount = 129;
+  const full = Bytes.fromUint8Array(new Uint8Array(524288));
+  const totalBytes = chunkCount * 524288;
+  assert.ok(totalBytes > 67108864);
+  const manifest = { ...initialState(), expectedChunks: chunkCount, expectedBytes: totalBytes, restoreToken: 'restore-token' };
+  await assertFails(setDoc(stateRef, { ...manifest, expectedBytes: totalBytes + 1 }));
+  await assertSucceeds(setDoc(stateRef, manifest));
+  for (let index = 0; index < chunkCount; index++) {
+    const batch = writeBatch(d);
+    batch.set(doc(d, `families/family/datasets/replacement/chunks/${index}`), { payload: full });
+    batch.update(stateRef, { chunks: index + 1, chunkBytes: (index + 1) * 524288, lastChunk: String(index) });
+    await assertSucceeds(batch.commit());
+    if (index === 127) await assertFails(activateRestore(d));
+  }
+  await assertSucceeds(activateRestore(d));
+  assert.equal((await getDoc(stateRef)).data().chunkBytes, totalBytes);
+  assert.equal((await getDoc(doc(d, 'families/family'))).data().activeDataset, 'replacement');
+});
+test('version 2 manifests keep technical bounds, accept wide chunk ids and refuse version 1 bootstraps', async () => {
+  await seed(undefined, { status: 'INITIALIZING' });
+  await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
+  const d = db('owner');
+  const stateRef = doc(d, 'families/family/datasets/current');
+  const { historyVersion, ...legacyManifest } = initialState();
+  const { dailyBytes, ...withoutDailyBytes } = initialState();
+  await assertFails(setDoc(stateRef, legacyManifest));
+  await assertFails(setDoc(stateRef, { ...initialState(), historyVersion: 1 }));
+  await assertFails(setDoc(stateRef, withoutDailyBytes));
+  await assertFails(setDoc(stateRef, { ...initialState(), expectedChunks: 1, expectedBytes: 524289 }));
+  await assertFails(setDoc(stateRef, { ...initialState(), expectedChunks: 4, expectedBytes: 3 }));
+  await assertFails(setDoc(stateRef, { ...initialState(), expectedChunks: 1, expectedBytes: 2 ** 53 }));
+  const manifest = { ...initialState(), expectedChunks: 1001, expectedBytes: 3003 };
+  await assertSucceeds(setDoc(stateRef, manifest));
+  const add = (cid, chunks, chunkBytes) => {
+    const b = writeBatch(d);
+    b.set(doc(d, `families/family/datasets/current/chunks/${cid}`), { payload: operation().payload });
+    b.update(stateRef, { chunks, chunkBytes, lastChunk: cid });
+    return b.commit();
+  };
+  await assertFails(add('01000', 1, 3));
+  await assertFails(add('1001', 1, 3));
+  await assertSucceeds(add('1000', 1, 3));
+  await assertSucceeds(add('0', 2, 6));
+  const activate = writeBatch(d);
+  activate.update(stateRef, { sealed: true });
+  activate.update(doc(d, 'families/family'), { status: 'ACTIVE', action: 'activate' });
+  await assertFails(activate.commit());
+});
+test('a version 1 bootstrap started before the update can finish without changing its manifest', async () => {
+  await seed(undefined, { status: 'INITIALIZING' });
+  const { historyVersion, ...legacyManifest } = initialState();
+  await setState({ ...legacyManifest, expectedChunks: 2, expectedBytes: 6 });
+  const d = db('owner');
+  const b = writeBatch(d);
+  b.set(doc(d, 'families/family/datasets/current/chunks/0'), { payload: operation().payload });
+  b.update(doc(d, 'families/family/datasets/current'), { chunks: 1, chunkBytes: 3, lastChunk: '0' });
+  await assertSucceeds(b.commit());
+  const finish = writeBatch(d);
+  finish.set(doc(d, 'families/family/datasets/current/chunks/1'), { payload: operation().payload });
+  finish.update(doc(d, 'families/family/datasets/current'), { chunks: 2, chunkBytes: 6, lastChunk: '1' });
+  await assertSucceeds(finish.commit());
+  const activate = writeBatch(d);
+  activate.update(doc(d, 'families/family/datasets/current'), { sealed: true });
+  activate.update(doc(d, 'families/family'), { status: 'ACTIVE', action: 'activate' });
+  await assertSucceeds(activate.commit());
+});
 test('expired restore cannot activate and administrators can cancel it', async () => {
   await seed();
   const d = db('owner');
@@ -418,7 +572,7 @@ function uploadPersonal(d, sequence) {
   b.set(doc(d, `families/personal/datasets/current/operations/phone:${sequence}`),
     { ...operation(), uid: 'wife', installId: 'phone', sequence });
   b.update(doc(d, 'families/personal/datasets/current'), { ...state(), count: sequence, bytes: 3 * sequence,
-    dailyCount: sequence, lastOpId: `phone:${sequence}` });
+    dailyCount: sequence, dailyBytes: 3 * sequence, lastOpId: `phone:${sequence}` });
   return b.commit();
 }
 async function personalStatus() {

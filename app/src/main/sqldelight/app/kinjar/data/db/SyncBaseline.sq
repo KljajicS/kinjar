@@ -1,13 +1,30 @@
 CREATE TABLE sync_baseline (
     singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton = 1),
-    payload BLOB NOT NULL
+    payload BLOB NOT NULL,
+    history_id TEXT
 );
 
 current:
 SELECT payload FROM sync_baseline WHERE singleton = 1;
 
+present:
+SELECT count(*) FROM sync_baseline WHERE singleton = 1;
+
+baselineSize:
+SELECT length(payload) FROM sync_baseline WHERE singleton = 1;
+
+baselineChunk:
+SELECT CAST(substr(payload, CAST(:start AS INTEGER), CAST(:span AS INTEGER)) AS BLOB)
+FROM sync_baseline WHERE singleton = 1;
+
 save:
-INSERT OR REPLACE INTO sync_baseline VALUES (1, ?);
+INSERT OR REPLACE INTO sync_baseline(singleton, payload) VALUES (1, ?);
+
+saveStored:
+INSERT OR REPLACE INTO sync_baseline(singleton, payload, history_id) VALUES (1, CAST('' AS BLOB), ?);
+
+baselineHistory:
+SELECT history_id FROM sync_baseline WHERE singleton = 1;
 
 deleteAll:
 DELETE FROM sync_baseline;

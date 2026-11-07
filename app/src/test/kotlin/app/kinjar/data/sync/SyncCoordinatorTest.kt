@@ -43,7 +43,11 @@ class SyncCoordinatorTest {
     private fun coordinator() = SyncCoordinator(context, services, families, transport, db, store, scheduler)
     private fun digest() = HistoryCodec.digest(HistoryCodec.encode(store.snapshot()))
     private fun enroll() = store.activate("user", "family", "dataset", "member", 1, store.snapshot(), digest(), false)
-    private fun anyHistory() = any(FamilyHistory::class.java) ?: FamilyHistory(baseline = emptyList(), operations = emptyList())
+    private fun current() = store.currentDigest()
+    private fun source(history: FamilyHistory) = legacyHistorySource(history)
+    private fun staged(history: FamilyHistory) = store.stageHistory(source(history))
+    private fun records(history: StoredHistory) = store.historySource(history.id).records().toList()
+    private fun anySource() = any(HistorySource::class.java) ?: source(FamilyHistory(baseline = emptyList(), operations = emptyList()))
     private fun anyBytes() = any(ByteArray::class.java) ?: byteArrayOf()
 
     @Before fun prepare(): Unit = runBlocking {
@@ -141,17 +145,17 @@ class SyncCoordinatorTest {
         doAnswer {
             if (failOnce) { failOnce = false; throw IllegalStateException("Response lost after activation") }
             Unit
-        }.`when`(transport).initialize(anyString(), anyString(), anyString(), anyHistory(), anyString())
-        assertTrue(runCatching { coordinator().restoreFamily(replacement, digest()) }.isFailure)
+        }.`when`(transport).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        assertTrue(runCatching { coordinator().restoreFamily(staged(replacement), current()) }.isFailure)
         assertEquals("RESTORE", db.restoreJournalQueries.current().executeAsOne().phase)
         assertEquals(1, db.accountQueries.active().executeAsList().size)
-        doReturn(replacement).`when`(transport).downloadBaseline("user", "family", family.activeDataset, true)
+        doReturn(source(replacement)).`when`(transport).downloadBaseline("user", "family", family.activeDataset, true)
         coordinator().synchronize()
         assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
         assertTrue(db.accountQueries.active().executeAsList().isEmpty())
         assertEquals(1, db.syncDraftQueries.all("user").executeAsList().size)
         assertEquals(family.activeDataset, db.syncSessionQueries.current().executeAsOne().dataset_id)
-        verify(transport, times(1)).initialize(anyString(), anyString(), anyString(), anyHistory(), anyString())
+        verify(transport, times(1)).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
     }
 
     @Test fun `download failure after replacement does not report restore failure or leave a journal`() = runTest {
@@ -164,7 +168,7 @@ class SyncCoordinatorTest {
         doThrow(IllegalStateException("Connection lost")).`when`(transport)
             .download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
         val sync = coordinator()
-        sync.restoreFamily(backup, digest())
+        sync.restoreFamily(staged(backup), current())
         assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
         assertEquals(family.activeDataset, db.syncSessionQueries.current().executeAsOne().dataset_id)
         assertEquals(backup, store.snapshot())
@@ -179,7 +183,7 @@ class SyncCoordinatorTest {
         }.`when`(transport).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
         doThrow(IllegalStateException("Cleanup unavailable")).`when`(transport).cleanup("user", "family")
         val sync = coordinator()
-        sync.restoreFamily(store.snapshot(), digest())
+        sync.restoreFamily(staged(store.snapshot()), current())
         assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
         assertEquals(SyncPhase.CLEANUP_REQUIRED, sync.status.value.phase)
         assertEquals(family.activeDataset, db.syncSessionQueries.current().executeAsOne().dataset_id)
@@ -194,7 +198,7 @@ class SyncCoordinatorTest {
         enroll()
         family = family.copy(otherDataset = "retired")
         doThrow(IllegalStateException("Cleanup unavailable")).`when`(transport).cleanup("user", "family")
-        assertTrue(runCatching { coordinator().restoreFamily(store.snapshot(), digest()) }.isFailure)
+        assertTrue(runCatching { coordinator().restoreFamily(staged(store.snapshot()), current()) }.isFailure)
         assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
         verify(transport, never()).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
     }
@@ -203,7 +207,7 @@ class SyncCoordinatorTest {
         enroll()
         family = family.copy(owner = "owner", admins = listOf("owner"))
         val before = store.snapshot()
-        assertTrue(runCatching { coordinator().restoreFamily(before, digest()) }.isFailure)
+        assertTrue(runCatching { coordinator().restoreFamily(staged(before), current()) }.isFailure)
         assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
         assertEquals(before, store.snapshot())
         verifyNoInteractions(transport)
@@ -211,8 +215,8 @@ class SyncCoordinatorTest {
 
     @Test fun `stale preview never starts cloud replacement`() = runTest {
         enroll()
-        val backup = store.snapshot()
-        val confirmed = digest()
+        val backup = staged(store.snapshot())
+        val confirmed = current()
         store.append(AccountCreated(Account("later", "Later", Currency.RSD)))
         val failure = runCatching { coordinator().restoreFamily(backup, confirmed) }.exceptionOrNull()
         assertTrue(failure is LocalHistoryChanged)
@@ -242,7 +246,7 @@ class SyncCoordinatorTest {
     @Test fun `freshly confirmed recovery replaces stale staging without losing the newer local copy`() = runTest {
         enroll()
         val backup = store.snapshot()
-        doReturn(backup).`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        doReturn(source(backup)).`when`(transport).downloadBaseline("user", "family", "dataset", true)
         val sync = coordinator()
         sync.stageRecovery()
         store.append(AccountCreated(Account("later", "Later", Currency.RSD)))
@@ -250,8 +254,10 @@ class SyncCoordinatorTest {
         sync.stageRecovery()
         sync.confirmReplacement()
         assertEquals(listOf("account"), db.accountQueries.active().executeAsList().map { it.id })
-        val retained = HistoryCodec.decode(db.syncDraftQueries.all("user").executeAsList().single().payload)
-        assertTrue(retained.decodedOperations().any { op -> op.events.any { (it.event as? AccountCreated)?.account?.id == "later" } })
+        val retained = requireNotNull(store.draftHistory("user", db.syncDraftQueries.draftInfo("user").executeAsList().single().id))
+        assertTrue(records(retained).filterIsInstance<HistoryRecord.Operation>().any { record ->
+            OperationCodec.decode(record.bytes()).events.any { (it.event as? AccountCreated)?.account?.id == "later" }
+        })
     }
 
     @Test fun `manual reconciliation reads before saved cursor without duplicating data`() = runTest {
@@ -261,6 +267,41 @@ class SyncCoordinatorTest {
         coordinator().synchronize(reconcile = true)
         verify(transport).download("user", "family", "dataset", null, true)
         assertEquals(before, store.snapshot())
+    }
+
+    @Test fun `recovery pages past a thousand operations and resumes from a small journal referencing staged history`() = runTest {
+        val before = store.snapshot()
+        val operations = (1L..1_201L).map { seq ->
+            val tx = Transaction("large-$seq", TransactionType.EXPENSE, Money.of("1", Currency.RSD), "account", null, null,
+                java.time.LocalDate.of(2026, 11, 4), "n".repeat(1500), "", "member", TransactionSource.MANUAL)
+            OperationCodec.encode(SyncOperation(familyId = "family", datasetId = "dataset", authorUid = "peer", installId = "peer", sequence = seq,
+                parents = emptySet(), resources = mapOf("transaction:${tx.id}" to ResourceAccess.WRITE, "account:account" to ResourceAccess.READ),
+                events = listOf(OperationEvent("peer-event-$seq", "peer", seq, seq, TransactionAdded(tx)))))
+        }
+        doReturn(source(before)).`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        var pages = 0
+        doAnswer { call ->
+            val offset = call.getArgument<CloudCursor?>(3)?.id?.toInt() ?: 0
+            val page = operations.drop(offset).take(100)
+            val end = offset + page.size
+            pages++
+            CloudPage(page, CloudCursor(end.toLong(), 0, end.toString()), end < operations.size)
+        }.`when`(transport).download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+
+        coordinator().stageRecovery()
+        assertEquals(13, pages)
+        assertEquals(before, store.snapshot())
+        assertTrue(requireNotNull(db.restoreManifest()).size < 64 * 1024)
+        doReturn(CloudPage(emptyList(), null, false)).`when`(transport)
+            .download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+        coordinator().confirmReplacement()
+
+        assertNull(db.restoreJournalQueries.journalInfo().executeAsOneOrNull())
+        assertEquals(1_201, store.snapshot().operations.size)
+        assertEquals(1_201, db.txQueries.all().executeAsList().size)
+        assertEquals(operations.map(HistoryCodec::digest), db.syncOperationQueries.all().executeAsList().map { HistoryCodec.digest(it.payload) })
+        assertEquals("dataset", db.syncSessionQueries.current().executeAsOne().dataset_id)
+        assertTrue(db.syncConflictQueries.all().executeAsList().isEmpty())
     }
 
     private fun targetHistory() = store.snapshot().let { it.copy(baseline = it.baseline.filterNot { record -> record.event is AccountCreated }) }
@@ -280,7 +321,7 @@ class SyncCoordinatorTest {
 
     @Test fun `personal workspace joins invited family keeping its cloud archive and local copy`() = runTest {
         enroll()
-        doReturn(targetHistory()).`when`(transport).downloadBaseline("user", "target", "shared", true)
+        doReturn(source(targetHistory())).`when`(transport).downloadBaseline("user", "target", "shared", true)
         store.append(AccountCreated(Account("personal", "Personal", Currency.RSD)))
         val uploadedTo = mutableListOf<String>()
         doAnswer { call -> uploadedTo += call.getArgument<String>(1); Unit }
@@ -294,7 +335,9 @@ class SyncCoordinatorTest {
         assertEquals(0, accounts())
         val draft = db.syncDraftQueries.all("user").executeAsList().single()
         assertEquals("family", draft.family_id)
-        assertTrue(HistoryCodec.decode(draft.payload).decodedOperations().any { op -> op.events.any { (it.event as? AccountCreated)?.account?.id == "personal" } })
+        assertTrue(records(requireNotNull(store.draftHistory("user", draft.id))).filterIsInstance<HistoryRecord.Operation>().any { record ->
+            OperationCodec.decode(record.bytes()).events.any { (it.event as? AccountCreated)?.account?.id == "personal" }
+        })
         assertEquals(listOf("family", "target"), uploadedTo)
         verify(families, times(1)).joinFromPersonal(anyString(), anyString(), anyString(), anyString())
         verify(families, never()).beginDeletion(anyString())
@@ -313,7 +356,7 @@ class SyncCoordinatorTest {
 
     @Test fun `committed switch whose response was lost resumes after restart without a second commit`() = runTest {
         enroll()
-        doReturn(targetHistory()).`when`(transport).downloadBaseline("user", "target", "shared", true)
+        doReturn(source(targetHistory())).`when`(transport).downloadBaseline("user", "target", "shared", true)
         commitSwitch { throw IllegalStateException("Response lost after commit") }
         assertTrue(runCatching { coordinator().joinFromPersonal(invitation) }.isFailure)
         assertEquals("SWITCH", journal()?.phase)
@@ -347,7 +390,7 @@ class SyncCoordinatorTest {
         doThrow(IllegalStateException("Connection interrupted")).`when`(families).joinFromPersonal(anyString(), anyString(), anyString(), anyString())
         assertTrue(runCatching { coordinator().joinFromPersonal(invitation) }.isFailure)
         val pending = requireNotNull(journal())
-        val stale = pending.manifest.toString(Charsets.UTF_8).replace(digest(), "stale")
+        val stale = pending.manifest.toString(Charsets.UTF_8).replace(current(), "stale")
         db.restoreJournalQueries.save(pending.uid, pending.family_id, pending.source_dataset, pending.target_dataset,
             pending.token, pending.phase, stale.toByteArray())
         assertTrue(runCatching { coordinator().synchronize() }.exceptionOrNull() is LocalHistoryChanged)
@@ -359,7 +402,7 @@ class SyncCoordinatorTest {
 
     @Test fun `family change during download keeps the journal and local data until a safe retry`() = runTest {
         enroll()
-        doReturn(targetHistory()).`when`(transport).downloadBaseline("user", "target", "shared", true)
+        doReturn(source(targetHistory())).`when`(transport).downloadBaseline("user", "target", "shared", true)
         commitSwitch()
         var changed = false
         doAnswer { call ->
@@ -403,7 +446,7 @@ class SyncCoordinatorTest {
         assertNull(sync.observedFamily.value)
         assertEquals(1, accounts())
         verifyNoInteractions(transport)
-        doReturn(targetHistory()).`when`(transport).downloadBaseline("user", "target", "shared", true)
+        doReturn(source(targetHistory())).`when`(transport).downloadBaseline("user", "target", "shared", true)
         sync.stageRecovery()
         sync.confirmReplacement()
         assertEquals("target", sessionFamily())
@@ -439,12 +482,113 @@ class SyncCoordinatorTest {
     @Test fun `archived workspace history stays exportable to its owner without local changes`() = runTest {
         enroll()
         family = family.copy(status = "ARCHIVED")
-        doReturn(store.snapshot()).`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        doReturn(source(store.snapshot())).`when`(transport).downloadBaseline("user", "family", "dataset", true)
         val before = store.snapshot()
         val history = coordinator().archivedHistory("family")
-        assertTrue(history.baseline.any { (it.event as? AccountCreated)?.account?.id == "account" })
+        assertTrue(records(history).filterIsInstance<HistoryRecord.Baseline>().any { (it.event.event as? AccountCreated)?.account?.id == "account" })
         assertEquals(before, store.snapshot())
         family = family.copy(owner = "other")
         assertTrue(runCatching { coordinator().archivedHistory("family") }.isFailure)
+    }
+
+    private fun legacyEnrollment(history: FamilyHistory) =
+        """{"memberId":"member","localDigest":"${digest()}","history":${HistoryCodec.encode(history).toString(Charsets.UTF_8)}}""".toByteArray()
+
+    @Test fun `interrupted bootstrap resumes uploading the same staged history after restart`() = runTest {
+        val uploads = mutableListOf<List<HistoryRecord>>()
+        doAnswer { call ->
+            uploads += call.getArgument<HistorySource>(3).records().toList()
+            if (uploads.size == 1) throw IllegalStateException("Connection lost after a chunk")
+            Unit
+        }.`when`(transport).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        assertTrue(runCatching { coordinator().createFamily("member") }.isFailure)
+        assertEquals("CREATE", journal()?.phase)
+        assertTrue(requireNotNull(db.restoreManifest()).size < 64 * 1024)
+        assertTrue(runCatching { store.append(AccountCreated(Account("blocked", "Blocked", Currency.RSD))) }.isFailure)
+        val stagedId = requireNotNull(db.restoreJournalQueries.journalHistory().executeAsOne().history_id)
+        store = EventStore(db, install, FixedClock(Instant.parse("2026-11-04T10:00:00Z"), ZoneId.of("UTC")), Projector(db))
+        store.discardHistory(store.beginHistory())
+        assertEquals(stagedId, store.history(stagedId).id)
+        coordinator().createFamily("member")
+        assertNull(journal())
+        assertEquals(2, uploads.size)
+        assertEquals(uploads[0], uploads[1])
+        assertTrue(uploads[0].filterIsInstance<HistoryRecord.Baseline>().any { (it.event.event as? AccountCreated)?.account?.id == "account" })
+        assertEquals(1, accounts())
+    }
+
+    @Test fun `create journal written before staging converts its inline history once`() = runTest {
+        db.restoreJournalQueries.save("user", "family", "", "dataset", "token", "CREATE", legacyEnrollment(store.snapshot()))
+        var attempts = 0
+        doAnswer { if (++attempts < 3) throw IllegalStateException("Connection lost"); Unit }
+            .`when`(transport).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        assertTrue(runCatching { coordinator().createFamily("member") }.isFailure)
+        val converted = requireNotNull(db.restoreManifest())
+        assertFalse(converted.toString(Charsets.UTF_8).contains("\"history\""))
+        assertTrue(runCatching { coordinator().createFamily("member") }.isFailure)
+        assertArrayEquals(converted, db.restoreManifest())
+        coordinator().createFamily("member")
+        assertNull(journal())
+        assertEquals("dataset", db.syncSessionQueries.current().executeAsOne().dataset_id)
+        assertEquals(1, accounts())
+    }
+
+    @Test fun `replacement journal written before staging still activates with its old digest`() = runTest {
+        enroll()
+        db.restoreJournalQueries.save("user", "family", "", "dataset", "1", "REPLACE", legacyEnrollment(targetHistory()))
+        coordinator().confirmReplacement()
+        assertNull(journal())
+        assertEquals(0, accounts())
+        assertEquals(1, db.syncDraftQueries.draftInfo("user").executeAsList().size)
+    }
+
+    @Test fun `restore journal written before staging resumes after the cloud already switched`() = runTest {
+        enroll()
+        val replacement = targetHistory()
+        val legacy = """{"enrollment":${legacyEnrollment(replacement).toString(Charsets.UTF_8)},"sourceGeneration":1}"""
+        db.restoreJournalQueries.save("user", "family", "dataset", "restored", "token", "RESTORE", legacy.toByteArray())
+        family = family.copy(activeDataset = "restored", generation = 2)
+        doReturn(source(replacement)).`when`(transport).downloadBaseline("user", "family", "restored", true)
+        coordinator().synchronize()
+        assertNull(journal())
+        assertEquals("restored", db.syncSessionQueries.current().executeAsOne().dataset_id)
+        assertEquals(0, accounts())
+        verify(transport, never()).initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+    }
+
+    @Test fun `cloud baseline differing from the restore journal is never activated`() = runTest {
+        enroll()
+        val backup = staged(targetHistory())
+        doAnswer { call -> family = family.copy(activeDataset = call.getArgument(4), generation = 2); Unit }
+            .`when`(transport).beginRestore(anyString(), anyString(), anyString(), anyLong(), anyString(), anyString())
+        doThrow(IllegalStateException("Response lost after activation")).`when`(transport)
+            .initialize(anyString(), anyString(), anyString(), anySource(), anyString())
+        assertTrue(runCatching { coordinator().restoreFamily(backup, current()) }.isFailure)
+        doReturn(source(store.snapshot())).`when`(transport).downloadBaseline("user", "family", family.activeDataset, true)
+        assertTrue(runCatching { coordinator().synchronize() }.isFailure)
+        assertEquals("RESTORE", journal()?.phase)
+        assertEquals("dataset", db.syncSessionQueries.current().executeAsOne().dataset_id)
+        assertEquals(1, accounts())
+    }
+
+    @Test fun `interrupted cloud download keeps local data and the pending replacement unchanged`() = runTest {
+        enroll()
+        doReturn(source(targetHistory())).`when`(transport).downloadBaseline("user", "family", "dataset", true)
+        coordinator().stageRecovery()
+        val pending = requireNotNull(db.restoreManifest())
+        val before = store.snapshot()
+        var pages = 0
+        doAnswer {
+            if (++pages == 2) throw IllegalStateException("Connection lost")
+            CloudPage(emptyList(), CloudCursor(1, 0, "page"), true)
+        }.`when`(transport).download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+        assertTrue(runCatching { coordinator().stageRecovery() }.isFailure)
+        assertArrayEquals(pending, db.restoreManifest())
+        assertEquals(before, store.snapshot())
+        assertEquals(1, accounts())
+        doReturn(CloudPage(emptyList(), null, false)).`when`(transport)
+            .download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+        coordinator().confirmReplacement()
+        assertEquals(0, accounts())
     }
 }

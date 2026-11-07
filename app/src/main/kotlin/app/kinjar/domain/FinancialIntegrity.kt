@@ -21,11 +21,66 @@ class FinancialIntegrity private constructor(
         return next
     }
 
+    /** Rollback only touched entries when a command fails, rather than copying the entire financial history. */
+    fun applyAtomically(events: List<Event>, strict: Boolean) {
+        val undo = mutableListOf<() -> Unit>()
+        fun <T> remember(map: MutableMap<String, T>, id: String) {
+            val before = map[id]
+            undo += { if (before == null) map.remove(id) else map[id] = before; Unit }
+        }
+        val changedTransactions = mutableSetOf<String>()
+        var changedAccounts = false
+        events.forEach { event ->
+            when (event) {
+                is AccountCreated -> { remember(accounts, event.account.id); changedAccounts = true }
+                is AccountUpdated -> { remember(accounts, event.account.id); changedAccounts = true }
+                is AccountArchived -> { remember(accounts, event.accountId); changedAccounts = true }
+                is TransactionAdded -> {
+                    remember(transactions, event.transaction.id)
+                    changedTransactions += event.transaction.id
+                    event.receipt?.let { remember(receipts, it.id) }
+                }
+                is TransactionEdited -> { remember(transactions, event.transaction.id); changedTransactions += event.transaction.id }
+                is TransactionDeleted -> { remember(transactions, event.transactionId); changedTransactions += event.transactionId }
+                is LoanCreated -> remember(loans, event.loan.id)
+                is LoanUpdated -> remember(loans, event.loan.id)
+                is LoanArchived -> remember(loans, event.loanId)
+                is LoanPaymentAdded -> remember(payments, event.payment.id)
+                is LoanPaymentUpdated -> remember(payments, event.payment.id)
+                is LoanPaymentRemoved -> {
+                    remember(payments, event.paymentId)
+                    val wasRemoved = event.paymentId in removedPayments
+                    undo += { if (!wasRemoved) removedPayments.remove(event.paymentId); Unit }
+                }
+                is LoanPrincipalAdjusted -> remember(adjustments, event.adjustment.id)
+                else -> Unit
+            }
+        }
+        try {
+            events.forEach { apply(it, strict) }
+            if (strict) {
+                validateTransactions(if (changedAccounts) transactions.values else changedTransactions.mapNotNull(transactions::get))
+                validateLoans()
+            }
+        } catch (failure: Throwable) {
+            undo.asReversed().forEach { it() }
+            throw failure
+        }
+    }
+
     fun validate() {
-        transactions.values.forEach { tx ->
+        validateTransactions(transactions.values)
+        validateLoans()
+    }
+
+    private fun validateTransactions(values: Collection<Transaction>) {
+        values.forEach { tx ->
             require(accounts[tx.accountId]?.currency == tx.money.currency) { "Transaction account currency mismatch" }
             tx.toAccountId?.let { require(accounts[it]?.currency == tx.money.currency) { "Transfer account currency mismatch" } }
         }
+    }
+
+    private fun validateLoans() {
         payments.values.forEach { require(it.loanId in loans) { "Unknown loan" } }
         adjustments.values.forEach { require(it.loanId in loans) { "Unknown loan adjustment" } }
         loans.values.forEach { loan ->
