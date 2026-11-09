@@ -237,7 +237,14 @@ class BudgetRepository(
 
     suspend fun renameMember(memberId: String, displayName: String) { store.append(MemberRenamed(memberId, displayName.trim())) }
 
-    suspend fun add(t: Transaction) { store.append(TransactionAdded(t)) { loans.requireUnlinked(t.id); require(t.type != TransactionType.LOAN_RECEIPT); validateTransaction(t) } }
+    suspend fun add(t: Transaction) {
+        store.append(TransactionAdded(t)) {
+            loans.requireUnlinked(t.id)
+            require(t.type != TransactionType.LOAN_RECEIPT)
+            storedTransaction(t.id)?.let { requireUnchanged(t, it) }
+            validateTransaction(t)
+        }
+    }
 
     suspend fun hasReceipt(id: String): Boolean = withContext(Dispatchers.IO) {
         db.receiptQueries.activeById(id).executeAsOneOrNull() != null

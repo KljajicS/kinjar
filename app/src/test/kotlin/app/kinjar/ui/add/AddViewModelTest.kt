@@ -179,6 +179,39 @@ class AddViewModelTest {
     }
 
     @Test
+    fun `bill paid while form is open rejects changed amount and reloads payment for correction`() = runTest(dispatcher) {
+        val vm = billVm()
+        val other = AddViewModel(repo, clock, SavedStateHandle(mapOf("rule" to "rent", "due" to "2026-10-20")), accountStore)
+            .also { models += it }
+        other.state.first { it.bill != null && it.accounts.isNotEmpty() }
+        other.save()
+        other.state.first { it.saved }
+        val payment = repo.transactions.first().single()
+
+        vm.press('<')
+        vm.press('5')
+        vm.save()
+        val rejected = vm.state.first { it.saved || it.saveError != null }
+        assertFalse(rejected.saved)
+        assertTrue(rejected.stale)
+        assertFalse(rejected.canSave)
+        assertEquals(R.string.audit_edit_stale, rejected.saveError)
+        assertEquals(payment, repo.transactions.first().single())
+
+        vm.reload()
+        vm.state.first { it.editing != null && !it.loading }
+        assertFalse(vm.state.value.stale)
+        assertNull(vm.state.value.bill)
+        assertEquals(payment, vm.state.value.editing)
+        assertEquals("40000", vm.state.value.amount.text)
+        vm.press('<')
+        vm.press('5')
+        vm.save()
+        vm.state.first { it.saved }
+        assertEquals(payment.copy(money = Money.of("40005", Currency.RSD)), repo.transactions.first().single())
+    }
+
+    @Test
     fun `archiving bill account requires explicit replacement without changing currency`() = runTest(dispatcher) {
         val vm = billVm()
         repo.archiveAccount("cash")

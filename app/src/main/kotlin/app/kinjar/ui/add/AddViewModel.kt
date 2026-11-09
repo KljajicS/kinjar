@@ -227,7 +227,7 @@ class AddViewModel @Inject constructor(
             it.copy(
                 type = t.type, amount = AmountInput(t.money.amount.stripTrailingZeros().toPlainString()), currency = t.money.currency,
                 categoryId = t.categoryId, accountId = t.accountId, toAccountId = t.toAccountId, date = t.date, merchant = t.merchant,
-                editing = t, loanLocked = locked, savedReceipt = savedReceipt, stale = false, saveError = null,
+                editing = t, bill = null, loanLocked = locked, savedReceipt = savedReceipt, stale = false, saveError = null,
                 // The stored amount is what arrived; recomputing it from today's rate would rewrite history.
                 receivedText = t.received?.amount?.stripTrailingZeros()?.toPlainString().orEmpty(), receivedManual = t.received != null,
                 receivedPair = t.received?.let { t.money.currency to it.currency }, receivedReset = false,
@@ -239,13 +239,18 @@ class AddViewModel @Inject constructor(
     /** Replaces the form with the stored transaction, dropping what was typed over the outdated one. */
     fun reload() {
         val s = _state.value
-        val id = s.editing?.id ?: return
+        val id = s.editing?.id ?: s.bill?.txId ?: return
         if (!s.stale || s.loading || s.saving || s.saved) return
         _state.update { it.copy(loading = true) }
         viewModelScope.launch {
             try {
                 val t = repo.transaction(id)
-                if (t == null) _state.update { it.copy(missing = true, stale = false, saveError = null) } else showEditing(t)
+                if (t == null) {
+                    _state.update { it.copy(missing = true, stale = false, saveError = null) }
+                } else {
+                    savedState["id"] = t.id
+                    showEditing(t)
+                }
                 _state.update { selectAccount(it.copy(loading = false)) }
             } catch (e: CancellationException) {
                 _state.update { it.copy(loading = false) }
