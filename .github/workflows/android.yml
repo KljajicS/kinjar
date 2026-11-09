@@ -4,6 +4,9 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 env:
   ORG_GRADLE_PROJECT_firebaseSyncEnabled: ${{ vars.KINJAR_FIREBASE_SYNC_ENABLED || 'false' }}
   KINJAR_FIREBASE_PROJECT_ID: ${{ vars.KINJAR_FIREBASE_PROJECT_ID }}
@@ -14,13 +17,16 @@ jobs:
   sync-rules:
     if: github.event.created
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: 21
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
       - run: npm --prefix firebase ci --ignore-scripts
@@ -28,28 +34,47 @@ jobs:
   build:
     if: github.event.created
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Validate release source and Firebase configuration
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor HEAD origin/main
+          test "$ORG_GRADLE_PROJECT_firebaseSyncEnabled" = true
+          test -n "$KINJAR_FIREBASE_PROJECT_ID"
+          test -n "$KINJAR_FIREBASE_APP_ID"
+          test -n "$KINJAR_FIREBASE_API_KEY"
+          test -n "$KINJAR_FIREBASE_WEB_CLIENT_ID"
       - run: make lint-workflows
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
       - run: make lint test build
   release:
     needs: [build, sync-rules]
     if: github.event_name == 'push' && github.event.created && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 40
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-disabled: true
       - name: Restore distribution signing key
         env:
           BUDGET_KEYSTORE_PATH: ${{ runner.temp }}/kinjar-release.keystore
@@ -60,29 +85,32 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$BUDGET_KEYSTORE_PATH"
       - run: make release
         env:
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.configuration-cache=false -Dorg.gradle.caching=false
           BUDGET_KEYSTORE_PATH: ${{ runner.temp }}/kinjar-release.keystore
           BUDGET_KEYSTORE_PASSWORD: ${{ secrets.BUDGET_KEYSTORE_PASSWORD }}
           BUDGET_KEY_ALIAS: ${{ secrets.BUDGET_KEY_ALIAS }}
           BUDGET_KEY_PASSWORD: ${{ secrets.BUDGET_KEY_PASSWORD }}
-      - name: Set release title
-        id: release-title
-        run: printf 'name=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Verify release identity
+        run: python3 scripts/verify-release.py app/build/outputs/apk/release/kinjar-release.apk "$GITHUB_REF_NAME"
+      - name: Remove temporary signing key
+        if: always()
+        env:
+          BUDGET_KEYSTORE_PATH: ${{ runner.temp }}/kinjar-release.keystore
+        run: rm -f "$BUDGET_KEYSTORE_PATH"
       - name: Preserve release diagnostics
         working-directory: app/build/outputs
         run: |
           cp mapping/release/mapping.txt apk/release/kinjar-mapping.txt
           cd apk/release
           sha256sum kinjar-release.apk kinjar-mapping.txt > SHA256SUMS
-      - uses: softprops/action-gh-release@v3
-        with:
-          name: ${{ steps.release-title.outputs.name }}
-          files: |
-            app/build/outputs/apk/release/kinjar-release.apk
-            app/build/outputs/apk/release/kinjar-mapping.txt
-            app/build/outputs/apk/release/SHA256SUMS
-          fail_on_unmatched_files: true
-      - name: Remove temporary signing key
-        if: always()
+      - name: Publish verified release
         env:
-          BUDGET_KEYSTORE_PATH: ${{ runner.temp }}/kinjar-release.keystore
-        run: rm -f "$BUDGET_KEYSTORE_PATH"
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            app/build/outputs/apk/release/kinjar-release.apk \
+            app/build/outputs/apk/release/kinjar-mapping.txt \
+            app/build/outputs/apk/release/SHA256SUMS \
+            --verify-tag --title "${GITHUB_REF_NAME#v}" \
+            --notes 'Signed KinJar release. Update both family phones before using new sync features. Install over the existing app to retain local data.'
