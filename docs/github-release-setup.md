@@ -1,8 +1,8 @@
 # Publish KinJar releases on GitHub
 
-This checklist configures the existing workflow to publish a signed APK under [KinJar Releases](https://github.com/KljajicS/kinjar/releases). A normal branch push does not publish an APK. A new version tag, such as `v0.3.7`, starts the release workflow.
+This checklist configures the existing workflow to publish a signed APK under [KinJar Releases](https://github.com/KljajicS/kinjar/releases). A normal branch push does not publish an APK. A new version tag, such as `v0.3.8`, starts the release workflow.
 
-Setup status, 9 November 2026: protected environment, signing secrets, Firebase variables and repository rules are configured. The hardened workflow must be merged into main before tagging. No release tag has been pushed and compatible Firebase rules still need deployment. The previous workflow cannot release while these safeguards are enabled; merge the updated workflow first.
+Setup status, 9 November 2026: protected environment, signing secrets, Firebase variables and repository rules are configured. The hardened workflow is on main and compatible Firebase rules are deployed. Tag `v0.3.7` failed a JVM test cleanup race before signing; no APK was published. The test lifecycle fix ships as `v0.3.8`, preserving the immutable failed tag.
 
 ## 1. Protect signing secrets
 
@@ -73,12 +73,12 @@ This feature batch needs no new index. Keep the existing project, memberships, d
 Once the settings are complete:
 
 1. Merge the tested feature and hardened workflow into main. The workflow rejects tags whose commits are not contained in main. Feature commit `49fe80c` and the subsequent workflow changes must be included before publishing this release.
-2. Verify `app/build.gradle.kts` has version name `0.3.7` and code `10`.
+2. Verify `app/build.gradle.kts` has version name `0.3.8` and code `11`.
 3. Create a new tag on the selected release commit and push it. Do not move an existing published tag.
 
 ```bash
-git tag -a v0.3.7 RELEASE_COMMIT_SHA -m 'KinJar 0.3.7'
-git push origin v0.3.7
+git tag -a v0.3.8 RELEASE_COMMIT_SHA -m 'KinJar 0.3.8'
+git push origin v0.3.8
 ```
 
 Replace `RELEASE_COMMIT_SHA` with the verified full commit SHA. This is a release operation; branch push alone is insufficient.
@@ -103,7 +103,7 @@ Install as an update, without uninstalling or clearing data. Update both family 
 
 - [x] Four environment signing secrets configured from the retained key, with no repository-level copies.
 - [x] Five repository Firebase variables configured, sync enabled.
-- [ ] Compatible Firebase rules deployed to the existing project.
+- [x] Compatible Firebase rules deployed to the existing project.
 - [ ] Release source commit selected and new version tag pushed.
 - [ ] Release approved manually after reviewing the tagged source.
 - [ ] All three Actions jobs green.

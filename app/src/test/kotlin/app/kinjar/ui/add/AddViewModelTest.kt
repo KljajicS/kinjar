@@ -1,7 +1,10 @@
 package app.kinjar.ui.add
 
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -49,9 +52,17 @@ class AddViewModelTest {
     private val repo = BudgetRepository(db, EventStore(db, "dev-1", clock, Projector(db)), clock, "dev-1")
     private val remembered = mutableMapOf<TransactionType, String>()
     private val accountStore = TransactionAccountStore(remembered::get) { type, id -> remembered[type] = id }
+    private val models = mutableListOf<AddViewModel>()
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
-    @After fun tearDown() = Dispatchers.resetMain()
+    @After fun tearDown() {
+        try {
+            runTest(dispatcher) { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
+        } finally {
+            Dispatchers.resetMain()
+            driver.close()
+        }
+    }
 
     private suspend fun seeded(store: TransactionAccountStore = accountStore): AddViewModel {
         repo.setUp("S", listOf(
@@ -64,7 +75,8 @@ class AddViewModelTest {
     }
 
     private suspend fun newVm(store: TransactionAccountStore = accountStore): AddViewModel =
-        AddViewModel(repo, clock, SavedStateHandle(), store).also { vm -> vm.state.first { it.accounts.isNotEmpty() } }
+        AddViewModel(repo, clock, SavedStateHandle(), store).also { models += it }
+            .also { vm -> vm.state.first { it.accounts.isNotEmpty() } }
 
     @Test
     fun `save disabled until amount entered, then saves expense with defaults`() = runTest(dispatcher) {
@@ -137,7 +149,7 @@ class AddViewModelTest {
     private suspend fun billVm(): AddViewModel {
         seeded()
         repo.setRule(RecurringRule("rent", "Rent", Money.of("40000", Currency.RSD), "cash", "cat-bills", Cadence.MONTHLY, LocalDate.of(2026, 10, 20)))
-        val vm = AddViewModel(repo, clock, SavedStateHandle(mapOf("rule" to "rent", "due" to "2026-10-20")), accountStore)
+        val vm = AddViewModel(repo, clock, SavedStateHandle(mapOf("rule" to "rent", "due" to "2026-10-20")), accountStore).also { models += it }
         vm.state.first { it.bill != null && it.accounts.isNotEmpty() }
         return vm
     }
