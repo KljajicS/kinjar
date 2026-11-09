@@ -97,6 +97,8 @@ data class RecurringRule(
 ) {
     init {
         require(!money.isNegative && !money.isZero) { "Bill amount must be positive" }
+        // Match the date picker's range and bound recurrence expansion from imported history.
+        require(firstDue.year in 1900..2100) { "Bill start date must be between 1900 and 2100" }
     }
 }
 

@@ -66,7 +66,15 @@ data class TransactionAdded(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val receiptDeletionId: String? = null,
-) : Event
+) : Event {
+    init {
+        receipt?.let {
+            require(transaction.id == it.transactionId && transaction.source == TransactionSource.RECEIPT) {
+                "Receipt must match its transaction"
+            }
+        }
+    }
+}
 
 @Serializable @SerialName("TransactionEdited")
 data class TransactionEdited(val transaction: Transaction) : Event

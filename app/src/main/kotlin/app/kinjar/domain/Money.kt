@@ -53,6 +53,18 @@ data class Money(
 
 object BigDecimalSerializer : KSerializer<BigDecimal> {
     override val descriptor = PrimitiveSerialDescriptor("BigDecimal", PrimitiveKind.STRING)
-    override fun serialize(encoder: Encoder, value: BigDecimal) = encoder.encodeString(value.toPlainString())
-    override fun deserialize(decoder: Decoder): BigDecimal = BigDecimal(decoder.decodeString())
+    override fun serialize(encoder: Encoder, value: BigDecimal) {
+        validate(value)
+        encoder.encodeString(value.toPlainString())
+    }
+    override fun deserialize(decoder: Decoder): BigDecimal {
+        val text = decoder.decodeString()
+        require(text.length <= 256) { "Decimal representation too long" }
+        return BigDecimal(text).also(::validate)
+    }
+
+    private fun validate(value: BigDecimal) {
+        // Small exponent-encoded values must not expand into unbounded plain strings.
+        require(value.precision() <= 100 && value.scale() in -100..100) { "Decimal precision or scale out of range" }
+    }
 }

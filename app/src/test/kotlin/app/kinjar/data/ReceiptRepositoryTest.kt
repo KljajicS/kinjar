@@ -31,6 +31,39 @@ class ReceiptRepositoryTest {
         store.activate("user", "family", "dataset", "member", 1, store.captureHistory(), store.currentDigest(), false)
     }
 
+    @Test fun `malformed remote events are quarantined without blocking valid changes or checkpoints`() = runTest {
+        enroll()
+        fun payload(install: String, event: Event, resources: Map<String, ResourceAccess>) = String(OperationCodec.encode(
+            SyncOperation(familyId = "family", datasetId = "dataset", authorUid = "other", installId = install,
+                sequence = 1, parents = emptySet(), resources = resources,
+                events = listOf(OperationEvent("$install-event", install, 1, 0, event)))))
+        val receiptResources = mapOf("transaction:${receipt.transactionId}" to ResourceAccess.WRITE,
+            "receipt:${receipt.id}" to ResourceAccess.WRITE, "account:cash" to ResourceAccess.READ,
+            "category:cat-groceries" to ResourceAccess.READ)
+        val badSource = payload("source", TransactionAdded(tx(), receipt), receiptResources)
+            .replace("\"source\":\"RECEIPT\"", "\"source\":\"MANUAL\"")
+        val badIdentity = payload("identity", TransactionAdded(tx(), receipt), receiptResources)
+            .replace(receipt.transactionId, "wrong-transaction")
+        val badDecimal = payload("decimal", TransactionAdded(tx(), receipt), receiptResources)
+            .replace("\"quantity\":\"1\"", "\"quantity\":\"1E+3000000\"")
+        val rule = RecurringRule("rule", "Rent", receipt.total, "cash", "cat-groceries", Cadence.MONTHLY, receipt.date)
+        val badDate = payload("date", RecurringRuleSet(rule), mapOf("rule:rule" to ResourceAccess.WRITE, "account:cash" to ResourceAccess.READ))
+            .replace("\"firstDue\":\"${receipt.date}\"", "\"firstDue\":\"-999999999-01-01\"")
+        val valid = payload("peer", AccountCreated(Account("new", "New", Currency.RSD)), mapOf("account:new" to ResourceAccess.WRITE))
+        for (invalid in listOf(badSource, badIdentity, badDecimal, badDate)) {
+            repeat(2) { store.receive(listOf(invalid.toByteArray(), valid.toByteArray()), "user", "family", "dataset", 1, 0, "peer:1") }
+            val root = EventJson.parseToJsonElement(invalid) as kotlinx.serialization.json.JsonObject
+            val events = root.getValue("events") as kotlinx.serialization.json.JsonArray
+            assertThrows(IllegalArgumentException::class.java) { HistoryStream.decodeEvent(events.single().toString().toByteArray()) }
+        }
+
+        assertEquals(4, db.syncQuarantineQueries.all().executeAsList().size)
+        assertEquals(listOf("peer:1"), db.syncOperationQueries.all().executeAsList().map { it.id })
+        assertTrue(db.accountQueries.active().executeAsList().any { it.id == "new" })
+        assertTrue(db.txQueries.all().executeAsList().isEmpty())
+        assertEquals("peer:1", db.syncCheckpointQueries.byDataset("dataset").executeAsOne().document_id)
+    }
+
     private fun assertPeerHistory() {
         val peerDb = testDb()
         val peer = EventStore(peerDb, "peer", clock, Projector(peerDb))

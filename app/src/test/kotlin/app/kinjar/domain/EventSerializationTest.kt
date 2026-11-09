@@ -1,10 +1,42 @@
 package app.kinjar.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.time.LocalDate
 
 class EventSerializationTest {
+    @Test fun `receipt decimals reject expansion on decode and encode`() {
+        for (value in listOf("1E+3000000", "1E-3000000", "0E-2147483647", "9".repeat(257))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                EventJson.decodeFromString(BigDecimalSerializer, "\"$value\"")
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                EventJson.encodeToString(BigDecimalSerializer, java.math.BigDecimal(value))
+            }
+        }
+        for (value in listOf("0.345", "1E+3", "-1.2500")) {
+            val decimal = java.math.BigDecimal(value)
+            assertEquals(decimal.toPlainString(), EventJson.decodeFromString(BigDecimalSerializer,
+                EventJson.encodeToString(BigDecimalSerializer, decimal)).toPlainString())
+        }
+    }
+
+    @Test fun `recurring history rejects extreme dates but accepts calendar boundaries`() {
+        val event: Event = RecurringRuleSet(RecurringRule("r", "Rent", Money.of("100", Currency.RSD), "a", "c",
+            Cadence.MONTHLY, LocalDate.of(2026, 10, 5)))
+        val json = EventJson.encodeToString(Event.serializer(), event)
+        for (date in listOf("-999999999-01-01", "+999999999-12-31", "1899-12-31", "2101-01-01")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                EventJson.decodeFromString(Event.serializer(), json.replace("2026-10-05", date))
+            }
+        }
+        for (date in listOf("1900-01-01", "2100-12-31")) {
+            val decoded = EventJson.decodeFromString(Event.serializer(), json.replace("2026-10-05", date)) as RecurringRuleSet
+            assertEquals(LocalDate.parse(date), decoded.rule.firstDue)
+        }
+    }
+
     @Test
     fun `transaction added round trips through json`() {
         val event: Event = TransactionAdded(
