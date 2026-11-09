@@ -50,8 +50,9 @@ class FirestoreTransport @Inject constructor(
     private fun checkUser(uid: String) { check(services.auth.currentUser?.uid == uid) { "Google account changed" } }
 
     /**
-     * Uploads [history] as a version 2 stream in [CHUNK_BYTES] chunks, resuming after interruption. The source is read
-     * twice, once for the manifest and once for upload, and both passes must produce the same bytes.
+     * Uploads [history] as a [HISTORY_VERSION] stream in [CHUNK_BYTES] chunks, resuming after interruption in the version
+     * the dataset was started with. The source is read twice, once for the manifest and once for upload, and both passes
+     * must produce the same bytes.
      */
     suspend fun initialize(uid: String, fid: String, did: String, history: HistorySource, restoreToken: String = "") {
         checkUser(uid)
@@ -64,7 +65,7 @@ class FirestoreTransport @Inject constructor(
         try {
             if (legacy != null) legacy.outputStream().buffered().use { HistoryCodec.write(history, it) }
             initializeStream(uid, fid, did, restoreToken, version) {
-                if (legacy == null) historyPieces(history) else filePieces(legacy)
+                if (legacy == null) historyPieces(history, version.toInt()) else filePieces(legacy)
             }
         } finally { legacy?.delete() }
     }
@@ -397,7 +398,8 @@ class FirestoreTransport @Inject constructor(
         const val MAX_DAILY_OPERATIONS = 200
         const val MAX_DAILY_BYTES = 8L * 1024 * 1024
         const val REFERENCE_COST = 32L
-        const val HISTORY_VERSION = 2L
+        // Matches HistoryStream.VERSION; datasets started at version 1 or 2 finish and stay readable at their version.
+        const val HISTORY_VERSION = 3L
         // Datasets written by version 1 apps were capped by the rules of that release.
         private const val MAX_LEGACY_CHUNKS = 128L
 
@@ -471,9 +473,9 @@ internal fun filePieces(file: File): Sequence<ByteArray> = sequence {
     }
 }
 
-internal fun historyPieces(source: HistorySource): Sequence<ByteArray> = sequence {
+internal fun historyPieces(source: HistorySource, version: Int = HistoryStream.VERSION): Sequence<ByteArray> = sequence {
     val buffer = ByteArrayOutputStream()
-    val writer = HistoryStream.Writer(buffer)
+    val writer = HistoryStream.Writer(buffer, version)
     yield(buffer.toByteArray())
     buffer.reset()
     for (record in source.records()) {

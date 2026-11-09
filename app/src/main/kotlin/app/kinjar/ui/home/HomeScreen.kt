@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,7 +21,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Handshake
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,12 +34,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -43,14 +51,16 @@ import app.kinjar.R
 import app.kinjar.ui.conflict.ConflictCheckFailed
 import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.data.RecentTx
-import app.kinjar.data.StarterCategories
+import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Currency
 import app.kinjar.domain.Money
+import app.kinjar.domain.Transaction
 import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.ui.formatTransactionDate
 import app.kinjar.ui.RateStatus
 import app.kinjar.ui.categoryDisplayName
+import app.kinjar.ui.categoryIcon
 import app.kinjar.ui.formatAmount
 import app.kinjar.ui.monthLocale
 import app.kinjar.ui.monthName
@@ -62,7 +72,6 @@ import app.kinjar.ui.theme.LocalColors
 import app.kinjar.ui.theme.OutlinedBox
 import app.kinjar.ui.theme.SectionStyle
 import app.kinjar.ui.theme.TitleStyle
-import app.kinjar.ui.theme.colorOf
 import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 import java.time.LocalDate
@@ -199,37 +208,55 @@ private fun MonthSection(s: HomeState, locale: Locale) {
             Text(stringResource(R.string.home_this_month), style = SectionStyle, color = c.text)
             Text(stringResource(R.string.home_month_range, month.lengthOfMonth(), monthName(month, locale)), style = LabelStyle, color = c.muted)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatCard(stringResource(R.string.home_income), s.summary.income, sign = true, c.green, Modifier.weight(1f), locale)
-            StatCard(stringResource(R.string.home_spent), s.summary.spent, sign = false, c.text, Modifier.weight(1f), locale)
-        }
-        val difference = s.summary.difference
-        OutlinedBox(Modifier.fillMaxWidth(), radius = 18, padding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.home_difference), style = LabelStyle, color = c.muted, modifier = Modifier.weight(1f))
-                AmountText(difference, sign = true, if (difference.isNegative) c.orange else c.green, locale)
-            }
-        }
+        MonthCard(s.summary.income, s.summary.spent, s.summary.difference, locale)
         if (s.summary.monthPartial) Text(stringResource(R.string.home_partial), style = CaptionStyle, color = c.orange)
     }
 }
 
 @Composable
-private fun StatCard(title: String, value: Money, sign: Boolean, color: Color, modifier: Modifier, locale: Locale) {
+private fun MonthCard(income: Money, spent: Money, difference: Money, locale: Locale) {
     val c = LocalColors.current
-    OutlinedBox(modifier, radius = 18, padding = PaddingValues(16.dp)) {
-        Text(title, style = LabelStyle, color = c.muted)
-        Spacer(Modifier.size(6.dp))
-        AmountText(value, sign, color, locale)
+    OutlinedBox(Modifier.fillMaxWidth(), radius = 18, padding = PaddingValues(16.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val stacked = LocalDensity.current.fontScale > 1.3f || maxWidth < 280.dp
+            val incomeStat = @Composable { m: Modifier -> MonthStat(stringResource(R.string.home_income), income, sign = true, c.green, m, locale) }
+            val spentStat = @Composable { m: Modifier -> MonthStat(stringResource(R.string.home_spent), spent, sign = false, c.red, m, locale) }
+            if (stacked) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    incomeStat(Modifier.fillMaxWidth())
+                    spentStat(Modifier.fillMaxWidth())
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    incomeStat(Modifier.weight(1f))
+                    spentStat(Modifier.weight(1f))
+                }
+            }
+        }
+        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = c.border)
+        val tone = when {
+            difference.isZero -> c.text
+            difference.isNegative -> c.red
+            else -> c.green
+        }
+        MonthStat(stringResource(R.string.home_difference), difference, sign = true, tone, Modifier.fillMaxWidth(), locale)
     }
 }
 
+/** Amount and currency share one wrapping Text so a large font or narrow screen breaks the line instead of clipping digits. */
 @Composable
-private fun AmountText(value: Money, sign: Boolean, color: Color, locale: Locale) {
+private fun MonthStat(title: String, value: Money, sign: Boolean, color: Color, modifier: Modifier, locale: Locale) {
     val c = LocalColors.current
-    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(formatAmount(value, sign = sign, locale = locale), style = mono(20, FontWeight.SemiBold), color = color, maxLines = 1)
-        Text(value.currency.name, style = sans(13), color = if (color == c.text) c.muted else color, modifier = Modifier.padding(bottom = 2.dp))
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = LabelStyle, color = c.muted)
+        Text(
+            buildAnnotatedString {
+                append(formatAmount(value, sign = sign, locale = locale))
+                append(' ')
+                withStyle(sans(13).toSpanStyle()) { append(value.currency.name) }
+            },
+            style = mono(20, FontWeight.SemiBold), color = color,
+        )
     }
 }
 
@@ -274,10 +301,18 @@ internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: Strin
         TransactionSource.RECURRING -> R.string.source_recurring
     }
     val account = listOfNotNull(accountNames[t.accountId], t.toAccountId?.let { accountNames[it] }).joinToString(" → ").ifBlank { null }
-    val signed = if (t.type == TransactionType.EXPENSE) -t.money else t.money
-    val accent = when (t.type) {
+    val locale = LocalLocale.current.platformLocale
+    val icon = when (t.type) {
+        TransactionType.TRANSFER -> Icons.Outlined.SwapHoriz
+        TransactionType.LOAN_RECEIPT -> Icons.Outlined.Handshake
+        TransactionType.INCOME -> categoryIcon(r.categoryIcon, t.categoryId, CategoryKind.INCOME)
+        TransactionType.EXPENSE -> categoryIcon(r.categoryIcon, t.categoryId, CategoryKind.EXPENSE)
+    }
+    val (iconTint, tile) = if (t.type == TransactionType.INCOME) c.green to c.green.copy(alpha = c.tintAlpha) else c.muted to c.surface2
+    val amountColor = when (t.type) {
         TransactionType.INCOME -> c.green
-        else -> StarterCategories.all.firstOrNull { it.id == t.categoryId }?.let { colorOf(it.color) } ?: c.muted
+        TransactionType.EXPENSE -> c.red
+        else -> c.text
     }
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp)
@@ -286,17 +321,29 @@ internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: Strin
             .then(if (held) Modifier.padding(10.dp) else Modifier),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(40.dp).background(accent.copy(alpha = c.tintAlpha), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-            Text(title.take(1).uppercase(), style = sans(15, FontWeight.SemiBold), color = accent)
+        Box(Modifier.size(40.dp).background(tile, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = sans(15, FontWeight.Medium), color = c.text, maxLines = 1)
             Text(listOfNotNull(category, account, who.ifBlank { null }, stringResource(source)).joinToString(" · "), style = LabelStyle, color = c.muted, maxLines = 1)
-            if (held) Text(stringResource(R.string.conflict_flag), style = LabelStyle, color = c.red, maxLines = 1)
+            if (held) Text(stringResource(R.string.conflict_flag), style = sans(13, FontWeight.SemiBold), color = c.red, maxLines = 1)
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("${formatAmount(signed, sign = t.type != TransactionType.TRANSFER, locale = LocalLocale.current.platformLocale)} ${t.money.currency}", style = mono(15), color = if (t.type == TransactionType.INCOME) c.green else c.text)
-            Text(formatTransactionDate(t.date, today, stringResource(R.string.home_today), LocalLocale.current.platformLocale), style = CaptionStyle, color = c.muted)
+            val (sent, received) = recentAmounts(t, locale)
+            Text(sent, style = mono(15), color = amountColor)
+            received?.let { Text(it, style = mono(13), color = c.muted) }
+            Text(formatTransactionDate(t.date, today, stringResource(R.string.home_today), locale), style = CaptionStyle, color = c.muted)
         }
     }
+}
+
+/** Sent amount line, plus the destination amount for a transfer that changed currency. */
+internal fun recentAmounts(t: Transaction, locale: Locale): Pair<String, String?> {
+    val signed = if (t.type == TransactionType.EXPENSE) -t.money else t.money
+    val sent = "${formatAmount(signed, sign = t.type != TransactionType.TRANSFER, locale = locale)} ${t.money.currency}"
+    val received = t.received
+        ?.takeIf { t.type == TransactionType.TRANSFER && it.currency != t.money.currency }
+        ?.let { "→ ${formatAmount(it, locale = locale)} ${it.currency}" }
+    return sent to received
 }

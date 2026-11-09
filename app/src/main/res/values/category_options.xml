@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="categories_expense">Expense categories</string>
+    <string name="categories_income">Income categories</string>
+    <string name="categories_income_empty">No income categories yet. Create one to sort salary, gifts and other money coming in.</string>
+    <string name="category_kind">Type</string>
+    <string name="category_kind_expense">Expense</string>
+    <string name="category_kind_income">Income</string>
+    <string name="category_kind_locked">The type can\'t be changed after the category is created.</string>
+    <string name="category_name_taken">Another category of this type already has this name.</string>
+    <string name="category_icon">Icon</string>
+
+    <string name="cat_income_salary">Salary</string>
+    <string name="cat_income_bonus">Bonus</string>
+    <string name="cat_income_freelance">Freelance</string>
+    <string name="cat_income_gifts">Gifts</string>
+    <string name="cat_income_interest">Interest</string>
+    <string name="cat_income_other">Other income</string>
+
+    <string name="category_color_olive">Olive</string>
+    <string name="category_color_brown">Brown</string>
+    <string name="category_color_forest">Forest green</string>
+    <string name="category_color_cyan">Cyan</string>
+    <string name="category_color_magenta">Magenta</string>
+    <string name="category_color_amber">Amber</string>
+    <string name="category_color_plum">Plum</string>
+    <string name="category_color_lavender">Lavender</string>
+
+    <string name="category_icon_cart">Shopping cart</string>
+    <string name="category_icon_receipt">Receipt</string>
+    <string name="category_icon_car">Car</string>
+    <string name="category_icon_restaurant">Restaurant</string>
+    <string name="category_icon_home">Home</string>
+    <string name="category_icon_child">Child</string>
+    <string name="category_icon_celebration">Celebration</string>
+    <string name="category_icon_health">Health</string>
+    <string name="category_icon_more">More</string>
+    <string name="category_icon_work">Work</string>
+    <string name="category_icon_star">Star</string>
+    <string name="category_icon_laptop">Laptop</string>
+    <string name="category_icon_gift">Gift</string>
+    <string name="category_icon_percent">Percent</string>
+    <string name="category_icon_payments">Payment</string>
+    <string name="category_icon_category">Shapes</string>
+    <string name="category_icon_savings">Savings</string>
+    <string name="category_icon_bank">Bank</string>
+    <string name="category_icon_shopping">Shopping bag</string>
+    <string name="category_icon_clothes">Clothes</string>
+    <string name="category_icon_utilities">Utilities</string>
+    <string name="category_icon_fuel">Fuel</string>
+    <string name="category_icon_phone">Phone</string>
+    <string name="category_icon_coffee">Coffee</string>
+    <string name="category_icon_movie">Movies</string>
+    <string name="category_icon_fitness">Fitness</string>
+    <string name="category_icon_school">School</string>
+    <string name="category_icon_pets">Pets</string>
+    <string name="category_icon_flight">Travel</string>
+</resources>

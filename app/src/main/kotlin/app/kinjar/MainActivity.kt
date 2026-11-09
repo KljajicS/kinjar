@@ -308,9 +308,11 @@ fun KinjarRoot(root: RootViewModel) {
             composable(Routes.NEW_RECURRING) { EditRecurringScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.EDIT_RECURRING) { EditRecurringScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.CATEGORIES) {
-                CategoriesScreen(onBack = { nav.popBackStack() }, onNew = { nav.navigate(Routes.NEW_CATEGORY) }, onEdit = { nav.navigate(Routes.editCategory(it)) })
+                CategoriesScreen(onBack = { nav.popBackStack() }, onNew = { nav.navigate(Routes.newCategory(it)) }, onEdit = { nav.navigate(Routes.editCategory(it)) })
             }
-            composable(Routes.NEW_CATEGORY) { EditCategoryScreen(onClose = { nav.popBackStack() }) }
+            composable(Routes.NEW_CATEGORY, arguments = listOf(navArgument("kind") { defaultValue = "EXPENSE" })) {
+                EditCategoryScreen(onClose = { nav.popBackStack() })
+            }
             composable(Routes.EDIT_CATEGORY) { EditCategoryScreen(onClose = { nav.popBackStack() }) }
             composable(Tab.ACCOUNTS.route) {
                 AccountsScreen(onNew = { nav.navigate(Routes.NEW_ACCOUNT) }, onEdit = { nav.navigate(Routes.editAccount(it)) },

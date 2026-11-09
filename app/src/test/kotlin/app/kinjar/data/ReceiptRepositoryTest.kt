@@ -218,8 +218,11 @@ class ReceiptRepositoryTest {
         javaClass.getResource("/schema-v4.sql")!!.readText().split(';').filter { it.isNotBlank() }
             .forEach { driver.execute(null, it, 0) }
         val old = KinjarDb(driver)
-        seedLegacyEvents(old, listOf(TransactionAdded(tx().copy(id = "old", source = TransactionSource.MANUAL))), clock.now())
-        KinjarDb.Schema.migrate(driver, 4, 5)
+        seedLegacyEventRows(old, listOf(TransactionAdded(tx().copy(id = "old", source = TransactionSource.MANUAL))), clock.now())
+        driver.execute(null, "INSERT INTO tx(id, type, amount, currency, account_id, to_account_id, category_id, date, note, merchant, " +
+            "paid_by, source, edited_at) VALUES ('old', 'EXPENSE', '120.00', 'RSD', 'cash', NULL, 'cat-groceries', '2026-10-15', '', " +
+            "'Shop', 'member', 'MANUAL', 1)", 0)
+        KinjarDb.Schema.migrate(driver, 4, KinjarDb.Schema.version)
         assertEquals("120.00", old.txQueries.all().executeAsList().single().amount)
         assertEquals(1L, old.eventQueries.count().executeAsOne())
         assertNull(old.receiptQueries.byId(receipt.id).executeAsOneOrNull())

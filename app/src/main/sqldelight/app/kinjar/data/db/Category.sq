@@ -2,14 +2,20 @@ CREATE TABLE category (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
     color TEXT NOT NULL,
-    archived INTEGER NOT NULL DEFAULT 0
+    archived INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'EXPENSE',
+    icon TEXT
 );
 
 insertIgnore:
-INSERT OR IGNORE INTO category(id, name, color, archived) VALUES (?, ?, ?, ?);
+INSERT OR IGNORE INTO category(id, name, color, archived, kind, icon) VALUES (?, ?, ?, ?, ?, ?);
 
+-- Kind never changes; an update without an icon comes from an older app and keeps the stored one.
 update:
-UPDATE category SET name = ?, color = ? WHERE id = ?;
+UPDATE category SET name = ?, color = ?, icon = coalesce(?, icon) WHERE id = ?;
+
+byId:
+SELECT * FROM category WHERE id = ?;
 
 active:
 SELECT * FROM category WHERE archived = 0 ORDER BY name;

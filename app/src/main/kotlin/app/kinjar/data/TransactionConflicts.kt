@@ -2,21 +2,16 @@ package app.kinjar.data
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.kinjar.data.db.KinjarDb
-import app.kinjar.domain.Currency
 import app.kinjar.domain.HeldChanges
-import app.kinjar.domain.Money
 import app.kinjar.domain.OperationCodec
 import app.kinjar.domain.SyncOperation
 import app.kinjar.domain.Transaction
-import app.kinjar.domain.TransactionSource
-import app.kinjar.domain.TransactionType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.time.Instant
-import java.time.LocalDate
 import javax.inject.Inject
 
 /** [author] is the member who made the change, null when this phone cannot name them. */
@@ -78,8 +73,5 @@ class TransactionConflicts @Inject constructor(private val db: KinjarDb, private
         }, reasons)
     }
 
-    private fun transaction(id: String): Transaction? = db.txQueries.all().executeAsList().firstOrNull { it.id == id }?.run {
-        Transaction(id, TransactionType.valueOf(type), Money.of(amount, Currency.valueOf(currency)), account_id, to_account_id,
-            category_id, LocalDate.parse(date), note, merchant, paid_by, TransactionSource.valueOf(source))
-    }
+    private fun transaction(id: String): Transaction? = db.txQueries.all().executeAsList().firstOrNull { it.id == id }?.toDomain()
 }

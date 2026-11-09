@@ -1,0 +1,13 @@
+<resources>
+    <string name="transfer_received">Received (%1$s)</string>
+    <string name="transfer_sent">Sent</string>
+    <string name="transfer_received_label">Received</string>
+    <string name="transfer_received_nbs">Suggested from the NBS rate of %1$s</string>
+    <string name="transfer_received_override">Suggested from your saved exchange rate</string>
+    <string name="transfer_received_manual">Entered by you</string>
+    <string name="transfer_received_saved">Amount saved with this transfer</string>
+    <string name="transfer_received_missing">No exchange rate yet. Enter the amount that arrived.</string>
+    <string name="transfer_received_invalid">Enter a positive amount with at most 2 decimals</string>
+    <string name="transfer_received_reset">The currencies changed, so the amount you entered was replaced</string>
+    <string name="transfer_received_use_suggested">Use suggested amount</string>
+</resources>

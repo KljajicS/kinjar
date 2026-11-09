@@ -586,6 +586,16 @@ test('version 2 manifests keep technical bounds, accept wide chunk ids and refus
   activate.update(doc(d, 'families/family'), { status: 'ACTIVE', action: 'activate' });
   await assertFails(activate.commit());
 });
+test('bootstraps accept history versions 2 and 3 only', async () => {
+  await seed(undefined, { status: 'INITIALIZING' });
+  await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
+  const stateRef = doc(db('owner'), 'families/family/datasets/current');
+  await assertFails(setDoc(stateRef, { ...initialState(), historyVersion: 4 }));
+  await assertFails(setDoc(stateRef, { ...initialState(), historyVersion: '3' }));
+  await assertSucceeds(setDoc(stateRef, { ...initialState(), historyVersion: 3 }));
+  await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
+  await assertSucceeds(setDoc(stateRef, initialState()));
+});
 test('a version 1 bootstrap started before the update can finish without changing its manifest', async () => {
   await seed(undefined, { status: 'INITIALIZING' });
   const { historyVersion, ...legacyManifest } = initialState();

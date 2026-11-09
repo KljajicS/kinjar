@@ -52,7 +52,8 @@ class TransactionConflictViewModel @Inject constructor(
     val held: StateFlow<HeldRows> = attempts.flatMapLatest {
         combine(conflicts.held, repo.allCategories, repo.members) { held, categories, members ->
             HeldRows(held.ids, held.unsaved.map { t ->
-                RecentTx(t, categories.firstOrNull { it.id == t.categoryId }?.name, members.firstOrNull { it.id == t.paidBy }?.displayName)
+                val category = categories.firstOrNull { it.id == t.categoryId }
+                RecentTx(t, category?.name, members.firstOrNull { it.id == t.paidBy }?.displayName, category?.icon)
             })
         }.catch { Diagnostics.report(DiagnosticOperation.CONFLICT_READ, it); emit(held.value.copy(failed = true)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HeldRows())

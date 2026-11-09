@@ -72,9 +72,9 @@ class Projector(private val db: KinjarDb) {
                     .forEachIndexed { i, id -> db.accountQueries.setPosition(i.toLong(), id) }
             }
             is CategoryCreated -> db.categoryQueries.insertIgnore(
-                e.category.id, e.category.name, e.category.color, if (e.category.archived) 1 else 0,
+                e.category.id, e.category.name, e.category.color, if (e.category.archived) 1 else 0, e.category.kind.name, e.category.icon,
             )
-            is CategoryUpdated -> db.categoryQueries.update(e.category.name, e.category.color, e.category.id)
+            is CategoryUpdated -> db.categoryQueries.update(e.category.name, e.category.color, e.category.icon, e.category.id)
             is CategoryArchived -> db.categoryQueries.archive(e.categoryId)
             is TransactionAdded -> with(e.transaction) {
                 e.receipt?.let { receipt ->
@@ -90,13 +90,13 @@ class Projector(private val db: KinjarDb) {
                 }
                 db.txQueries.insertIgnore(
                     id, type.name, money.amount.toPlainString(), money.currency.name, accountId, toAccountId, categoryId,
-                    date.toString(), note, merchant, paidBy, source.name, at,
+                    date.toString(), note, merchant, paidBy, source.name, at, received?.amount?.toPlainString(), received?.currency?.name,
                 )
             }
             is TransactionEdited -> with(e.transaction) {
                 db.txQueries.update(
                     type.name, money.amount.toPlainString(), money.currency.name, accountId, toAccountId, categoryId,
-                    date.toString(), note, merchant, paidBy, source.name, at, id,
+                    date.toString(), note, merchant, paidBy, source.name, at, received?.amount?.toPlainString(), received?.currency?.name, id,
                 )
             }
             is TransactionDeleted -> {
@@ -152,7 +152,7 @@ class Projector(private val db: KinjarDb) {
 
     companion object {
         /** Bump when a projector change must reach existing installs; the app rebuilds once on mismatch. */
-        const val VERSION = 7
+        const val VERSION = 8
     }
 }
 

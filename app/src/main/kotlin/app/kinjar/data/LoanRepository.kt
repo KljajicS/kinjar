@@ -47,10 +47,7 @@ class LoanRepository(private val db: KinjarDb, private val store: EventStore, pr
         db.loanQueries.all().executeAsList().map { EventJson.decodeFromString<Loan>(it.payload).copy(archived = it.archived != 0L) },
         db.loanPaymentQueries.all().executeAsList().mapNotNull { it.payload?.let { json -> EventJson.decodeFromString<LoanPayment>(json) } },
         db.loanAdjustmentQueries.all().executeAsList().map { EventJson.decodeFromString<LoanAdjustment>(it.payload) },
-        db.txQueries.all().executeAsList().map { row ->
-            Transaction(row.id, TransactionType.valueOf(row.type), Money.of(row.amount, Currency.valueOf(row.currency)), row.account_id,
-                row.to_account_id, row.category_id, LocalDate.parse(row.date), row.note, row.merchant, row.paid_by, TransactionSource.valueOf(row.source))
-        },
+        db.txQueries.all().executeAsList().map { it.toDomain() },
         db.loanReceiptQueries.all().executeAsList().associate { it.loan_id to it.tx_id },
     )
 
@@ -70,7 +67,7 @@ class LoanRepository(private val db: KinjarDb, private val store: EventStore, pr
         val account = db.accountQueries.byId(tx.accountId).executeAsOneOrNull()
         require(account != null && account.archived == 0L && account.currency == tx.money.currency.name) { "Account no longer available" }
         require(tx.date <= clock.today()) { "Payment has not happened yet" }
-        if (tx.categoryId != null) require(db.categoryQueries.active().executeAsList().any { it.id == tx.categoryId })
+        db.requireCategoryFor(tx)
     }
 
     /** True when an identical create already landed, so a retry appends nothing; different content under the same IDs is rejected. */

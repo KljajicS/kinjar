@@ -75,7 +75,7 @@ object HomeCalculator {
                 TransactionType.EXPENSE -> add(t.accountId, -t.money)
                 TransactionType.TRANSFER -> {
                     add(t.accountId, -t.money)
-                    add(t.toAccountId!!, t.money)
+                    add(t.toAccountId!!, t.received ?: t.money)
                 }
             }
         }

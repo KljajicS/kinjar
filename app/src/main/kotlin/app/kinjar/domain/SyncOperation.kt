@@ -60,11 +60,21 @@ data class SyncOperation(
     }
 }
 
-// Older readers must request an update before replaying a receipt restoration they cannot interpret.
+// Older readers must request an update before replaying data they cannot interpret: version 3 receipt restorations,
+// version 4 income categories, category icons and cross-currency transfer amounts.
 private fun requiredVersion(parents: Set<String>, rejected: Set<String>, events: List<OperationEvent>): Int = when {
+    events.any { it.event.needsVersion4() } -> 4
     events.any { (it.event as? TransactionAdded)?.receiptDeletionId != null } -> 3
     parents.size > 1_000 || rejected.size > 1_000 -> 2
     else -> 1
+}
+
+private fun Event.needsVersion4(): Boolean = when (this) {
+    is CategoryCreated -> category.kind != CategoryKind.EXPENSE || category.icon != null
+    is CategoryUpdated -> category.kind != CategoryKind.EXPENSE || category.icon != null
+    is TransactionAdded -> transaction.received != null
+    is TransactionEdited -> transaction.received != null
+    else -> false
 }
 
 // Per-command validation budget, independent of the number of records in a history stream.
@@ -161,6 +171,7 @@ class UnsupportedSyncVersion : IllegalArgumentException("Unsupported sync versio
 
 object OperationCodec {
     const val MAX_BYTES = 512 * 1024
+    const val MAX_VERSION = 4
     private val json = Json { encodeDefaults = true; classDiscriminator = "type" }
 
     fun encode(operation: SyncOperation): ByteArray = when (operation.version) {
@@ -180,7 +191,7 @@ object OperationCodec {
         val root = json.parseToJsonElement(text).jsonObject
         val version = root["version"]?.jsonPrimitive?.intOrNull
         require(version != null && version > 0) { "Invalid sync version" }
-        if (version > 3) throw UnsupportedSyncVersion()
+        if (version > MAX_VERSION) throw UnsupportedSyncVersion()
         if (version == 1) return json.decodeFromString<SyncOperation>(text).also {
             require(it.parents.size.toLong() + it.rejected.size <= maxReferences) { "Too many references" }
         }

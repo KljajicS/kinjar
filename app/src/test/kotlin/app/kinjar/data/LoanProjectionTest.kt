@@ -42,7 +42,19 @@ class LoanProjectionTest {
             TransactionAdded(income.copy(id = "expense", type = TransactionType.EXPENSE, money = rsd("250"))),
             GoalSet(Goal("g", "Reserve", rsd("1000"))),
             RecurringRuleSet(RecurringRule("r", "Bill", rsd("100"), "a", "c", Cadence.MONTHLY, clock.today())))
-        seedLegacyEvents(oldDb, events, clock.now())
+        // Rows as the schema 7 projector wrote them; the current projector targets the current schema.
+        seedLegacyEventRows(oldDb, events, clock.now())
+        val today = clock.today()
+        listOf(
+            "INSERT INTO account(id, name, currency, kind, archived) VALUES ('a', 'Cash', 'RSD', 'SPENDING', 0)",
+            "INSERT INTO tx(id, type, amount, currency, account_id, to_account_id, category_id, date, note, merchant, paid_by, source, edited_at) " +
+                "VALUES ('income', 'INCOME', '1000.00', 'RSD', 'a', NULL, NULL, '$today', '', '', 'm', 'MANUAL', 1)",
+            "INSERT INTO tx(id, type, amount, currency, account_id, to_account_id, category_id, date, note, merchant, paid_by, source, edited_at) " +
+                "VALUES ('expense', 'EXPENSE', '250.00', 'RSD', 'a', NULL, NULL, '$today', '', '', 'm', 'MANUAL', 2)",
+            "INSERT INTO goal(id, name, target, monthly, currency) VALUES ('g', 'Reserve', '1000.00', '0.00', 'RSD')",
+            "INSERT INTO recurring_rule(id, name, amount, currency, account_id, category_id, cadence, first_due) " +
+                "VALUES ('r', 'Bill', '100.00', 'RSD', 'a', 'c', 'MONTHLY', '$today')",
+        ).forEach { driver.execute(null, it, 0) }
         KinjarDb.Schema.migrate(driver, 7, KinjarDb.Schema.version)
         val db = KinjarDb(driver)
         assertEquals("Cash", db.accountQueries.byId("a").executeAsOne().name)

@@ -11,24 +11,26 @@ CREATE TABLE tx (
     merchant TEXT NOT NULL,
     paid_by TEXT NOT NULL,
     source TEXT NOT NULL,
-    edited_at INTEGER NOT NULL
+    edited_at INTEGER NOT NULL,
+    received_amount TEXT,
+    received_currency TEXT
 );
 
 CREATE INDEX tx_date ON tx(date DESC);
 
 insertIgnore:
-INSERT OR IGNORE INTO tx(id, type, amount, currency, account_id, to_account_id, category_id, date, note, merchant, paid_by, source, edited_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR IGNORE INTO tx(id, type, amount, currency, account_id, to_account_id, category_id, date, note, merchant, paid_by, source, edited_at, received_amount, received_currency)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 update:
-UPDATE tx SET type = ?, amount = ?, currency = ?, account_id = ?, to_account_id = ?, category_id = ?, date = ?, note = ?, merchant = ?, paid_by = ?, source = ?, edited_at = ?
+UPDATE tx SET type = ?, amount = ?, currency = ?, account_id = ?, to_account_id = ?, category_id = ?, date = ?, note = ?, merchant = ?, paid_by = ?, source = ?, edited_at = ?, received_amount = ?, received_currency = ?
 WHERE id = ?;
 
 delete:
 DELETE FROM tx WHERE id = ?;
 
 recent:
-SELECT tx.*, category.name AS category_name, member.display_name AS paid_by_name
+SELECT tx.*, category.name AS category_name, member.display_name AS paid_by_name, category.icon AS category_icon
 FROM tx
 LEFT JOIN category ON category.id = tx.category_id
 LEFT JOIN member ON member.id = tx.paid_by

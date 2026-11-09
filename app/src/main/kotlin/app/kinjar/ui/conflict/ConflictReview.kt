@@ -126,7 +126,9 @@ private fun VersionCard(label: String, t: Transaction?, state: ReviewState, note
         if (t == null) {
             Text(stringResource(R.string.conflict_no_transaction), style = BodyStyle, color = c.text)
         } else {
-            Text("${formatAmount(t.money, locale = locale)} ${t.money.currency}", style = mono(18, FontWeight.SemiBold), color = c.text)
+            // Versions may differ only in what arrived, so both sides of a cross-currency transfer are shown.
+            val received = t.received?.let { " → ${formatAmount(it, locale = locale)} ${it.currency}" }.orEmpty()
+            Text("${formatAmount(t.money, locale = locale)} ${t.money.currency}$received", style = mono(18, FontWeight.SemiBold), color = c.text)
             val type = stringResource(when (t.type) {
                 TransactionType.EXPENSE -> R.string.add_expense
                 TransactionType.INCOME -> R.string.add_income

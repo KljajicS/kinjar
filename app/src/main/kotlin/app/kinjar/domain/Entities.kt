@@ -1,5 +1,7 @@
 package app.kinjar.domain
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.descriptors.PrimitiveKind
@@ -13,6 +15,7 @@ import java.time.YearMonth
 enum class AccountKind { SPENDING, SAVINGS }
 enum class TransactionType { EXPENSE, INCOME, TRANSFER, LOAN_RECEIPT }
 enum class TransactionSource { MANUAL, RECEIPT, RECURRING }
+enum class CategoryKind { EXPENSE, INCOME }
 
 @Serializable
 data class Member(val id: String, val displayName: String, val deviceId: String)
@@ -26,9 +29,23 @@ data class Account(
     val archived: Boolean = false,
 )
 
+/** [kind] never changes after creation. New fields are omitted at their defaults so legacy events keep their exact bytes. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-data class Category(val id: String, val name: String, val color: String, val archived: Boolean = false)
+data class Category(
+    val id: String,
+    val name: String,
+    val color: String,
+    val archived: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val kind: CategoryKind = CategoryKind.EXPENSE,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val icon: String? = null,
+)
 
+/**
+ * [received] is what a transfer credits to its destination when the two accounts use different currencies; it is null
+ * otherwise, and then the destination receives [money].
+ */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class Transaction(
     val id: String,
@@ -42,9 +59,15 @@ data class Transaction(
     val merchant: String,
     val paidBy: String,
     val source: TransactionSource,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val received: Money? = null,
 ) {
     init {
         require(!money.isNegative && !money.isZero) { "Transaction amount must be positive" }
+        received?.let {
+            require(type == TransactionType.TRANSFER) { "Only transfers receive another amount" }
+            require(!it.isNegative && !it.isZero) { "Received amount must be positive" }
+            require(it.currency != money.currency) { "Same currency transfers receive the sent amount" }
+        }
         if (type == TransactionType.TRANSFER) {
             require(toAccountId != null && toAccountId != accountId) { "Transfer needs a different destination account" }
         } else {

@@ -23,9 +23,9 @@ Extracted from `screens.html` (the Claude Design export). Compose code in `app/s
 | primarySoft | #ECEEFE | rgba(140,150,255,0.18) | selected category background |
 | green | #1B7A57 | #4CC79A | income, synced dot |
 | orange | #A8520E | #F0A05A | over budget |
-| red | #B3261E | #FF8A80 | transaction conflict outline and label |
+| red | #B3261E | #FF8A80 | expense amounts, Spent, negative Difference, transaction conflict outline and label |
 
-Category colors (same in both themes): Groceries #3D4BD6, Bills #D06A1E, Transport #1A8A7B, Eating out #7B55C7, Household #6E747D, Kids #B8467F, Fun #A88412, Health #2A7FC0, Other #6E747D. Avatars use the color at 12% (light) or 18% (dark) alpha behind the letter.
+Category colors (same in both themes): Groceries #3D4BD6, Bills #D06A1E, Transport #1A8A7B, Eating out #7B55C7, Household #6E747D, Kids #B8467F, Fun #A88412, Health #2A7FC0, Other #6E747D. Existing category colors stay unchanged. The category editor offers 20 distinct swatches and selectable icons; transaction tiles use the income or expense treatment below.
 
 ## Layout
 
@@ -36,10 +36,10 @@ Category colors (same in both themes): Groceries #3D4BD6, Bills #D06A1E, Transpo
 ## Components
 
 - Safe to spend card: radius 24, padding 22 x 20, background surface2, inner gap 14. Label 13 / 500 / uppercase / 0.06em muted. Amount mono 40 / 600 / -0.03em with currency 16 / 500 muted on the baseline. Hint line 14 muted. Progress track 10 high radius 5, pace marker 2 x 18.
-- Stat cards (Income, Spent): two columns, gap 12, radius 18, 1px border, padding 16, label 13 muted, value mono 20 / 600. Income value green.
+- Month card: one card, radius 18, 1px border, padding 16. Income (green) and Spent (red) in two columns, gap 12, stacked when font scale is above 1.3 or the card is narrower than 280. Divider (border color, 14 above and below), then full-width Difference: green when positive, red when negative, text color when zero. Labels 13 muted, values mono 20 / 600 with the currency code 13 in the same text, so it wraps to a new line instead of truncating digits. The partial-rate warning stays below the card.
 - Savings card: radius 18, border, padding 18 x 16, gap 12. Total mono 24 / 600 with RSD 14 muted. Per-currency chips: padding 6 x 10, radius 10, surface2, mono 13.
 - Section header: 17 / 600. Link text 14 primary.
-- Recent row: min height 56, gap 12. Avatar 40 x 40 radius 12, letter 600 in the category color on its 12% tint. Title 15 / 500, subtitle 13 muted. Amount mono 15 / 500 right aligned, date 12 muted beneath.
+- Recent row (Home and Activity): min height 56, gap 12. Icon tile 40 x 40 radius 12 with a 22 decorative category icon: income green on the green tint, expense muted on surface2. Transfers (swap icon) and loan receipts (handshake icon) use the muted on surface2 style. Title 15 / 500, subtitle 13 muted. Amount mono 15 / 500 right aligned: expense red, income green, transfers and loan receipts text color. A cross-currency transfer adds the received amount (mono 13 muted, prefixed with an arrow) under the sent amount. Date 12 muted beneath. A held conflict adds a 2px red outline and a 13 / 600 red "Needs review" line.
 - Bottom nav: height 84, padding 0 12 12, 5 equal columns, top border, labels 11 / 500, active item primary. Scan item is a 56 circle filled primary, lifted 24 up.
 - Round icon button (close, add): 44 circle, surface2.
 - Segmented control (Expense / Income / Transfer): width 270, surface2, radius 14, padding 4; items height 36, radius 10, selected one bg (white in light, surface2 lifted in dark) 14 / 500, others muted.

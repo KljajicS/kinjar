@@ -30,7 +30,7 @@ class BudgetRepositoryTest {
     fun `setUp creates member, starter categories and accounts`() = runTest {
         repo.setUp("Siniša", listOf(Account("cash", "Cash", Currency.RSD)))
         assertNotNull(repo.currentMember())
-        assertEquals(StarterCategories.all.size, repo.categories.first().size)
+        assertEquals(StarterCategories.all.size + StarterCategories.income.size, repo.categories.first().size)
         assertEquals("Cash", repo.accounts.first().single().name)
     }
 

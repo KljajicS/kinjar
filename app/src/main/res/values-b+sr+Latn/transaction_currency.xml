@@ -1,0 +1,13 @@
+<resources>
+    <string name="transfer_received">Primljeno (%1$s)</string>
+    <string name="transfer_sent">Poslato</string>
+    <string name="transfer_received_label">Primljeno</string>
+    <string name="transfer_received_nbs">Predlog po kursu NBS od %1$s</string>
+    <string name="transfer_received_override">Predlog po vašem sačuvanom kursu</string>
+    <string name="transfer_received_manual">Uneli ste ručno</string>
+    <string name="transfer_received_saved">Iznos sačuvan uz ovaj prenos</string>
+    <string name="transfer_received_missing">Kurs još nije dostupan. Unesite iznos koji je stigao.</string>
+    <string name="transfer_received_invalid">Unesite pozitivan iznos sa najviše 2 decimale</string>
+    <string name="transfer_received_reset">Valute su promenjene, pa je vaš uneti iznos zamenjen</string>
+    <string name="transfer_received_use_suggested">Koristi predloženi iznos</string>
+</resources>

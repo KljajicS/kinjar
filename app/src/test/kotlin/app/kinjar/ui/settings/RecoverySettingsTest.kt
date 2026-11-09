@@ -108,7 +108,7 @@ class RecoverySettingsTest {
         restore("category")
         list.retry()
         edit.retryLoad()
-        assertTrue(list.categories.filterNotNull().first().isNotEmpty())
+        assertTrue(list.categories.filterNotNull().first().expense.isNotEmpty())
         val s = edit.state.first { it.loaded }
         assertEquals("Bills", s.name)
         assertFalse(s.loadFailed)
@@ -177,5 +177,8 @@ class RecoverySettingsTest {
     }
 
     @Test
-    fun `every palette color has a spoken name`() = assertEquals(CategoryPalette.size, PaletteNames.toSet().size)
+    fun `every palette color has a spoken name`() {
+        assertEquals(CategoryPalette.size, PaletteNames.size)
+        assertEquals(CategoryPalette.size, PaletteNames.toSet().size)
+    }
 }

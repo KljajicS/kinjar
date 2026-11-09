@@ -28,7 +28,7 @@ class HardeningTest {
         driver.execute(null, "DROP TRIGGER fail_category", 0)
         repo.setUp("S", listOf(account))
         assertEquals(1, db.memberQueries.all().executeAsList().size)
-        assertEquals(StarterCategories.all.size, db.categoryQueries.active().executeAsList().size)
+        assertEquals(StarterCategories.all.size + StarterCategories.income.size, db.categoryQueries.active().executeAsList().size)
         assertEquals(1, db.accountQueries.active().executeAsList().size)
         assertTrue(runCatching { repo.setUp("Again", listOf(account)) }.isFailure)
         assertEquals(1, db.memberQueries.all().executeAsList().size)

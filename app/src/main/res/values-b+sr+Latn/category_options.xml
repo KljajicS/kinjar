@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="categories_expense">Kategorije troškova</string>
+    <string name="categories_income">Kategorije prihoda</string>
+    <string name="categories_income_empty">Još nema kategorija prihoda. Napravi jednu da razvrstaš platu, poklone i drugi novac koji stiže.</string>
+    <string name="category_kind">Tip</string>
+    <string name="category_kind_expense">Trošak</string>
+    <string name="category_kind_income">Prihod</string>
+    <string name="category_kind_locked">Tip ne može da se promeni nakon što je kategorija napravljena.</string>
+    <string name="category_name_taken">Druga kategorija ovog tipa već ima ovaj naziv.</string>
+    <string name="category_icon">Ikonica</string>
+
+    <string name="cat_income_salary">Plata</string>
+    <string name="cat_income_bonus">Bonus</string>
+    <string name="cat_income_freelance">Honorarni rad</string>
+    <string name="cat_income_gifts">Pokloni</string>
+    <string name="cat_income_interest">Kamata</string>
+    <string name="cat_income_other">Ostali prihodi</string>
+
+    <string name="category_color_olive">Maslinasta</string>
+    <string name="category_color_brown">Braon</string>
+    <string name="category_color_forest">Tamnozelena</string>
+    <string name="category_color_cyan">Cijan</string>
+    <string name="category_color_magenta">Magenta</string>
+    <string name="category_color_amber">Ćilibar</string>
+    <string name="category_color_plum">Šljiva</string>
+    <string name="category_color_lavender">Lavanda</string>
+
+    <string name="category_icon_cart">Korpa</string>
+    <string name="category_icon_receipt">Račun</string>
+    <string name="category_icon_car">Automobil</string>
+    <string name="category_icon_restaurant">Restoran</string>
+    <string name="category_icon_home">Kuća</string>
+    <string name="category_icon_child">Dete</string>
+    <string name="category_icon_celebration">Proslava</string>
+    <string name="category_icon_health">Zdravlje</string>
+    <string name="category_icon_more">Više</string>
+    <string name="category_icon_work">Posao</string>
+    <string name="category_icon_star">Zvezda</string>
+    <string name="category_icon_laptop">Laptop</string>
+    <string name="category_icon_gift">Poklon</string>
+    <string name="category_icon_percent">Procenat</string>
+    <string name="category_icon_payments">Uplata</string>
+    <string name="category_icon_category">Oblici</string>
+    <string name="category_icon_savings">Štednja</string>
+    <string name="category_icon_bank">Banka</string>
+    <string name="category_icon_shopping">Kesa za kupovinu</string>
+    <string name="category_icon_clothes">Odeća</string>
+    <string name="category_icon_utilities">Režije</string>
+    <string name="category_icon_fuel">Gorivo</string>
+    <string name="category_icon_phone">Telefon</string>
+    <string name="category_icon_coffee">Kafa</string>
+    <string name="category_icon_movie">Filmovi</string>
+    <string name="category_icon_fitness">Fitnes</string>
+    <string name="category_icon_school">Škola</string>
+    <string name="category_icon_pets">Ljubimci</string>
+    <string name="category_icon_flight">Putovanja</string>
+</resources>

@@ -144,7 +144,8 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
     /** Replay inputs without payload weight: collisions only inspect the events of single-event operations. */
     fun operationViews(): List<SyncOperation> = db.syncOperationQueries.all { _, _, _, payload ->
         OperationCodec.decode(payload).let {
-            it.copy(familyId = "history", datasetId = "history", events = if (it.version == 3) it.events else it.events.take(2))
+            // Versions 3 and up depend on their events, so trimming them could change the version a copy requires.
+            it.copy(familyId = "history", datasetId = "history", events = if (it.version >= 3) it.events else it.events.take(2))
         }
     }.executeAsList()
 

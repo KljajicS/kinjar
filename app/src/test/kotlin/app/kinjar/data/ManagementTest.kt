@@ -26,7 +26,7 @@ class ManagementTest {
         assertEquals("Dog", repo.categories.first().first { it.id == pets.id }.name)
         repo.archiveCategory("cat-fun")
         assertNull(repo.categories.first().firstOrNull { it.id == "cat-fun" })
-        assertEquals(StarterCategories.all.size, repo.categories.first().size)
+        assertEquals(StarterCategories.all.size + StarterCategories.income.size, repo.categories.first().size)
     }
 
     @Test
@@ -39,7 +39,7 @@ class ManagementTest {
         assertEquals(listOf("eur"), repo.accounts.first().map { it.id })
         assertEquals(listOf("cash", "eur"), repo.allAccounts.first().map { it.id }.sorted())
         repo.archiveCategory("cat-fun")
-        assertEquals(StarterCategories.all.size, repo.allCategories.first().size)
+        assertEquals(StarterCategories.all.size + StarterCategories.income.size, repo.allCategories.first().size)
         val m = repo.currentMember()!!
         repo.renameMember(m.id, "Siniša")
         assertEquals("Siniša", repo.currentMember()!!.displayName)

@@ -68,7 +68,8 @@ class ExchangeRatesViewModelTest {
     @Test fun `all four tabs react and every emission uses one rate including historical months`() = runTest(dispatcher) {
         repo.setUp("Family", listOf(Account("spend", "Spending", Currency.EUR, AccountKind.SPENDING), Account("save", "Savings", Currency.EUR, AccountKind.SAVINGS)))
         suspend fun add(id: String, type: TransactionType, amount: String, account: String, previous: Boolean = false) {
-            repo.add(Transaction(id, type, Money.of(amount, Currency.EUR), account, null, "cat-groceries",
+            val category = if (type == TransactionType.INCOME) "cat-income-salary" else "cat-groceries"
+            repo.add(Transaction(id, type, Money.of(amount, Currency.EUR), account, null, category,
                 if (previous) clock.today().minusMonths(1) else clock.today(), "", "", "member", TransactionSource.MANUAL))
         }
         add("income", TransactionType.INCOME, "1000", "spend")

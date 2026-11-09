@@ -72,7 +72,7 @@
     <string name="loan_save_payment">Sačuvaj uplatu</string>
     <string name="loan_record_hint">Evidentira već izvršenu uplatu. Ne pokreće bankovni prenos.</string>
     <string name="loan_received">Primljen kredit</string>
-    <string name="app_name">kinjar</string>
+    <string name="app_name">KinJar</string>
     <string name="tab_home">Početna</string>
     <string name="tab_insights">Uvidi</string>
     <string name="tab_scan">Skeniraj</string>
@@ -297,10 +297,10 @@
     <string name="rates_reset">Koristi automatski kurs</string>
     <string name="settings_app_lock">Zaključavanje aplikacije</string>
     <string name="settings_app_lock_hint">Traži otisak prsta ili zaključavanje ekrana telefona za otvaranje aplikacije</string>
-    <string name="lock_title">kinjar je zaključan</string>
+    <string name="lock_title">KinJar je zaključan</string>
     <string name="lock_hint">Otključajte otiskom prsta ili PIN-om, šablonom ili lozinkom telefona.</string>
     <string name="lock_unlock">Otključaj</string>
-    <string name="lock_prompt_unlock">Otključaj kinjar</string>
+    <string name="lock_prompt_unlock">Otključaj KinJar</string>
     <string name="lock_prompt_enable">Uključi zaključavanje aplikacije</string>
     <string name="lock_prompt_disable">Isključi zaključavanje aplikacije</string>
     <string name="lock_prompt_subtitle">Koristite otisak prsta ili zaključavanje ekrana telefona</string>

@@ -1,0 +1,28 @@
+-- category and tx predate the migration files, so SQLDelight only knows them from these no-ops on real databases.
+CREATE TABLE IF NOT EXISTS category (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS tx (
+    id TEXT NOT NULL PRIMARY KEY,
+    type TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    to_account_id TEXT,
+    category_id TEXT,
+    date TEXT NOT NULL,
+    note TEXT NOT NULL,
+    merchant TEXT NOT NULL,
+    paid_by TEXT NOT NULL,
+    source TEXT NOT NULL,
+    edited_at INTEGER NOT NULL
+);
+
+ALTER TABLE category ADD COLUMN kind TEXT NOT NULL DEFAULT 'EXPENSE';
+ALTER TABLE category ADD COLUMN icon TEXT;
+ALTER TABLE tx ADD COLUMN received_amount TEXT;
+ALTER TABLE tx ADD COLUMN received_currency TEXT;

@@ -21,6 +21,12 @@ Keep a separate secure backup of the keystore and credentials. Never commit them
 
 Before tagging, increment `versionCode` and `versionName`, run `make lint test release`, and test an upgrade on a device containing existing transactions. Confirm that accounts, balances, receipts, goals and loan history survive the upgrade.
 
+## Current private distribution
+
+Private release 0.3.7 uses the retained certificate from installed 0.3.4-0.3.6 builds (SHA-256 `2f07a019e22b065033e7ccdb0f555bad1fe98b584798eb4507152cc12543dfab`). These are non-debuggable release builds; retaining the existing key allows an in-place upgrade.
+
+The public v0.3.3 GitHub artifact has a different certificate (SHA-256 `783475a96dc98a6cb2ec0a683d36a2f987dbf1d3363daaa95d57eca1ec23ebb3`). Before publishing another tag, verify or update the CI signing secrets to use the retained private-distribution key, and verify Firebase build variables are enabled and match the private project. Do not assume a successful tagged build can update current phones. A normal branch push does not publish an APK.
+
 Earlier CI releases used temporary debug keys. A new signing key cannot update those installations. Recover the exact original private key before promising an in-place upgrade; an APK contains its certificate, not its private key. Do not uninstall an existing installation containing financial data to bypass a signature mismatch. Current kinjar builds support password-protected backups and cloud recovery; verify an export can be restored on a spare installation before changing distribution keys.
 
 Releases up to 0.3.3 shipped as Family Budget Tracker with application ID `rs.budget`. kinjar uses `app.kinjar`, so it installs as a separate app: it does not upgrade those installations and does not read their data.

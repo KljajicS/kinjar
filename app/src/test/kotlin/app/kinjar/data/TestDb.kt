@@ -16,11 +16,14 @@ fun testDb(): KinjarDb {
 }
 
 fun seedLegacyEvents(db: KinjarDb, events: List<Event>, at: Instant) {
-    events.forEachIndexed { index, event ->
-        val payload = EventJson.encodeToString(Event.serializer(), event)
-        val record = EventRecord("legacy-$index", "legacy", index.toLong() + 1, at.plusMillis(index.toLong()), event)
-        db.eventQueries.insert(record.id, record.deviceId, record.seq, record.occurredAt.toEpochMilli(),
-            EventJson.parseToJsonElement(payload).jsonObject.getValue("type").jsonPrimitive.content, payload)
-        Projector(db).apply(record)
-    }
+    seedLegacyEventRows(db, events, at).forEach(Projector(db)::apply)
+}
+
+/** Event rows only, for schemas older than the current projector writes. */
+fun seedLegacyEventRows(db: KinjarDb, events: List<Event>, at: Instant): List<EventRecord> = events.mapIndexed { index, event ->
+    val payload = EventJson.encodeToString(Event.serializer(), event)
+    val record = EventRecord("legacy-$index", "legacy", index.toLong() + 1, at.plusMillis(index.toLong()), event)
+    db.eventQueries.insert(record.id, record.deviceId, record.seq, record.occurredAt.toEpochMilli(),
+        EventJson.parseToJsonElement(payload).jsonObject.getValue("type").jsonPrimitive.content, payload)
+    record
 }

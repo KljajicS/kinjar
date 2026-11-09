@@ -115,13 +115,14 @@ class AddViewModelTest {
     }
 
     @Test
-    fun `transfer across currencies is rejected`() = runTest(dispatcher) {
+    fun `transfer across currencies without a rate waits for the received amount`() = runTest(dispatcher) {
         val vm = seeded()
         vm.setType(TransactionType.TRANSFER)
         "500".forEach(vm::press)
         vm.setAccount("cash")
         vm.setToAccount("eur")
-        assertEquals(R.string.add_currency_mismatch, vm.state.value.error)
+        assertNull(vm.state.value.error)
+        assertEquals(ReceivedSource.MISSING, vm.state.value.receivedSource)
         assertFalse(vm.state.value.canSave)
     }
 
@@ -273,8 +274,8 @@ class AddViewModelTest {
         vm.setType(TransactionType.EXPENSE)
         assertEquals("card", vm.state.value.accountId)
         remembered[TransactionType.EXPENSE] = "eur"
-        repo.addCategory("Other", "#000000")
-        vm.state.first { it.categories.any { category -> category.name == "Other" } }
+        repo.addCategory("Extra", "#000000")
+        vm.state.first { it.categories.any { category -> category.name == "Extra" } }
         assertEquals("card", vm.state.value.accountId)
         repo.updateAccount(vm.state.value.accounts.first { it.id == "cash" }.copy(name = "First account"))
         vm.state.first { it.accounts.any { account -> account.name == "First account" } }
@@ -377,8 +378,8 @@ class AddViewModelTest {
         remembered[TransactionType.EXPENSE] = "card"
         val vm = billVm()
         assertEquals("cash", vm.state.value.accountId)
-        repo.addCategory("Other", "#000000")
-        vm.state.first { it.categories.any { category -> category.name == "Other" } }
+        repo.addCategory("Extra", "#000000")
+        vm.state.first { it.categories.any { category -> category.name == "Extra" } }
         assertEquals("cash", vm.state.value.accountId)
         vm.skip()
         vm.state.first { it.saved }

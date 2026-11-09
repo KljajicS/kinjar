@@ -231,7 +231,7 @@ class LoanDetailViewModel @Inject constructor(
 ) : ViewModel() {
     val id: String = requireNotNull(saved["id"])
     val writes = WriteOperation(viewModelScope)
-    private val load = Loadable(viewModelScope, combine(repo.loans.book, repo.allAccounts, repo.categories, ::LoanDetailData))
+    private val load = Loadable(viewModelScope, combine(repo.loans.book, repo.allAccounts, repo.expenseCategories, ::LoanDetailData))
     /** Null while loading or after a failed read, so no check or write runs on stale inputs. */
     val data: StateFlow<LoanDetailData?> = load.state
     val loadFailed: StateFlow<Boolean> = load.failed

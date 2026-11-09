@@ -45,6 +45,7 @@ import app.kinjar.domain.CategoryUpdated
 import app.kinjar.domain.MemberRenamed
 import app.kinjar.domain.Category
 import app.kinjar.domain.CategoryCreated
+import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Currency
 import app.kinjar.domain.HomeCalculator
 import app.kinjar.domain.HomeSummary
@@ -63,7 +64,9 @@ import app.kinjar.domain.TransactionType
 import app.kinjar.domain.newId
 import java.time.LocalDate
 
-data class RecentTx(val transaction: Transaction, val categoryName: String?, val paidByName: String?)
+data class RecentTx(val transaction: Transaction, val categoryName: String?, val paidByName: String?, val categoryIcon: String? = null)
+/** Another active category of the same kind already has this name, ignoring case and surrounding spaces. */
+class DuplicateCategoryName : IllegalArgumentException("Category name already used")
 class DuplicateReceipt : IllegalStateException("Receipt already saved")
 class InvalidReceiptAccount : IllegalStateException("Receipt requires an active RSD account")
 class InvalidReceiptCategory : IllegalStateException("Category no longer available")
@@ -83,8 +86,11 @@ class BudgetRepository(
     val accounts: Flow<List<Account>> =
         db.accountQueries.active().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
+    /** Active categories of both kinds. */
     val categories: Flow<List<Category>> =
         db.categoryQueries.active().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
+    val expenseCategories: Flow<List<Category>> = categories.map { all -> all.filter { it.kind == CategoryKind.EXPENSE } }
+    val incomeCategories: Flow<List<Category>> = categories.map { all -> all.filter { it.kind == CategoryKind.INCOME } }
 
     /** Archived rows included: history screens need the names and balances of things that no longer exist. */
     val allAccounts: Flow<List<Account>> =
@@ -156,6 +162,8 @@ class BudgetRepository(
     suspend fun rule(id: String): RecurringRule? = withContext(Dispatchers.IO) { db.recurringRuleQueries.byId(id).executeAsOneOrNull()?.toDomain() }
     suspend fun setRule(rule: RecurringRule) {
         store.append(RecurringRuleSet(rule)) {
+            // Bills are paid as expenses; a rule whose category was archived may still be edited.
+            require(db.categoryQueries.byId(rule.categoryId).executeAsOneOrNull()?.kind != CategoryKind.INCOME.name) { "Bills need an expense category" }
             val previous = db.recurringRuleQueries.byId(rule.id).executeAsOneOrNull()
             require(previous == null || (previous.cadence == rule.cadence.name && previous.first_due == rule.firstDue.toString())) {
                 "Existing recurring schedules cannot change"
@@ -173,15 +181,38 @@ class BudgetRepository(
             ?: db.memberQueries.all().executeAsList().firstOrNull()?.toDomain()
     }
 
-    suspend fun setUp(displayName: String, accounts: List<Account>) {
+    suspend fun setUp(displayName: String, accounts: List<Account>, incomeCategories: List<Category> = StarterCategories.income) {
+        require(incomeCategories.all { it.kind == CategoryKind.INCOME && !it.archived })
         store.appendAll(
             listOf(MemberCreated(Member(newId(), displayName, deviceId))) +
-                StarterCategories.all.map { CategoryCreated(it) } + accounts.map { AccountCreated(it) },
+                (StarterCategories.all + incomeCategories).map { CategoryCreated(it) } + accounts.map { AccountCreated(it) },
         ) { check(db.memberQueries.all().executeAsList().isEmpty()) { "Setup already completed" } }
     }
 
-    suspend fun addCategory(name: String, color: String) { store.append(CategoryCreated(Category(newId(), name.trim(), color))) }
-    suspend fun updateCategory(category: Category) { store.append(CategoryUpdated(category)) }
+    suspend fun addCategory(name: String, color: String, icon: String? = null, kind: CategoryKind = CategoryKind.EXPENSE) {
+        val category = Category(newId(), name.trim(), color, kind = kind, icon = icon)
+        store.append(CategoryCreated(category)) { requireUniqueName(category) }
+    }
+
+    /** The kind is fixed at creation; an update without an icon keeps the stored one. */
+    suspend fun updateCategory(category: Category) {
+        val trimmed = category.copy(name = category.name.trim())
+        store.append(CategoryUpdated(trimmed)) {
+            val stored = requireNotNull(db.categoryQueries.byId(trimmed.id).executeAsOneOrNull()) { "Category no longer available" }
+            require(stored.kind == trimmed.kind.name) { "Category type cannot change" }
+            // Duplicates from before this check stay editable as long as the name does not change.
+            if (stored.name.normalizedName() != trimmed.name.normalizedName()) requireUniqueName(trimmed)
+        }
+    }
+
+    private fun requireUniqueName(category: Category) {
+        require(category.name.isNotEmpty()) { "Category needs a name" }
+        val wanted = category.name.normalizedName()
+        if (db.categoryQueries.active().executeAsList().any { it.id != category.id && it.kind == category.kind.name && it.name.normalizedName() == wanted }) {
+            throw DuplicateCategoryName()
+        }
+    }
+
     suspend fun archiveCategory(id: String) { store.append(CategoryArchived(id)) }
 
     suspend fun addAccount(account: Account) { store.append(AccountCreated(account)) }
@@ -233,9 +264,7 @@ class BudgetRepository(
             require(deletionId == latestReceiptDeletion(db, t.id)) { "Receipt deletion changed; scan again" }
             val account = db.accountQueries.byId(t.accountId).executeAsOneOrNull()
             if (account == null || account.archived != 0L || account.currency != "RSD") throw InvalidReceiptAccount()
-            if (t.categoryId != null && db.categoryQueries.active().executeAsList().none { it.id == t.categoryId }) {
-                throw InvalidReceiptCategory()
-            }
+            if (t.categoryId != null && runCatching { db.requireCategoryFor(t) }.isFailure) throw InvalidReceiptCategory()
         }
     }
     suspend fun transaction(id: String): Transaction? = withContext(Dispatchers.IO) {
@@ -269,12 +298,13 @@ class BudgetRepository(
     private fun validateTransaction(t: Transaction) {
         val account = db.accountQueries.byId(t.accountId).executeAsOneOrNull()
         require(account != null && account.archived == 0L && account.currency == t.money.currency.name) { "Account no longer available" }
-        if (t.categoryId != null) require(db.categoryQueries.active().executeAsList().any { it.id == t.categoryId }) { "Category no longer available" }
+        db.requireCategoryFor(t)
         if (t.type == TransactionType.TRANSFER) {
             val destination = t.toAccountId?.let { db.accountQueries.byId(it).executeAsOneOrNull() }
-            require(destination != null && destination.archived == 0L && destination.id != account.id && destination.currency == account.currency) {
+            require(destination != null && destination.archived == 0L && destination.id != account.id) {
                 "Transfer account no longer available"
             }
+            require(destination.currency == (t.received ?: t.money).currency.name) { "Transfer needs the amount the destination receives" }
         }
     }
 
@@ -293,22 +323,46 @@ class BudgetRepository(
         if (stored != expected) throw StaleTransaction()
     }
 
+    private fun String.normalizedName() = trim().lowercase()
+
     private fun GoalRow.toDomain() = Goal(id, name, Money.of(target, Currency.valueOf(currency)), Money.of(monthly, Currency.valueOf(currency)), archived == 1L)
     private fun RuleRow.toDomain() = RecurringRule(
         id, name, Money.of(amount, Currency.valueOf(currency)), account_id, category_id, Cadence.valueOf(cadence), LocalDate.parse(first_due), archived == 1L,
     )
     private fun AccountRow.toDomain() = Account(id, name, Currency.valueOf(currency), AccountKind.valueOf(kind), archived == 1L)
-    private fun CategoryRow.toDomain() = Category(id, name, color, archived == 1L)
+    private fun CategoryRow.toDomain() = Category(id, name, color, archived == 1L, CategoryKind.valueOf(kind), icon)
     private fun MemberRow.toDomain() = Member(id, display_name, device_id)
-    private fun TxRow.toDomain() = Transaction(
-        id, TransactionType.valueOf(type), Money.of(amount, Currency.valueOf(currency)), account_id, to_account_id,
-        category_id, LocalDate.parse(date), note, merchant, paid_by, TransactionSource.valueOf(source),
-    )
     private fun Recent.toRecent() = RecentTx(
-        Transaction(
-            id, TransactionType.valueOf(type), Money.of(amount, Currency.valueOf(currency)), account_id, to_account_id,
-            category_id, LocalDate.parse(date), note, merchant, paid_by, TransactionSource.valueOf(source),
-        ),
-        category_name, paid_by_name,
+        transaction(id, type, amount, currency, account_id, to_account_id, category_id, date, note, merchant, paid_by, source,
+            received_amount, received_currency),
+        category_name, paid_by_name, category_icon,
     )
+}
+
+internal fun TxRow.toDomain(): Transaction = transaction(id, type, amount, currency, account_id, to_account_id, category_id, date, note,
+    merchant, paid_by, source, received_amount, received_currency)
+
+private fun transaction(
+    id: String, type: String, amount: String, currency: String, accountId: String, toAccountId: String?, categoryId: String?,
+    date: String, note: String, merchant: String, paidBy: String, source: String, receivedAmount: String?, receivedCurrency: String?,
+) = Transaction(
+    id, TransactionType.valueOf(type), Money.of(amount, Currency.valueOf(currency)), accountId, toAccountId,
+    categoryId, LocalDate.parse(date), note, merchant, paidBy, TransactionSource.valueOf(source),
+    receivedAmount?.let { Money.of(it, Currency.valueOf(requireNotNull(receivedCurrency))) },
+)
+
+/**
+ * New writes only: expenses take expense categories and income takes income categories, while transfers and loan
+ * receipts take none. Replay never checks this, so older history keeps loading.
+ */
+internal fun KinjarDb.requireCategoryFor(t: Transaction) {
+    val id = t.categoryId ?: return
+    val kind = when (t.type) {
+        TransactionType.EXPENSE -> CategoryKind.EXPENSE
+        TransactionType.INCOME -> CategoryKind.INCOME
+        TransactionType.TRANSFER, TransactionType.LOAN_RECEIPT -> throw IllegalArgumentException("Only income and expenses have categories")
+    }
+    val category = categoryQueries.byId(id).executeAsOneOrNull()
+    require(category != null && category.archived == 0L) { "Category no longer available" }
+    require(category.kind == kind.name) { "Category does not match the transaction type" }
 }

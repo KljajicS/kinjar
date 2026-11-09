@@ -23,7 +23,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -51,6 +51,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -58,14 +59,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
 import app.kinjar.domain.Account
+import app.kinjar.domain.Category
 import app.kinjar.domain.Currency
 import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.ui.categoryDisplayName
+import app.kinjar.ui.categoryIcon
 import app.kinjar.ui.conflict.ConflictCheckFailedScreen
 import app.kinjar.ui.conflict.ConflictReview
 import app.kinjar.ui.conflict.TransactionConflictViewModel
 import app.kinjar.ui.formatAmount
+import app.kinjar.ui.formatDate
 import app.kinjar.ui.monthLocale
 import app.kinjar.ui.theme.KinjarDatePickerDialog
 import app.kinjar.ui.theme.CaptionStyle
@@ -100,7 +104,8 @@ fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts
         reviewed -> Unit
         s.editing != null && !s.loading && !s.loadFailed && !editing -> TransactionDetails(s, onClose, onEdit = { editing = true })
         else -> AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::press, vm::setCategory, vm::setAccount,
-            vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad, vm::reload)
+            vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad, vm::reload,
+            vm::setReceived, vm::useSuggestedReceived)
     }
 }
 
@@ -110,6 +115,7 @@ fun AddContent(
     onCategory: (String?) -> Unit, onAccount: (String) -> Unit, onToAccount: (String) -> Unit,
     onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit, onSave: () -> Unit,
     onDelete: () -> Unit = {}, onRetry: () -> Unit = {}, onReload: () -> Unit = {},
+    onReceived: (String) -> Unit = {}, onUseSuggested: () -> Unit = {},
 ) {
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
@@ -143,7 +149,9 @@ fun AddContent(
                 s.loadFailed -> Unit
                 s.missing -> Text(stringResource(R.string.audit_finance_missing), style = sans(15), color = c.orange)
                 s.loanLocked -> Text(stringResource(R.string.audit_finance_loan_locked), style = sans(15), color = c.orange)
-                else -> Fields(s, locale, separator, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip) { confirmDelete = true }
+                else -> Fields(s, locale, separator, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip, onReceived, onUseSuggested) {
+                    confirmDelete = true
+                }
             }
             if (s.stale && !s.loading) TextButton(onClick = onReload) { Text(stringResource(R.string.audit_edit_reload), color = c.primary) }
         }
@@ -171,7 +179,8 @@ fun AddContent(
 private fun Fields(
     s: AddState, locale: Locale, separator: Char,
     onCategory: (String?) -> Unit, onAccount: (String) -> Unit, onToAccount: (String) -> Unit,
-    onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit, onDelete: () -> Unit,
+    onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit,
+    onReceived: (String) -> Unit, onUseSuggested: () -> Unit, onDelete: () -> Unit,
 ) {
     val c = LocalColors.current
     Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -181,9 +190,9 @@ private fun Fields(
         }
     }
 
-    if (s.type == TransactionType.EXPENSE) {
-        if (s.editing != null) CategoryBox(s.categories, s.categoryId, onCategory)
-        else CategoryGrid(s.categories, s.categoryId, onCategory)
+    if (s.type.categoryKind != null) {
+        if (s.editing != null) CategoryBox(s.pickableCategories, s.allCategories, s.categoryId, onCategory)
+        else CategoryGrid(s.pickableCategories, s.categoryId, onCategory)
     }
 
     if (s.type == TransactionType.TRANSFER) {
@@ -191,6 +200,7 @@ private fun Fields(
             AccountBox(stringResource(R.string.add_account), s.accounts, s.accountId, onAccount, Modifier.weight(1f))
             AccountBox(stringResource(R.string.add_to_account), s.accounts, s.toAccountId, onToAccount, Modifier.weight(1f))
         }
+        if (s.crossCurrency) ReceivedField(s, locale, separator, onReceived, onUseSuggested)
     } else {
         AccountBox(
             stringResource(if (s.type == TransactionType.INCOME) R.string.add_deposit_into else R.string.add_pay_from),
@@ -209,7 +219,7 @@ private fun Fields(
         s.type == TransactionType.TRANSFER && s.toAccountId != null && s.accounts.none { it.id == s.toAccountId }) {
         Text(stringResource(R.string.add_account_unavailable), style = sans(13), color = c.orange)
     }
-    if (s.type == TransactionType.EXPENSE && s.categoryId != null && s.categories.none { it.id == s.categoryId }) {
+    if (s.type.categoryKind != null && s.categoryId != null && s.pickableCategories.none { it.id == s.categoryId }) {
         Text(stringResource(R.string.scan_category_changed), style = sans(13), color = c.orange)
     }
 
@@ -224,6 +234,34 @@ private fun Fields(
     if (s.editing != null) {
         app.kinjar.ui.theme.DangerLink(stringResource(if (s.editing.source == TransactionSource.RECEIPT) R.string.receipt_delete else R.string.audit_finance_delete),
             enabled = !s.saving && !s.stale, onClick = onDelete)
+    }
+}
+
+/** The suggestion is shown in place until the user types; '.' is stored and the locale separator is shown. */
+@Composable
+private fun ReceivedField(s: AddState, locale: Locale, separator: Char, onReceived: (String) -> Unit, onUseSuggested: () -> Unit) {
+    val c = LocalColors.current
+    val target = s.toCurrency ?: return
+    val suggestion = s.suggestion
+    val text = if (s.receivedManual) s.receivedText else suggestion?.money?.amount?.toPlainString().orEmpty()
+    FieldBox(stringResource(R.string.transfer_received, target.name), text.replace('.', separator), { onReceived(it.replace(separator, '.')) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+    val source = when (s.receivedSource) {
+        ReceivedSource.NBS -> stringResource(R.string.transfer_received_nbs, formatDate(requireNotNull(suggestion?.nbsDate), locale))
+        ReceivedSource.OVERRIDE -> stringResource(R.string.transfer_received_override)
+        ReceivedSource.MANUAL -> stringResource(R.string.transfer_received_manual)
+        ReceivedSource.SAVED -> stringResource(R.string.transfer_received_saved)
+        ReceivedSource.MISSING -> stringResource(R.string.transfer_received_missing)
+        null -> null
+    }
+    val invalid = s.receivedManual && s.receivedText.isNotBlank() && s.received == null
+    if (invalid) Text(stringResource(R.string.transfer_received_invalid), style = sans(13), color = c.orange)
+    else source?.let { Text(it, style = sans(13), color = if (s.receivedSource == ReceivedSource.MISSING) c.orange else c.muted) }
+    if (s.receivedReset) Text(stringResource(R.string.transfer_received_reset), style = sans(13), color = c.orange)
+    if (s.receivedManual && suggestion != null) {
+        TextButton(onClick = onUseSuggested) {
+            Text(stringResource(R.string.transfer_received_use_suggested) + " (${formatAmount(suggestion.money, locale = locale)} ${target.name})", color = c.primary)
+        }
     }
 }
 
@@ -284,12 +322,15 @@ private fun TypeSwitch(selected: TransactionType, onSelect: (TransactionType) ->
 }
 
 @Composable
-private fun CategoryBox(categories: List<app.kinjar.domain.Category>, selectedId: String?, onSelect: (String?) -> Unit) {
+private fun CategoryBox(categories: List<Category>, known: List<Category>, selectedId: String?, onSelect: (String?) -> Unit) {
     val c = LocalColors.current
     var open by remember { mutableStateOf(false) }
     val selected = categories.firstOrNull { it.id == selectedId }
+    val retired = known.firstOrNull { it.id == selectedId }.takeIf { selected == null }
     val label = stringResource(R.string.scan_category)
     val value = selected?.let { categoryDisplayName(it.id, it.name) }
+        // A retired or other-kind category keeps its name so the stored choice stays recognizable until replaced.
+        ?: retired?.let { categoryDisplayName(it.id, it.name) + " · " + stringResource(R.string.scan_category_changed) }
         ?: stringResource(if (selectedId == null) R.string.loan_uncategorized else R.string.scan_category_changed)
     Box(Modifier.fillMaxWidth()) {
         OutlinedBox(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = "$label, $value" },
@@ -298,7 +339,7 @@ private fun CategoryBox(categories: List<app.kinjar.domain.Category>, selectedId
                 Column(Modifier.weight(1f)) {
                     Text(label, style = CaptionStyle, color = c.muted)
                     Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        selected?.let { Box(Modifier.size(8.dp).background(colorOf(it.color), CircleShape)) }
+                        selected?.let { Icon(categoryIcon(it.icon, it.id, it.kind), contentDescription = null, tint = colorOf(it.color), modifier = Modifier.size(18.dp)) }
                         Text(value, style = sans(14, FontWeight.Medium), color = c.text)
                     }
                 }
@@ -308,14 +349,15 @@ private fun CategoryBox(categories: List<app.kinjar.domain.Category>, selectedId
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.loan_uncategorized), style = sans(14)) }, onClick = { onSelect(null); open = false })
             categories.forEach { category ->
-                DropdownMenuItem(text = { Text(categoryDisplayName(category.id, category.name), style = sans(14)) }, onClick = { onSelect(category.id); open = false })
+                DropdownMenuItem(text = { Text(categoryDisplayName(category.id, category.name), style = sans(14)) }, onClick = { onSelect(category.id); open = false },
+                    leadingIcon = { Icon(categoryIcon(category.icon, category.id, category.kind), contentDescription = null, tint = colorOf(category.color)) })
             }
         }
     }
 }
 
 @Composable
-private fun CategoryGrid(categories: List<app.kinjar.domain.Category>, selectedId: String?, onSelect: (String?) -> Unit) {
+private fun CategoryGrid(categories: List<Category>, selectedId: String?, onSelect: (String?) -> Unit) {
     val c = LocalColors.current
     val rows = (categories.size + 3) / 4
     LazyVerticalGrid(
@@ -329,8 +371,8 @@ private fun CategoryGrid(categories: List<app.kinjar.domain.Category>, selectedI
             val label = categoryDisplayName(cat.id, cat.name)
             OutlinedBox(Modifier.height(62.dp), radius = 14, padding = PaddingValues(0.dp), selected = selectedId == cat.id, onClick = { onSelect(cat.id) }) {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Box(Modifier.size(10.dp).background(colorOf(cat.color), CircleShape))
-                    Spacer(Modifier.size(6.dp))
+                    Icon(categoryIcon(cat.icon, cat.id, cat.kind), contentDescription = null, tint = colorOf(cat.color), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.size(4.dp))
                     Text(label, style = sans(12, FontWeight.Medium), color = c.text, maxLines = 1)
                 }
             }

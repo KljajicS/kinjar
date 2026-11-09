@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import app.kinjar.data.BudgetRepository
 import app.kinjar.data.Clock
-import app.kinjar.data.StarterCategories
+import app.kinjar.data.DuplicateCategoryName
 import app.kinjar.data.ThemeMode
 import app.kinjar.data.ThemeStore
 import app.kinjar.data.security.AppLock
@@ -27,12 +27,16 @@ import app.kinjar.domain.Account
 import app.kinjar.domain.AccountKind
 import app.kinjar.domain.Cadence
 import app.kinjar.domain.Category
+import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Currency
 import app.kinjar.domain.Money
 import app.kinjar.domain.RecurringRule
 import app.kinjar.domain.newId
 import java.time.LocalDate
 import app.kinjar.ui.CategoryPalette
+import app.kinjar.ui.isDuplicateCategoryName
+import app.kinjar.ui.starterRank
+import app.kinjar.ui.unusedPaletteColor
 import app.kinjar.ui.RateStatus
 import app.kinjar.ui.home.AccountBalance
 import app.kinjar.ui.WriteOperation
@@ -93,53 +97,86 @@ class AppLockViewModel @Inject constructor(private val lock: AppLock) : ViewMode
     }
 }
 
+data class CategoryGroups(val expense: List<Category>, val income: List<Category>)
+
 @HiltViewModel
 class CategoriesViewModel @Inject constructor(repo: BudgetRepository) : ViewModel() {
-    private val load = Loadable(viewModelScope, repo.categories.map { list -> list.sortedBy(::starterOrder) })
-    val categories: StateFlow<List<Category>?> = load.state
+    private val load = Loadable(viewModelScope, repo.categories.map { list ->
+        val (expense, income) = list.sortedBy { starterRank(it.id) }.partition { it.kind == CategoryKind.EXPENSE }
+        CategoryGroups(expense, income)
+    })
+    val categories: StateFlow<CategoryGroups?> = load.state
     val failed: StateFlow<Boolean> = load.failed
     fun retry() = load.retry()
 }
 
-private fun starterOrder(c: Category) = StarterCategories.all.indexOfFirst { it.id == c.id }.let { if (it < 0) Int.MAX_VALUE else it }
-
+/** [others] are the other active categories; [duplicate] records a name the repository rejected. */
 data class EditCategoryState(
     val editing: Boolean = false,
     val id: String? = null,
     val name: String = "",
     val color: String = CategoryPalette.first(),
+    val kind: CategoryKind = CategoryKind.EXPENSE,
+    val icon: String? = null,
+    val others: List<Category> = emptyList(),
+    val duplicate: Boolean = false,
     val loaded: Boolean = true,
     val loadFailed: Boolean = false,
     val done: Boolean = false,
 ) {
-    val canSave: Boolean get() = name.isNotBlank() && loaded
+    val sameKind: List<Category> get() = others.filter { it.kind == kind }
+    val nameTaken: Boolean get() = duplicate || isDuplicateCategoryName(name, sameKind.map { it.name })
+    val canSave: Boolean get() = name.isNotBlank() && loaded && !nameTaken && !done
 }
 
 @HiltViewModel
 class EditCategoryViewModel @Inject constructor(private val repo: BudgetRepository, savedState: SavedStateHandle) : ViewModel() {
     val writes = WriteOperation(viewModelScope)
-    private val _state = MutableStateFlow(savedState.get<String>("id").let { id -> EditCategoryState(editing = id != null, id = id, loaded = id == null) })
+    private val _state = MutableStateFlow(savedState.get<String>("id").let { id ->
+        val kind = CategoryKind.entries.firstOrNull { it.name == savedState.get<String>("kind") } ?: CategoryKind.EXPENSE
+        EditCategoryState(editing = id != null, id = id, kind = kind, loaded = id == null)
+    })
     val state: StateFlow<EditCategoryState> = _state
+    private var original: Category? = null
+    private var colorPicked = false
 
-    private val load = EditorLoad(viewModelScope, { _state.update { it.copy(loadFailed = true) } }) {
-        val id = requireNotNull(_state.value.id)
-        val c = requireNotNull(repo.categories.first().firstOrNull { it.id == id })
-        _state.update { it.copy(name = c.name, color = c.color, loaded = true, loadFailed = false) }
+    /** A new category stays savable when this read fails; the repository still rejects duplicates. */
+    private val load = EditorLoad(viewModelScope, { _state.update { if (it.editing) it.copy(loadFailed = true) else it } }) {
+        val id = _state.value.id
+        val all = repo.categories.first()
+        val c = if (id == null) null else requireNotNull(all.firstOrNull { it.id == id })
+        val others = all.filter { it.id != id }
+        original = c
+        _state.update { s ->
+            if (c == null) s.copy(others = others, color = if (colorPicked) s.color else unusedPaletteColor(others.map { it.color }))
+            else s.copy(name = c.name, color = c.color, kind = c.kind, icon = c.icon, others = others, loaded = true, loadFailed = false)
+        }
     }
 
-    init { retryLoad() }
+    init { load.start() }
 
     fun retryLoad() { if (!_state.value.loaded) load.start() }
 
-    fun setName(name: String) = _state.update { it.copy(name = name) }
-    fun setColor(color: String) = _state.update { it.copy(color = color) }
+    fun setName(name: String) = _state.update { it.copy(name = name, duplicate = false) }
+    fun setIcon(key: String) = _state.update { it.copy(icon = key) }
+    fun setKind(kind: CategoryKind) = _state.update { if (it.editing) it else it.copy(kind = kind, duplicate = false) }
+
+    fun setColor(color: String) {
+        colorPicked = true
+        _state.update { it.copy(color = color) }
+    }
 
     fun save() {
         val s = _state.value
         if (!s.canSave) return
-        writes.run {
-            if (s.id == null) repo.addCategory(s.name, s.color) else repo.updateCategory(Category(s.id, s.name.trim(), s.color))
-            _state.update { it.copy(done = true) }
+        writes.run(finish = false) {
+            try {
+                if (s.id == null) repo.addCategory(s.name, s.color, s.icon, s.kind)
+                else repo.updateCategory(requireNotNull(original).copy(name = s.name.trim(), color = s.color, icon = s.icon))
+                _state.update { it.copy(done = true) }
+            } catch (_: DuplicateCategoryName) {
+                _state.update { it.copy(duplicate = true) }
+            }
         }
     }
 
@@ -306,7 +343,7 @@ class EditRecurringViewModel @Inject constructor(private val repo: BudgetReposit
 
     private val load = EditorLoad(viewModelScope, { _state.update { it.copy(loadFailed = true) } }) {
         val accounts = repo.accounts.first()
-        val categories = repo.categories.first().sortedBy(::starterOrder)
+        val categories = repo.expenseCategories.first().sortedBy { starterRank(it.id) }
         val existing = _state.value.id?.let { requireNotNull(repo.rule(it)) }
         _state.update { s ->
             s.copy(

@@ -89,7 +89,7 @@ class FinancialIntegrity private constructor(
     private fun validateTransactions(values: Collection<Transaction>) {
         values.forEach { tx ->
             require(accounts[tx.accountId]?.currency == tx.money.currency) { "Transaction account currency mismatch" }
-            tx.toAccountId?.let { require(accounts[it]?.currency == tx.money.currency) { "Transfer account currency mismatch" } }
+            tx.toAccountId?.let { require(accounts[it]?.currency == (tx.received ?: tx.money).currency) { "Transfer account currency mismatch" } }
         }
     }
 

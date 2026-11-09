@@ -119,12 +119,17 @@ fun interface HistorySource {
 data class HistorySummary(val digest: String, val bytes: Long, val baselineCount: Long, val operationCount: Long, val quarantineCount: Long)
 
 /**
- * Version 2 history: one JSON object per line, a version header, records in canonical kind order and an end line with
- * the record counts. Lines are bounded individually; the history as a whole is not.
+ * Version 2 and 3 history: one JSON object per line, a version header, records in canonical kind order and an end line
+ * with the record counts. Lines are bounded individually; the history as a whole is not. Version 3 has the same lines;
+ * its header only makes version 2 readers stop with [UnsupportedSyncVersion] before reading records they would misread.
+ *
+ * [HistorySummary.digest] always identifies the content as its version 2 stream, whatever header was written, so
+ * digests stored or confirmed before version 3 still compare equal.
  */
 object HistoryStream {
-    const val VERSION = 2
+    const val VERSION = 3
     const val DIGEST_PREFIX = "2:"
+    private const val DIGEST_VERSION = 2
     const val MAX_LINE_BYTES = 1024 * 1024
     private val json = Json { encodeDefaults = true; classDiscriminator = "type" }
 
@@ -142,14 +147,21 @@ object HistoryStream {
 
     fun summarize(records: Sequence<HistoryRecord>): HistorySummary = Writer(Discard).run { records.forEach(::write); finish() }
 
-    class Writer(private val output: OutputStream) {
+    /** Writes a [version] stream; an interrupted upload resumes with the version it started with. */
+    class Writer(private val output: OutputStream, version: Int = VERSION) {
         private val digest = MessageDigest.getInstance("SHA-256")
         private val counts = LongArray(3)
         private var bytes = 0L
         private var kind = 0
         private var finished = false
 
-        init { emit(json.encodeToString(Header.serializer(), Header(VERSION))) }
+        init {
+            require(version in DIGEST_VERSION..VERSION) { "Unsupported history" }
+            val header = (header(version) + "\n").toByteArray(Charsets.UTF_8)
+            output.write(header)
+            bytes += header.size
+            digest.update((header(DIGEST_VERSION) + "\n").toByteArray(Charsets.UTF_8))
+        }
 
         fun write(record: HistoryRecord) {
             check(!finished)
@@ -188,7 +200,7 @@ object HistoryStream {
         val header = readLine(stream) ?: throw IllegalArgumentException("Empty history")
         val version = json.parseToJsonElement(header).jsonObject["version"]?.jsonPrimitive?.intOrNull
         if (version != null && version > VERSION) throw UnsupportedSyncVersion()
-        require(version == VERSION && json.encodeToString(Header.serializer(), Header(VERSION)) == header) { "Unsupported history" }
+        require(version != null && version >= DIGEST_VERSION && header(version) == header) { "Unsupported history" }
         val counts = LongArray(3)
         var kind = 0
         while (true) {
@@ -211,6 +223,8 @@ object HistoryStream {
             yield(record)
         }
     }
+
+    private fun header(version: Int): String = json.encodeToString(Header.serializer(), Header(version))
 
     private fun readLine(input: InputStream): String? {
         val line = ByteArrayOutputStream()

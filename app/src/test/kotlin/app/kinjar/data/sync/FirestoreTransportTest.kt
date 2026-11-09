@@ -43,9 +43,14 @@ class FirestoreTransportTest {
         val history = FamilyHistory(baseline = emptyList(), operations = emptyList())
         val source = history.source()
         val summary = HistoryStream.summarize(source.records())
-        val manifest = StreamManifest.of(historyPieces(source))
+        // An interrupted version 2 upload resumes with exactly the bytes it started with.
+        val manifest = StreamManifest.of(historyPieces(source, 2))
         assertEquals(summary.digest.removePrefix("2:"), manifest.digest)
         assertEquals(summary.bytes, manifest.bytes)
+        val current = historyPieces(source).fold(ByteArray(0)) { all, piece -> all + piece }
+        assertTrue(current.toString(Charsets.UTF_8).startsWith("{\"version\":3}\n"))
+        assertEquals(summary.bytes, current.size.toLong())
+        assertEquals(history.source().records().toList(), HistoryStream.read(current.inputStream()).toList())
         val legacy = temporary.newFile()
         legacy.outputStream().use { HistoryCodec.write(source, it) }
         assertArrayEquals(HistoryCodec.encode(history), filePieces(legacy).reduce(ByteArray::plus))

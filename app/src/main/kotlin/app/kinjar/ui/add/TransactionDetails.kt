@@ -58,6 +58,9 @@ internal fun TransactionDetails(s: AddState, onClose: () -> Unit, onEdit: () -> 
                 }), style = sans(13), color = c.muted)
                 Text(formatAmount(transaction.money, locale = locale), style = mono(40, FontWeight.SemiBold), color = c.text)
                 Text(transaction.money.currency.name, style = sans(14), color = c.muted)
+                transaction.received?.let { received ->
+                    Text("→ ${formatAmount(received, locale = locale)} ${received.currency}", style = mono(20, FontWeight.Medium), color = c.text)
+                }
                 if (transaction.merchant.isNotBlank()) Text(transaction.merchant, style = sans(18, FontWeight.Medium), color = c.text)
             }
             OutlinedBox(Modifier.fillMaxWidth(), radius = 14, padding = PaddingValues(16.dp)) {
@@ -69,10 +72,15 @@ internal fun TransactionDetails(s: AddState, onClose: () -> Unit, onEdit: () -> 
                     if (transaction.type == TransactionType.TRANSFER) {
                         val destination = s.accounts.firstOrNull { it.id == transaction.toAccountId }
                         DetailRow(stringResource(R.string.add_to_account), destination?.name ?: stringResource(R.string.transaction_unavailable))
+                        transaction.received?.let { received ->
+                            HorizontalDivider(color = c.border)
+                            DetailRow(stringResource(R.string.transfer_sent), "${formatAmount(transaction.money, locale = locale)} ${transaction.money.currency}")
+                            DetailRow(stringResource(R.string.transfer_received_label), "${formatAmount(received, locale = locale)} ${received.currency}")
+                        }
                     }
-                    if (transaction.type == TransactionType.EXPENSE) {
+                    if (transaction.type.categoryKind != null) {
                         HorizontalDivider(color = c.border)
-                        val category = s.categories.firstOrNull { it.id == transaction.categoryId }
+                        val category = s.allCategories.firstOrNull { it.id == transaction.categoryId }
                         DetailRow(stringResource(R.string.scan_category), category?.let { categoryDisplayName(it.id, it.name) }
                             ?: stringResource(if (transaction.categoryId == null) R.string.loan_uncategorized else R.string.transaction_unavailable))
                     }

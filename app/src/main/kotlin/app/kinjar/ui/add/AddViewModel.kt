@@ -27,8 +27,11 @@ import app.kinjar.domain.Bill
 import app.kinjar.domain.BillCalculator
 import app.kinjar.domain.billTxId
 import app.kinjar.domain.Category
+import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Currency
 import app.kinjar.domain.EventJson
+import app.kinjar.domain.ExchangeRateSnapshot
+import app.kinjar.ui.parseMoneyInput
 import app.kinjar.domain.Money
 import app.kinjar.domain.Transaction
 import app.kinjar.domain.Receipt
@@ -66,16 +69,73 @@ data class AddState(
     val today: LocalDate = date,
     /** [editing] changed after this form was filled; only a reload, never a save or delete, is allowed. */
     val stale: Boolean = false,
+    /** Archived rows included, so a stored entry still shows the name of a category that was retired. */
+    val allCategories: List<Category> = emptyList(),
+    val rates: ExchangeRateSnapshot = ExchangeRateSnapshot(),
+    /** What the user typed for a cross-currency transfer; ignored while [receivedManual] is false. */
+    val receivedText: String = "",
+    val receivedManual: Boolean = false,
+    /** The sent and received currencies [receivedText] was entered for. */
+    val receivedPair: Pair<Currency, Currency>? = null,
+    /** A typed received amount was dropped because the currencies changed. */
+    val receivedReset: Boolean = false,
 ) {
     val typeLocked: Boolean get() = bill != null || receipt != null || (editing != null && editing.source != TransactionSource.MANUAL)
     val rsdOnly: Boolean get() = receipt != null || editing?.source == TransactionSource.RECEIPT
     val billInFuture: Boolean get() = editing?.source == TransactionSource.RECURRING && date > today
 
+    /** Active categories the current type can use. */
+    val pickableCategories: List<Category> get() = type.categoryKind?.let { kind -> categories.filter { it.kind == kind } } ?: emptyList()
+    val toCurrency: Currency? get() = accounts.firstOrNull { it.id == toAccountId }?.currency
+    val crossCurrency: Boolean get() = type == TransactionType.TRANSFER && toCurrency.let { it != null && it != currency }
+    val suggestion: ReceivedSuggestion? get() {
+        val target = toCurrency ?: return null
+        val sent = amount.value ?: return null
+        return if (crossCurrency) suggestReceived(Money.of(sent, currency), target, rates) else null
+    }
+    val received: Money? get() {
+        if (!crossCurrency) return null
+        val target = requireNotNull(toCurrency)
+        return if (receivedManual) parseMoneyInput(receivedText, target)?.takeIf { !it.isZero } else suggestion?.money
+    }
+    val receivedSource: ReceivedSource? get() = when {
+        !crossCurrency -> null
+        receivedManual && editing?.received != null && received == editing.received -> ReceivedSource.SAVED
+        receivedManual -> ReceivedSource.MANUAL
+        suggestion?.nbsDate != null -> ReceivedSource.NBS
+        suggestion != null -> ReceivedSource.OVERRIDE
+        rates.rates.rate(currency) == null || rates.rates.rate(requireNotNull(toCurrency)) == null -> ReceivedSource.MISSING
+        else -> null
+    }
+
     val canSave: Boolean get() = !loading && !loadFailed && !saving && !saved && !missing && !loanLocked && !stale && amount.value != null && accountId != null && error == null &&
         accounts.any { it.id == accountId && !it.archived && it.currency == currency } &&
         (!rsdOnly || currency == Currency.RSD) && !billInFuture &&
-        (type != TransactionType.EXPENSE || categoryId == null || categories.any { it.id == categoryId }) &&
-        (type != TransactionType.TRANSFER || accounts.any { it.id == toAccountId && !it.archived })
+        (type.categoryKind == null || categoryId == null || pickableCategories.any { it.id == categoryId }) &&
+        (type != TransactionType.TRANSFER || accounts.any { it.id == toAccountId && !it.archived }) &&
+        (!crossCurrency || received != null)
+}
+
+enum class ReceivedSource { NBS, OVERRIDE, MANUAL, SAVED, MISSING }
+
+private data class Inputs(val accounts: List<Account>, val categories: List<Category>, val all: List<Category>, val rates: ExchangeRateSnapshot)
+
+/** [nbsDate] is null when a saved rate override took part in the conversion. */
+data class ReceivedSuggestion(val money: Money, val nbsDate: LocalDate?)
+
+internal val TransactionType.categoryKind: CategoryKind?
+    get() = when (this) {
+        TransactionType.EXPENSE -> CategoryKind.EXPENSE
+        TransactionType.INCOME -> CategoryKind.INCOME
+        TransactionType.TRANSFER, TransactionType.LOAN_RECEIPT -> null
+    }
+
+/** Converts through RSD with the same rates totals use; an override wins over the fetched NBS rate and is never labelled NBS. */
+internal fun suggestReceived(sent: Money, target: Currency, rates: ExchangeRateSnapshot): ReceivedSuggestion? {
+    val money = rates.rates.convert(sent, target)?.takeIf { !it.isZero } ?: return null
+    val foreign = listOf(sent.currency, target).filter { it != Currency.RSD }
+    val nbsDate = if (foreign.any { it in rates.overrides }) null else foreign.mapNotNull { rates.cached[it]?.effectiveDate }.minOrNull()
+    return ReceivedSuggestion(money, nbsDate)
 }
 
 @HiltViewModel
@@ -88,6 +148,8 @@ class AddViewModel @Inject constructor(
     private val _state = MutableStateFlow(AddState(date = clock.today(), loading = true))
     val state: StateFlow<AddState> = _state
     private val accountChoices = mutableMapOf<TransactionType, String>()
+    /** The category last picked per type in this form; a remembered null means uncategorized was chosen. */
+    private val categoryChoices = mutableMapOf<TransactionType, String?>()
     private var prefilled = false
 
     init {
@@ -108,13 +170,15 @@ class AddViewModel @Inject constructor(
                 _state.update { restoreDraft(it) }
                 prefilled = true
             }
-            combine(repo.accounts, repo.categories) { a, c -> a to c }.collect { (accounts, categories) ->
+            combine(repo.accounts, repo.categories, repo.allCategories, repo.exchangeRates.snapshots, ::Inputs).collect { (accounts, categories, all, rates) ->
                 val memberName = repo.currentMember()?.displayName.orEmpty()
                 val sortedCategories = categories.sortedBy { c -> StarterCategories.all.indexOfFirst { it.id == c.id }.let { if (it < 0) Int.MAX_VALUE else it } }
                 _state.update { s ->
-                    val keepCategory = s.receipt != null || s.bill != null || s.editing != null || s.categoryId == null || categories.any { it.id == s.categoryId }
-                    selectAccount(s.copy(categoryId = if (keepCategory) s.categoryId else sortedCategories.firstOrNull()?.id,
-                        paidByName = memberName, accounts = accounts, categories = sortedCategories, loading = false))
+                    val pickable = s.type.categoryKind?.let { kind -> sortedCategories.filter { it.kind == kind } }.orEmpty()
+                    val keepCategory = s.receipt != null || s.bill != null || s.editing != null || s.categoryId == null || pickable.any { it.id == s.categoryId }
+                    val replacement = if (s.type == TransactionType.EXPENSE) pickable.firstOrNull()?.id else null
+                    selectAccount(s.copy(categoryId = if (keepCategory) s.categoryId else replacement,
+                        paidByName = memberName, accounts = accounts, categories = sortedCategories, allCategories = all, rates = rates, loading = false))
                 }
             }
         } catch (e: CancellationException) {
@@ -164,8 +228,12 @@ class AddViewModel @Inject constructor(
                 type = t.type, amount = AmountInput(t.money.amount.stripTrailingZeros().toPlainString()), currency = t.money.currency,
                 categoryId = t.categoryId, accountId = t.accountId, toAccountId = t.toAccountId, date = t.date, merchant = t.merchant,
                 editing = t, loanLocked = locked, savedReceipt = savedReceipt, stale = false, saveError = null,
+                // The stored amount is what arrived; recomputing it from today's rate would rewrite history.
+                receivedText = t.received?.amount?.stripTrailingZeros()?.toPlainString().orEmpty(), receivedManual = t.received != null,
+                receivedPair = t.received?.let { t.money.currency to it.currency }, receivedReset = false,
             )
         }
+        categoryChoices.clear()
     }
 
     /** Replaces the form with the stored transaction, dropping what was typed over the outdated one. */
@@ -203,6 +271,8 @@ class AddViewModel @Inject constructor(
         savedState[DRAFT_TO] = s.toAccountId
         savedState[DRAFT_DATE] = s.date.toString()
         savedState[DRAFT_MERCHANT] = s.merchant
+        savedState[DRAFT_RECEIVED] = if (s.receivedManual) s.receivedText else null
+        savedState[DRAFT_RECEIVED_PAIR] = if (s.receivedManual) s.receivedPair?.let { "${it.first.name}>${it.second.name}" } else null
         // A stale form keeps the version it was typed over, so recreation cannot pass the draft off as current.
         if (!s.stale) savedState[DRAFT_BASE] = s.editing?.let { encode(it) }
     }
@@ -219,6 +289,12 @@ class AddViewModel @Inject constructor(
             ?.takeIf { it != TransactionType.LOAN_RECEIPT && !s.typeLocked } ?: s.type
         val date = if (s.bill != null) s.date
             else savedState.get<String>(DRAFT_DATE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: s.date
+        val receivedPair = savedState.get<String>(DRAFT_RECEIVED_PAIR)?.split('>')?.takeIf { it.size == 2 }?.let { (from, to) ->
+            val currencies = Currency.entries.associateBy { it.name }
+            currencies[from]?.let { f -> currencies[to]?.let { t -> (f to t).takeIf { f != t } } }
+        }
+        val receivedText = savedState.get<String>(DRAFT_RECEIVED)
+            ?.takeIf { type == TransactionType.TRANSFER && receivedPair != null && parseMoneyInput(it, receivedPair.second)?.isZero == false }
         val restored = s.copy(
             type = type,
             amount = savedState.get<String>(DRAFT_AMOUNT).orEmpty().fold(AmountInput()) { input, key -> input.press(key) },
@@ -227,6 +303,8 @@ class AddViewModel @Inject constructor(
             toAccountId = if (type == TransactionType.TRANSFER) savedState.get<String>(DRAFT_TO) else null,
             date = date,
             merchant = savedState.get<String>(DRAFT_MERCHANT) ?: s.merchant,
+            receivedText = receivedText.orEmpty(), receivedManual = receivedText != null,
+            receivedPair = if (receivedText != null) receivedPair else null, receivedReset = false,
             stale = stale,
             saveError = if (stale) R.string.audit_edit_stale else s.saveError,
         )
@@ -239,14 +317,41 @@ class AddViewModel @Inject constructor(
     private fun matches(s: AddState, transaction: Transaction): Boolean = s.type == transaction.type &&
         s.currency == transaction.money.currency && s.amount.value?.compareTo(transaction.money.amount) == 0 &&
         s.categoryId == transaction.categoryId && s.accountId == transaction.accountId && s.toAccountId == transaction.toAccountId &&
-        s.date == transaction.date && s.merchant == transaction.merchant
+        s.date == transaction.date && s.merchant == transaction.merchant && sameReceived(s, transaction.received)
+
+    /** Compared without account currencies, so it also holds while a restored draft waits for accounts to load. */
+    private fun sameReceived(s: AddState, received: Money?): Boolean =
+        if (received == null) !s.receivedManual || s.type != TransactionType.TRANSFER
+        else s.receivedManual && s.receivedPair?.second == received.currency &&
+            parseMoneyInput(s.receivedText, received.currency)?.amount?.compareTo(received.amount) == 0
 
     fun setType(type: TransactionType) = _state.update { s ->
-        if (s.typeLocked || s.missing || s.loanLocked || s.type == type) s else selectAccount(
-            s.copy(type = type, toAccountId = null),
+        if (s.typeLocked || s.missing || s.loanLocked || s.type == type) return@update s
+        if (s.type.categoryKind != null) categoryChoices[s.type] = s.categoryId
+        val categoryId = when {
+            type.categoryKind == null -> null
+            categoryChoices.containsKey(type) -> categoryChoices[type]
+            s.editing != null -> s.editing.categoryId.takeIf { s.editing.type == type }
+            type == TransactionType.EXPENSE -> s.categories.filter { it.kind == CategoryKind.EXPENSE }
+                .let { expense -> expense.firstOrNull { it.id == DEFAULT_EXPENSE } ?: expense.firstOrNull() }?.id
+            // Income stays uncategorized until chosen, so no entry is filed under a guessed source.
+            else -> null
+        }
+        selectAccount(
+            s.copy(type = type, toAccountId = null, categoryId = categoryId,
+                receivedText = "", receivedManual = false, receivedPair = null, receivedReset = false),
             if (type == TransactionType.TRANSFER) s.accountId else accountChoices[type] ?: s.editing?.accountId,
         )
     }
+
+    /** Any edit, even one that matches the suggestion, pins the value so later rate refreshes leave it alone. */
+    fun setReceived(text: String) = _state.update { s ->
+        val target = s.toCurrency
+        if (!s.crossCurrency || target == null || text.length > MAX_RECEIVED) s
+        else s.copy(receivedText = text.trim().replace(',', '.'), receivedManual = true, receivedPair = s.currency to target, receivedReset = false)
+    }
+
+    fun useSuggestedReceived() = _state.update { it.copy(receivedText = "", receivedManual = false, receivedPair = null, receivedReset = false) }
 
     fun prefillReceipt(receipt: Receipt, categoryId: String?) = _state.update { s ->
         if (s.receipt?.id == receipt.id) s else selectAccount(s.copy(
@@ -261,8 +366,10 @@ class AddViewModel @Inject constructor(
     fun resetReceipt() {
         if (_state.value.saving) return
         accountChoices.clear()
+        categoryChoices.clear()
         _state.update { s ->
-            selectAccount(AddState(date = clock.today(), accounts = s.accounts, categories = s.categories, paidByName = s.paidByName))
+            selectAccount(AddState(date = clock.today(), accounts = s.accounts, categories = s.categories, allCategories = s.allCategories,
+                rates = s.rates, paidByName = s.paidByName))
         }
     }
 
@@ -305,12 +412,12 @@ class AddViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val toAccountId = if (s.type == TransactionType.TRANSFER) s.toAccountId else null
-                val categoryId = if (s.type == TransactionType.EXPENSE) s.categoryId else null
+                val categoryId = if (s.type.categoryKind != null) s.categoryId else null
                 val original = s.editing
                 if (original != null) {
                     repo.edit(original.copy(
                         type = s.type, money = Money.of(amount, s.currency), accountId = accountId, toAccountId = toAccountId,
-                        categoryId = categoryId, date = s.date, merchant = s.merchant.trim(),
+                        categoryId = categoryId, date = s.date, merchant = s.merchant.trim(), received = s.received,
                     ), expected = original)
                 } else {
                     val member = requireNotNull(repo.currentMember())
@@ -330,6 +437,7 @@ class AddViewModel @Inject constructor(
                             s.bill != null -> TransactionSource.RECURRING
                             else -> TransactionSource.MANUAL
                         },
+                        received = s.received,
                     )
                     if (s.receipt != null) repo.addReceipt(transaction, s.receipt) else repo.add(transaction)
                 }
@@ -396,17 +504,15 @@ class AddViewModel @Inject constructor(
         return validate(s.copy(accountId = account?.id, currency = account?.currency ?: s.currency))
     }
 
+    /**
+     * A typed received amount only means something for the currency pair it was typed for; a new cross-currency pair drops it
+     * with a notice. Same-currency or unknown destinations keep it untouched, since the field is hidden and ignored there.
+     */
     private fun validate(s: AddState): AddState {
         if (s.type != TransactionType.TRANSFER || s.toAccountId == null) return s.copy(error = null)
-        val from = s.accounts.firstOrNull { it.id == s.accountId }
-        val to = s.accounts.firstOrNull { it.id == s.toAccountId }
-        return s.copy(
-            error = when {
-                s.accountId == s.toAccountId -> R.string.add_same_account
-                from != null && to != null && from.currency != to.currency -> R.string.add_currency_mismatch
-                else -> null
-            }
-        )
+        val pairChanged = s.receivedManual && s.crossCurrency && s.receivedPair != (s.currency to s.toCurrency)
+        val checked = if (pairChanged) s.copy(receivedText = "", receivedManual = false, receivedPair = null, receivedReset = true) else s
+        return checked.copy(error = if (s.accountId == s.toAccountId) R.string.add_same_account else null)
     }
 
     private companion object {
@@ -418,7 +524,12 @@ class AddViewModel @Inject constructor(
         const val DRAFT_DATE = "draft.date"
         const val DRAFT_MERCHANT = "draft.merchant"
         const val DRAFT_BASE = "draft.base"
-        val DRAFT_KEYS = listOf(DRAFT_TYPE, DRAFT_AMOUNT, DRAFT_CATEGORY, DRAFT_ACCOUNT, DRAFT_TO, DRAFT_DATE, DRAFT_MERCHANT, DRAFT_BASE)
+        const val DRAFT_RECEIVED = "draft.received"
+        const val DRAFT_RECEIVED_PAIR = "draft.receivedPair"
+        val DRAFT_KEYS = listOf(DRAFT_TYPE, DRAFT_AMOUNT, DRAFT_CATEGORY, DRAFT_ACCOUNT, DRAFT_TO, DRAFT_DATE, DRAFT_MERCHANT, DRAFT_BASE,
+            DRAFT_RECEIVED, DRAFT_RECEIVED_PAIR)
+        const val DEFAULT_EXPENSE = "cat-groceries"
+        const val MAX_RECEIVED = 15
 
         fun encode(t: Transaction): String = EventJson.encodeToString(Transaction.serializer(), t)
     }
