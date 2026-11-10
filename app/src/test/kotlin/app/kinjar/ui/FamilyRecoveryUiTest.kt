@@ -1,6 +1,7 @@
 package app.kinjar.ui
 
 import android.net.Uri
+import androidx.lifecycle.viewModelScope
 import app.kinjar.R
 import app.kinjar.data.*
 import app.kinjar.data.auth.FirebaseAuthRepository
@@ -11,6 +12,8 @@ import app.kinjar.domain.*
 import app.kinjar.ui.sync.FamilyViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
@@ -34,6 +37,7 @@ class FamilyRecoveryUiTest {
     private val families = mock(FamilyRepository::class.java)
     private val sync = mock(SyncCoordinator::class.java)
     private val backups = mock(BackupFiles::class.java)
+    private val models = mutableListOf<FamilyViewModel>()
 
     @Before fun prepare() {
         Dispatchers.setMain(dispatcher)
@@ -41,11 +45,20 @@ class FamilyRecoveryUiTest {
         doReturn(MutableStateFlow(SyncStatus())).`when`(sync).status
         doReturn(MutableStateFlow<FamilyInfo?>(null)).`when`(sync).observedFamily
     }
-    @After fun close() { Dispatchers.resetMain() }
+    @After fun close() {
+        try {
+            runTest(dispatcher) { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 
     private suspend fun viewModel(): FamilyViewModel {
         doReturn(emptyList<FamilyInvitation>()).`when`(families).invitations()
-        return FamilyViewModel(auth, families, sync, backups, db, store, repo).also { it.awaitIdle() }
+        return FamilyViewModel(auth, families, sync, backups, db, store, repo).also {
+            models += it
+            it.awaitIdle()
+        }
     }
     private suspend fun FamilyViewModel.awaitIdle() { writes.state.first { !it.busy } }
 

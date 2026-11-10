@@ -15,7 +15,9 @@ import app.kinjar.domain.*
 import app.kinjar.ui.sync.FamilyViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -42,6 +44,7 @@ class BackupViewModelTest {
     private val sync = mock(SyncCoordinator::class.java)
     private val backups = mock(BackupFiles::class.java)
     private val owner = ViewModelStore()
+    private val models = mutableListOf<FamilyViewModel>()
     private val uri = mock(Uri::class.java)
     private val password = "four long random words".toCharArray()
 
@@ -52,7 +55,16 @@ class BackupViewModelTest {
         doReturn(MutableStateFlow<FamilyInfo?>(null)).`when`(sync).observedFamily
         runBlocking { repo.setUp("Local", listOf(Account("cash", "Cash", Currency.RSD))) }
     }
-    @After fun close() { Dispatchers.resetMain() }
+    @After fun close() {
+        try {
+            runTest(dispatcher) {
+                owner.clear()
+                models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 
     private suspend fun viewModel(): FamilyViewModel {
         doReturn(emptyList<FamilyInvitation>()).`when`(families).invitations()
@@ -60,7 +72,10 @@ class BackupViewModelTest {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = FamilyViewModel(auth, families, sync, backups, db, spied, repo) as T
         }
-        return ViewModelProvider(owner, factory)[FamilyViewModel::class.java].also { it.awaitIdle() }
+        return ViewModelProvider(owner, factory)[FamilyViewModel::class.java].also {
+            models += it
+            it.awaitIdle()
+        }
     }
     private suspend fun FamilyViewModel.awaitIdle() { writes.state.first { !it.busy } }
     private fun spools() = store.read { db.historySpoolQueries.unreferenced().executeAsList() }

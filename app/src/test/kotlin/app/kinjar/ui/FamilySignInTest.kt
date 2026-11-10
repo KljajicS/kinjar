@@ -1,6 +1,7 @@
 package app.kinjar.ui
 
 import android.net.Uri
+import androidx.lifecycle.viewModelScope
 import app.kinjar.data.*
 import app.kinjar.data.auth.FirebaseAuthRepository
 import app.kinjar.data.auth.GoogleAccount
@@ -10,6 +11,8 @@ import app.kinjar.domain.*
 import app.kinjar.ui.sync.FamilyViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
@@ -32,6 +35,7 @@ class FamilySignInTest {
     private val families = mock(FamilyRepository::class.java)
     private val sync = mock(SyncCoordinator::class.java)
     private val backups = mock(BackupFiles::class.java)
+    private val models = mutableListOf<FamilyViewModel>()
     private val cloud = FamilyInfo("family", "user", listOf("user"), mapOf("user" to "member"), "dataset", 1, "ACTIVE")
 
     @Before fun prepare() {
@@ -40,12 +44,19 @@ class FamilySignInTest {
         doReturn(MutableStateFlow(SyncStatus())).`when`(sync).status
         doReturn(MutableStateFlow<FamilyInfo?>(null)).`when`(sync).observedFamily
     }
-    @After fun close() { Dispatchers.resetMain() }
+    @After fun close() {
+        try {
+            runTest(dispatcher) { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
     private suspend fun viewModel(): FamilyViewModel {
         doReturn(true).`when`(families).admitted()
         doReturn(emptyList<FamilyInvitation>()).`when`(families).invitations()
         doReturn(emptyList<FamilyDevice>()).`when`(families).devices(anyString())
         return FamilyViewModel(auth, families, sync, backups, db, store, repo).also {
+            models += it
             it.writes.state.first { state -> !state.busy }
         }
     }
