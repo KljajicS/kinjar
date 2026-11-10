@@ -147,6 +147,10 @@ class FamilyViewModel @Inject constructor(
         val membership = families.membership()
         check(auth.current()?.uid == account.uid) { "Google account changed" }
         require(membership == null || membership.removed || state.value.journalPhase == "CREATE") { "Cloud data already exists" }
+        val pendingCreation = withContext(Dispatchers.IO) { store.read {
+            db.restoreJournalQueries.journalInfo().executeAsOneOrNull()?.phase == "CREATE"
+        } }
+        if (membership?.removed == true && !pendingCreation && !families.admitted()) throw WorkspaceAdmissionRequired()
         withContext(Dispatchers.IO) { store.read {
             check(auth.current()?.uid == account.uid) { "Google account changed" }
             val journal = db.restoreJournalQueries.journalInfo().executeAsOneOrNull()

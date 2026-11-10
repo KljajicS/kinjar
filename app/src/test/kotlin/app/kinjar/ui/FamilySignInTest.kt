@@ -42,6 +42,7 @@ class FamilySignInTest {
     }
     @After fun close() { Dispatchers.resetMain() }
     private suspend fun viewModel(): FamilyViewModel {
+        doReturn(true).`when`(families).admitted()
         doReturn(emptyList<FamilyInvitation>()).`when`(families).invitations()
         doReturn(emptyList<FamilyDevice>()).`when`(families).devices(anyString())
         return FamilyViewModel(auth, families, sync, backups, db, store, repo).also {
@@ -143,6 +144,23 @@ class FamilySignInTest {
         assertEquals(before, store.snapshot())
         assertTrue(db.syncDraftQueries.draftInfo("local").executeAsList().isEmpty())
         verify(sync).createFamily(repo.currentMember()!!.id)
+    }
+
+    @Test fun `unapproved fresh creation leaves standalone budget unchanged on repeated attempts`() = runTest(dispatcher) {
+        repo.setUp("Local", listOf(Account("local", "Local cash", Currency.RSD)))
+        val before = store.snapshot()
+        doReturn(FamilyMembership("family", "member", true)).`when`(families).membership()
+        val vm = viewModel()
+        doReturn(false).`when`(families).admitted()
+        repeat(2) {
+            vm.createWithAccounts(listOf(Account("fresh", "Fresh cash", Currency.RSD)))
+            vm.awaitIdle()
+            advanceUntilIdle()
+            assertEquals(before, store.snapshot())
+            assertTrue(db.syncDraftQueries.draftInfo("local").executeAsList().isEmpty())
+            assertNull(db.restoreJournalQueries.journalInfo().executeAsOneOrNull())
+        }
+        verify(sync, never()).createFamily(anyString())
     }
 
     @Test fun `existing local profile uploads on explicit Google sign in`() = runTest(dispatcher) {

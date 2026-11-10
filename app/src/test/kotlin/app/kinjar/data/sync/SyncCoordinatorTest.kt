@@ -150,6 +150,17 @@ class SyncCoordinatorTest {
         verifyNoInteractions(transport)
     }
 
+    @Test fun `explicit family deletion keeps pending phone history and still deletes cloud data`() = runTest {
+        enroll()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        val before = store.snapshot()
+        coordinator().deleteFamily("family")
+        verify(families).beginDeletion("family")
+        verify(transport).deleteFamily("user", "family")
+        assertNull(db.syncSessionQueries.current().executeAsOneOrNull())
+        assertEquals(before.source().records().toList(), drafts().single())
+    }
+
     @Test fun `phone reconnecting after another phone creates family retains old edits on replacement`() = runTest {
         enroll()
         store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))

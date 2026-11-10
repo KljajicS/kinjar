@@ -43,7 +43,7 @@ fun FamilySetupScreen(onBack: () -> Unit, onDone: () -> Unit,
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ScreenHeader(stringResource(R.string.setup_family_accounts)) { if (!writes.busy) onBack() }
         Text(stringResource(R.string.setup_family_accounts_hint), style = BodyStyle, color = c.muted)
-        if (!state.hasLocalMember) SetupAccounts(choices.accounts, vm::toggleAccount, vm::addAccount)
+        if (!state.hasLocalMember || state.freshFamilyRequired) SetupAccounts(choices.accounts, vm::toggleAccount, vm::addAccount)
         else Text(stringResource(R.string.setup_accounts_saved), style = BodyStyle, color = c.muted)
         WriteFeedback(family.writes, state.failureText)
         PrimaryButton(stringResource(R.string.setup_cloud_start), enabled = state.account != null && choices.accounts.any { it.enabled } && !writes.busy) {
