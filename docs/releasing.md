@@ -27,6 +27,8 @@ Before tagging, increment `versionCode` and `versionName`, run `make lint test r
 
 ## Current private distribution
 
+Release 0.3.9 adds leaving a family while retaining each phone's history and pending edits separately for export. Deploy the updated Firestore rules before pushing the release tag. On 10 November 2026, the live `release` environment had branch restrictions but no required reviewer, so the tag can publish automatically; the approval requirement described above is not currently enforced. Upgrade every departing member's phone before leaving: older APKs delete their local copies. Two-emulator acceptance covered leaving, encrypted saved-copy export and restore, fresh-family creation, and stale-phone recovery. Production signed-APK Play Integrity/App Check remains a release verification step.
+
 Private release 0.3.7 uses the retained certificate from installed 0.3.4-0.3.6 builds (SHA-256 `2f07a019e22b065033e7ccdb0f555bad1fe98b584798eb4507152cc12543dfab`). These are non-debuggable release builds; retaining the existing key allows an in-place upgrade.
 
 The first protected Actions run for `v0.3.7` passed workflow lint, Android lint and Firestore tests, but failed a JVM test because `AddViewModelTest` left ViewModel coroutines running after resetting the main dispatcher. Signing and publication were skipped. Release 0.3.8 cancels and joins those coroutines before resetting the dispatcher and closing the test database; application behavior is unchanged. Keep `v0.3.7` intact and publish the correction under its new tag.
