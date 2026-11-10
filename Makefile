@@ -1,9 +1,12 @@
-.PHONY: check lint lint-sync lint-workflows test test-sync test-release-metadata build release run shot emu
+.PHONY: check lint lint-sync audit-sync lint-workflows test test-sync test-release-metadata build release run shot emu
 
 check: lint test
 
 lint-sync:
 	cd firebase && npm run lint
+
+audit-sync:
+	cd firebase && npm audit --audit-level=moderate
 
 test-sync:
 	cd firebase && npm test

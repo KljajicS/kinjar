@@ -2,7 +2,7 @@
 
 This checklist configures the existing workflow to publish a signed APK under [KinJar Releases](https://github.com/KljajicS/kinjar/releases). A normal branch push does not publish an APK. A new version tag matching `vMAJOR.MINOR.PATCH` starts the release workflow.
 
-Setup status, 10 November 2026: signing secrets and Firebase variables are configured, and releases through `v0.3.10` have been published. The private repository's `release` environment has deployment branch restrictions but no required reviewer. The rulesets API reports that an upgraded plan or public visibility is needed. Immutability for future releases is enabled and verified; existing releases remain mutable. Vulnerability alerts and automated security fixes are enabled. Other intended protections below must be verified in GitHub; this checklist does not establish that they are active.
+Setup status, 10 November 2026: repository public, signing secrets and Firebase variables configured, and signed `v0.3.11` published with updater metadata. The `release` environment requires owner approval, restricts deployment to `v*` tags and disables administrator bypass. Owner-only tag creation, immutable version tags, main history protection and required PR checks are active. New releases are immutable; older releases remain mutable. Vulnerability alerts, automated security fixes, secret scanning, push protection and private vulnerability reporting are enabled. Recheck these live settings before each release.
 
 ## 1. Protect signing secrets
 
