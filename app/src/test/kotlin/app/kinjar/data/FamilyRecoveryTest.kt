@@ -224,15 +224,47 @@ class FamilyRecoveryTest {
         assertEquals("Good", db.accountQueries.active().executeAsList().single().name)
     }
 
-    @Test fun `removed family clears a pending restore and only its retained copies`() = runTest {
+    @Test fun `removed family preserves pending edits previous copies and staged recovery across restart`() = runTest {
         store.append(account("a")); enroll()
+        store.append(account("pending"))
+        val before = store.snapshot()
+        val priorCopies = db.syncDraftQueries.draftInfo("user").executeAsList()
         db.syncDraftQueries.save("other", "different-user", "different-family", 1, HistoryCodec.encode(store.snapshot()))
-        db.restoreJournalQueries.save("user", "family", "dataset", "replacement", "token", "RESTORE", byteArrayOf(1))
+        val staged = store.writeHistory(FamilyHistory(baseline = emptyList(), operations = emptyList()).source().records())
+        store.saveJournal("user", "family", "dataset", "replacement", "token", "RESTORE", byteArrayOf(1), staged)
         store.clearRemovedFamily("user", "family")
         assertNull(db.restoreJournalQueries.current().executeAsOneOrNull())
+        assertNull(db.syncSessionQueries.current().executeAsOneOrNull())
+        assertTrue(db.syncOutboxQueries.pending("family", "dataset").executeAsList().isEmpty())
+        val copies = db.syncDraftQueries.draftInfo("user").executeAsList()
+        assertEquals(priorCopies.size + 2, copies.size)
+        assertTrue(copies.containsAll(priorCopies))
+        val reopened = EventStore(db, "local", clock, Projector(db))
+        val saved = copies.map { reopened.historySource(requireNotNull(reopened.draftHistory("user", it.id)).id).records().toList() }
+        assertTrue(saved.contains(before.source().records().toList()))
+        assertTrue(saved.contains(emptyList()))
+        reopened.clearRemovedFamily("user", "family")
+        assertEquals(copies, db.syncDraftQueries.draftInfo("user").executeAsList())
         assertEquals(1, db.syncDraftQueries.all("different-user").executeAsList().size)
         store.append(account("new"))
         assertEquals(1, db.accountQueries.active().executeAsList().size)
+    }
+
+    @Test fun `failed detach rolls back saved copies session pending writes and recovery`() = runTest {
+        store.append(account("a")); enroll()
+        store.append(account("pending"))
+        val before = store.snapshot()
+        val copies = db.syncDraftQueries.draftInfo("user").executeAsList()
+        assertThrows(IllegalStateException::class.java) {
+            store.read {
+                store.clearRemovedFamily("user", "family")
+                error("Cleanup failed")
+            }
+        }
+        assertEquals(before, store.snapshot())
+        assertEquals(copies, db.syncDraftQueries.draftInfo("user").executeAsList())
+        assertNotNull(db.syncSessionQueries.current().executeAsOneOrNull())
+        assertEquals(1, db.syncOutboxQueries.pending("family", "dataset").executeAsList().size)
     }
 
     @Test fun `unsupported operation leaves entire import and checkpoint unchanged`() = runTest {

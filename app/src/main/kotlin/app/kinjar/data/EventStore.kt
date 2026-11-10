@@ -399,9 +399,10 @@ class EventStore(
     fun clearRemovedFamily(uid: String, familyId: String) = read {
         val session = db.syncSessionQueries.current().executeAsOneOrNull() ?: return@read
         if (session.uid != uid || session.family_id != familyId) return@read
-        val histories = listOf(db.syncBaselineQueries.baselineHistory().executeAsOneOrNull()?.history_id,
-            db.restoreJournalQueries.journalHistory().executeAsOneOrNull()?.history_id) +
-            db.syncDraftQueries.familyHistories(uid, familyId).executeAsList().map { it.history_id }
+        retainHistory(capture(), session.uid, session.family_id)
+        val journal = db.restoreJournalQueries.journalInfo().executeAsOneOrNull()
+        journalHistory()?.let { retainHistory(it, requireNotNull(journal).uid, journal.family_id) }
+        val baseline = db.syncBaselineQueries.baselineHistory().executeAsOneOrNull()?.history_id
         projector.clear()
         db.syncOutboxQueries.deleteAll()
         db.syncOperationQueries.deleteAll()
@@ -409,11 +410,10 @@ class EventStore(
         db.syncCheckpointQueries.deleteAll()
         db.syncBaselineQueries.deleteAll()
         db.syncQuarantineQueries.deleteAll()
-        db.syncDraftQueries.deleteFamily(uid, familyId)
-        db.restoreJournalQueries.deleteAll()
+        clearJournal()
         db.eventQueries.deleteAll()
         db.syncSessionQueries.deleteAll()
-        histories.forEach(::dropIfUnused)
+        dropIfUnused(baseline)
     }
 
     private fun rebuildInTransaction() {
