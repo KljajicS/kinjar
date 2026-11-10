@@ -208,6 +208,48 @@ test('ordinary users cannot claim a slot or forge family reference separately', 
   await assertFails(setDoc(doc(d, 'slots/0'), { familyId: 'family', owner: 'owner' }));
   await assertFails(setDoc(doc(d, 'users/owner'), { familyId: 'family', memberId: 'm-owner', status: 'ACTIVE' }));
 });
+for (const administrator of [false, true]) {
+  test(`${administrator ? 'administrator' : 'member'} can leave and create a separate family`, async () => {
+    await seed({ owner: 'm-owner', wife: 'm-wife' }, { admins: administrator ? ['owner', 'wife'] : ['owner'] });
+    const d = db('wife');
+    await env.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), 'families/family/installs/1'), { uid: 'wife', installId: 'wifephone' });
+      await setDoc(doc(context.firestore(), 'families/family/claims/wifephone'), { uid: 'wife' });
+    });
+    await assertSucceeds(upload(d, { id: 'wifephone:1', operation: { uid: 'wife', installId: 'wifephone', installSlot: '1' } }).commit());
+    const contribution = 'families/family/datasets/current/operations/wifephone:1';
+    const before = (await getDoc(doc(db('owner'), contribution))).data();
+    const batch = writeBatch(d);
+    batch.update(doc(d, 'families/family'), { members: { owner: 'm-owner' }, admins: ['owner'], action: 'remove', target: 'wife' });
+    batch.update(doc(d, 'users/wife'), { status: 'REMOVED' });
+    batch.delete(doc(d, 'families/family/installs/1'));
+    await assertSucceeds(batch.commit());
+    await assertFails(getDoc(doc(d, 'families/family/datasets/current')));
+    assert.deepEqual((await getDoc(doc(db('owner'), contribution))).data(), before);
+    assert.equal((await getDoc(doc(db('owner'), 'families/family'))).data().owner, 'owner');
+    await admit('wife');
+    await assertSucceeds(createWorkspace(d, 'wife', 'new-family', '1'));
+    assert.deepEqual((await getDoc(doc(db('owner'), contribution))).data(), before);
+  });
+}
+
+test('self removal cannot remove the owner, another member, or omit the account update', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife', child: 'm-child' });
+  for (const [actor, target] of [['owner', 'owner'], ['wife', 'child']]) {
+    const d = db(actor);
+    const members = { owner: 'm-owner', wife: 'm-wife', child: 'm-child' };
+    delete members[target];
+    const batch = writeBatch(d);
+    batch.update(doc(d, 'families/family'), { members, action: 'remove', target });
+    batch.update(doc(d, `users/${target}`), { status: 'REMOVED' });
+    await assertFails(batch.commit());
+  }
+  await assertFails(updateDoc(doc(db('wife'), 'families/family'), {
+    members: { owner: 'm-owner', child: 'm-child' }, action: 'remove', target: 'wife',
+  }));
+  await assertFails(updateDoc(doc(db('wife'), 'users/wife'), { status: 'REMOVED' }));
+});
+
 test('owner can appoint admin but cannot transfer ownership to outsider', async () => {
   await seed({ owner: 'm-owner', wife: 'm-wife' });
   const d = db('owner');
@@ -342,7 +384,8 @@ test('racing administrator role edits cannot remove creator or elevate a member'
   assert.deepEqual((await getDoc(doc(db('owner'), 'families/family'))).data().admins, ['owner']);
 });
 
-test('member removal, all six device slots and six invitation cancellations fit atomic access limits', async () => {
+for (const actor of ['owner', 'wife']) {
+test(`member removal by ${actor}, all six device slots and six invitation cancellations fit atomic access limits`, async () => {
   await seed({ owner: 'm-owner', wife: 'm-wife' }, { admins: ['owner', 'wife'] });
   await env.withSecurityRulesDisabled(async c => {
     for (let i = 0; i < 6; i++) {
@@ -350,7 +393,7 @@ test('member removal, all six device slots and six invitation cancellations fit 
       await setDoc(doc(c.firestore(), `families/family/invites/${i}`), invitation(`kid${i}@example.com`, Date.now(), 'wife'));
     }
   });
-  const d = db('owner');
+  const d = db(actor);
   const remove = writeBatch(d);
   remove.update(doc(d, 'families/family'), { members: { owner: 'm-owner' }, admins: ['owner'], action: 'remove', target: 'wife' });
   remove.update(doc(d, 'users/wife'), { status: 'REMOVED' });
@@ -359,8 +402,12 @@ test('member removal, all six device slots and six invitation cancellations fit 
     remove.update(doc(d, `families/family/invites/${i}`), { status: 'CANCELLED' });
   }
   await assertSucceeds(remove.commit());
-  for (let i = 0; i < 6; i++) assert.equal((await getDoc(doc(d, `families/family/installs/${i}`))).exists(), false);
+  for (let i = 0; i < 6; i++) {
+    assert.equal((await getDoc(doc(db('owner'), `families/family/installs/${i}`))).exists(), false);
+    assert.equal((await getDoc(doc(db('owner'), `families/family/invites/${i}`))).data().status, 'CANCELLED');
+  }
 });
+}
 
 function register(d, uid, installId, slot, { claim = true } = {}) {
   const b = writeBatch(d);

@@ -40,7 +40,10 @@
     <string name="fbs_transfer">Transfer ownership</string>
     <string name="fbs_transfer_warning">This administrator becomes the family creator and can manage your administrator role or remove you.</string>
     <string name="fbs_remove_member">Remove member</string>
-    <string name="fbs_remove_warning">This member loses cloud access. Their app clears family data after confirming removal online. Existing exports cannot be erased.</string>
+    <string name="fbs_leave">Leave family</string>
+    <string name="fbs_leave_warning">You will lose access to this family. Shared history, including your contributions, stays with the family. This phone’s copy, including unsynced changes, remains separately saved for export in Backup → Previous local copies. No download or upload is needed before leaving. You can then join another family or start a new, empty family.</string>
+    <string name="fbs_leave_owner">To leave, make another member an administrator and transfer ownership to them first.</string>
+    <string name="fbs_remove_warning">This member loses cloud access. After confirming removal online, their updated app keeps this phone’s history and unsynced changes separately saved for export. Shared history stays with the family. Existing copies cannot be erased remotely.</string>
     <string name="fbs_devices">Connected phones</string>
     <string name="fbs_remove_device">Remove inactive phone</string>
     <string name="fbs_remove_device_warning">This frees a connection slot. A phone still signed into a family account can connect again.</string>
@@ -48,7 +51,7 @@
     <string name="fbs_cancel_restore_warning">Keep the previous family dataset. You can cancel your own restore, or another administrator can cancel after its time limit expires.</string>
     <string name="fbs_cleanup">Finish old-data cleanup</string>
     <string name="fbs_delete">Delete family</string>
-    <string name="fbs_delete_warning">Permanently delete this family from Firebase and remove every member. The app clears local family data after confirming removal. Save a backup first if needed.</string>
+    <string name="fbs_delete_warning">Permanently delete this family from Firebase and remove every member. After confirming removal, updated apps keep each phone’s local history and unsynced changes separately saved for export. Cloud data will be deleted.</string>
     <string name="fbs_sign_out">Sign out</string>
     <string name="fbs_conflicts">Changes needing a decision</string>
     <string name="fbs_other_phone">Another phone</string>

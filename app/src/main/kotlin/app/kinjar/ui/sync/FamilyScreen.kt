@@ -64,7 +64,7 @@ fun FamilyScreen(
             conflict.operation.resources.none { (key, access) -> key.startsWith("transaction:") && access == ResourceAccess.WRITE }
     }
     fun ask(title: Int, body: Int, execute: () -> Unit) { confirmation = Confirmation(title, body, execute); confirmed = false }
-    fun createFamily() { if (state.journalPhase != "CREATE" && !state.hasLocalMember && onCreate != null) onCreate() else vm.create() }
+    fun createFamily() { if (state.journalPhase != "CREATE" && (!state.hasLocalMember || state.freshFamilyRequired) && onCreate != null) onCreate() else vm.create() }
     LaunchedEffect(writes.busy, writes.failed) { if (confirmed && !writes.busy && !writes.failed) confirmation = null }
     LaunchedEffect(state.completedEnrollment, writes.busy) { if (state.completedEnrollment && !writes.busy) onContinue() }
     var cloudSetupOpened by rememberSaveable { mutableStateOf(false) }
@@ -206,8 +206,11 @@ fun FamilyScreen(
                             Text(if (personal) stringResource(R.string.fd_personal_title) else stringResource(R.string.fd_count, stringResource(R.string.fbs_members), family.members.size),
                                 style = SectionStyle, color = c.text, modifier = Modifier.weight(1f))
                             if (canInvite && !personal) RoundIconButton(Icons.Default.PersonAdd, stringResource(R.string.fbs_invite)) { inviting = !inviting }
-                            if (admin && family.status != "DELETING") Overflow(stringResource(R.string.fd_family_actions)) { close ->
-                                MenuAction(stringResource(R.string.fbs_cancel_invites), idle, close) {
+                            if ((admin || state.canLeave) && family.status != "DELETING") Overflow(stringResource(R.string.fd_family_actions)) { close ->
+                                if (state.canLeave) MenuAction(stringResource(R.string.fbs_leave), idle, close, danger = true) {
+                                    ask(R.string.fbs_leave, R.string.fbs_leave_warning, vm::leaveFamily)
+                                }
+                                if (admin) MenuAction(stringResource(R.string.fbs_cancel_invites), idle, close) {
                                     ask(R.string.fbs_cancel_invites, R.string.fbs_cancel_invites_warning, vm::cancelInvitations)
                                 }
                                 if (uid == family.owner) MenuAction(stringResource(R.string.fbs_delete), idle, close, danger = true) {
@@ -215,6 +218,7 @@ fun FamilyScreen(
                                 }
                             }
                         }
+                        if (uid == family.owner && !personal) Text(stringResource(R.string.fbs_leave_owner), style = CaptionStyle, color = c.muted)
                         if (personal) {
                             Text(stringResource(R.string.fd_personal_hint), style = CaptionStyle, color = c.muted)
                             if (canInvite && !inviting) PrimaryButton(stringResource(R.string.fd_share), enabled = idle) { inviting = true }

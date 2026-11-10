@@ -102,7 +102,7 @@ service cloud.firestore {
           || (resource.data.status == 'ACTIVE' && request.resource.data.status == 'REMOVED'
             && request.resource.data.familyId == resource.data.familyId
             && request.resource.data.memberId == resource.data.memberId
-            && admin(resource.data.familyId)
+            && (admin(resource.data.familyId) || request.auth.uid == uid)
             && (!(uid in getAfter(familyPath(resource.data.familyId)).data.members)
               || getAfter(familyPath(resource.data.familyId)).data.status == 'DELETING'))
           || (request.auth.uid == uid && resource.data.status == 'ACTIVE' && request.resource.data.status == 'ACTIVE'
@@ -149,8 +149,9 @@ service cloud.firestore {
       }
       function removing() {
         let target = request.resource.data.target;
-        return admin(fid) && target in resource.data.members && target != resource.data.owner
-          && (!(target in resource.data.admins) || request.auth.uid == resource.data.owner)
+        return target in resource.data.members && target != resource.data.owner
+          && ((target == request.auth.uid && member(fid) && resource.data.status == 'ACTIVE')
+            || (admin(fid) && (!(target in resource.data.admins) || request.auth.uid == resource.data.owner)))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'admins', 'action', 'target'])
           && request.resource.data.action == 'remove'
           && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([target])

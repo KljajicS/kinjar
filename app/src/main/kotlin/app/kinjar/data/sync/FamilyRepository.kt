@@ -208,16 +208,43 @@ class FamilyRepository @Inject constructor(private val services: FirebaseService
         }.await()
     }
 
-    suspend fun remove(familyId: String, targetUid: String) {
-        val user = uid()
+    suspend fun leave(familyId: String, expectedUid: String) {
+        check(uid() == expectedUid)
         db.runTransaction { transaction ->
+            check(uid() == expectedUid)
+            val userRef = db.collection("users").document(expectedUid)
+            val account = transaction.get(userRef)
+            check(account.getString("familyId") == familyId)
+            if (account.getString("status") == "REMOVED") return@runTransaction
+            check(account.getString("status") == "ACTIVE")
             val root = family(familyId)
             val current = decode(transaction.get(root))
-            check(user in current.admins && targetUid != current.owner && targetUid in current.members)
+            check(current.status == "ACTIVE" && expectedUid in current.members && current.owner != expectedUid)
+            val removed = (0..5).map { root.collection("installs").document(it.toString()) }
+                .filter { transaction.get(it).getString("uid") == expectedUid }
+            val revoked = if (expectedUid in current.admins) pendingInvitesBy(transaction, root, expectedUid) else emptyList()
+            check(uid() == expectedUid)
+            transaction.update(root, mapOf("members" to (current.members - expectedUid), "admins" to (current.admins - expectedUid),
+                "action" to "remove", "target" to expectedUid))
+            transaction.update(userRef, "status", "REMOVED")
+            removed.forEach(transaction::delete)
+            revoked.forEach { transaction.update(it, "status", "CANCELLED") }
+        }.await()
+    }
+
+    suspend fun remove(familyId: String, targetUid: String) {
+        val user = uid()
+        require(targetUid != user)
+        db.runTransaction { transaction ->
+            check(uid() == user)
+            val root = family(familyId)
+            val current = decode(transaction.get(root))
+            check(targetUid != current.owner && targetUid in current.members)
+            check(user in current.admins)
             check(targetUid !in current.admins || user == current.owner)
             val installs = (0..5).map { root.collection("installs").document(it.toString()) }
             val removed = installs.filter { transaction.get(it).getString("uid") == targetUid }
-            val revoked = pendingInvitesBy(transaction, root, targetUid)
+            val revoked = if (user in current.admins) pendingInvitesBy(transaction, root, targetUid) else emptyList()
             transaction.update(root, mapOf("members" to (current.members - targetUid), "admins" to (current.admins - targetUid), "action" to "remove", "target" to targetUid))
             transaction.update(db.collection("users").document(targetUid), "status", "REMOVED")
             removed.forEach(transaction::delete)

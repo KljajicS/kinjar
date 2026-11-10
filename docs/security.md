@@ -35,7 +35,7 @@ Creating a cloud workspace requires an `admission/{uid}` document with `enabled:
 
 Each installation ID is claimed permanently, per family, by the first account that registers it. Operation IDs are derived from installation IDs, so rules refuse uploads and device registrations that use an installation ID claimed by another account. Claims survive device and member removal and are deleted only with the family.
 
-SQLDelight stores local finances and pending operations. Firestore uses memory-only caching. Signing out pauses cloud access; it does not erase the local financial copy. App lock remains optional. Confirmed online removal clears that family's local data; an offline phone or exported copy cannot be remotely erased. Permission errors alone never trigger deletion.
+SQLDelight stores local finances and pending operations. Firestore uses memory-only caching. Signing out pauses cloud access; it does not erase the local financial copy. App lock remains optional. Confirmed online removal retains local history, pending edits and staged recovery history separately for export, then detaches the session. Prior retained copies remain available. Offline phones and saved copies cannot be remotely erased. Permission errors alone never trigger detachment. Older APKs still delete their local copy on confirmed removal; upgrade all departing member phones before using Leave family.
 
 Creator-authorized family deletion first removes member access, then deletes remote content. Cleanup runs in the client and can resume after interruption. Closing every client can leave a deletion unfinished; the project owner must finish abandoned cleanup. Removing a device slot only frees capacity: an authorized member can connect that phone again.
 

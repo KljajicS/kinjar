@@ -501,6 +501,19 @@ class SyncCoordinator @Inject constructor(
         !cleanupBatch(uid, family.id)
     }
 
+    suspend fun leaveFamily(familyId: String) = action {
+        val uid = user()
+        val session = store.read {
+            check(db.restoreJournalQueries.journalInfo().executeAsOneOrNull() == null)
+            db.syncSessionQueries.current().executeAsOneOrNull().also { check(it == null || it.uid == uid) }
+        }
+        families.leave(familyId, uid)
+        checkUser(uid)
+        session?.let { store.clearRemovedFamily(uid, it.family_id) }
+        mutableObservedFamily.value = null
+        mutableStatus.value = SyncStatus(SyncPhase.REMOVED)
+    }
+
     suspend fun deleteFamily(familyId: String) = action {
         val uid = user()
         families.beginDeletion(familyId)
@@ -528,7 +541,7 @@ class SyncCoordinator @Inject constructor(
             return
         }
         val session = store.read { db.syncSessionQueries.current().executeAsOneOrNull() }
-        if (session == null || session.uid != uid || session.install_id != install) {
+        if (session == null || session.uid != uid) {
             mutableObservedFamily.value = null
             val membership = families.membership()
             checkUser(uid)
@@ -537,10 +550,15 @@ class SyncCoordinator @Inject constructor(
         }
         val membership = families.membership()
         checkUser(uid)
-        if (membership?.familyId == session.family_id && membership.removed) {
+        if (membership?.removed == true) {
             mutableObservedFamily.value = null
             store.clearRemovedFamily(uid, session.family_id)
             mutableStatus.value = SyncStatus(SyncPhase.REMOVED)
+            return
+        }
+        if (session.install_id != install) {
+            mutableObservedFamily.value = null
+            mutableStatus.value = mutableStatus.value.copy(phase = SyncPhase.REPLACEMENT_REQUIRED)
             return
         }
         if (membership != null && !membership.removed && membership.familyId != session.family_id) {

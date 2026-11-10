@@ -54,11 +54,14 @@ data class FamilyScreenState(
     val completedEnrollment: Boolean = false,
     val recoveryOtherAccount: Boolean = false,
     val needsCloudSetup: Boolean = false,
+    val freshFamilyRequired: Boolean = false,
     val sessionMatchesAccount: Boolean = false,
     val sessionMatchesCloud: Boolean = false,
     val archives: List<FamilyInfo> = emptyList(),
     val archivesLoaded: Boolean = false,
 ) {
+    val canLeave get() = account != null && family?.status == "ACTIVE" && account.uid in family.members &&
+        account.uid != family.owner && journalPhase == null && !recoveryOtherAccount && (!enrolled || sessionMatchesAccount)
     val canRestore get() = !recoveryOtherAccount && journalPhase != "SWITCH" && (!enrolled || (family?.status == "ACTIVE" && account?.uid in family.admins))
 }
 
@@ -124,7 +127,7 @@ class FamilyViewModel @Inject constructor(
         val state = state.value
         if (state.recoveryOtherAccount || state.journalPhase != null) return
         if (state.family == null && !state.enrolled) {
-            if (state.hasLocalMember) createFamily()
+            if (state.hasLocalMember && !state.freshFamilyRequired) createFamily()
             else mutableState.update { it.copy(needsCloudSetup = true) }
         } else if (state.family?.status == "ACTIVE" && !state.hasLocalMember) {
             sync.stageRecovery()
@@ -144,6 +147,19 @@ class FamilyViewModel @Inject constructor(
         val membership = families.membership()
         check(auth.current()?.uid == account.uid) { "Google account changed" }
         require(membership == null || membership.removed || state.value.journalPhase == "CREATE") { "Cloud data already exists" }
+        withContext(Dispatchers.IO) { store.read {
+            check(auth.current()?.uid == account.uid) { "Google account changed" }
+            val journal = db.restoreJournalQueries.journalInfo().executeAsOneOrNull()
+            require(journal == null || (journal.uid == account.uid && journal.phase == "CREATE"))
+            val session = db.syncSessionQueries.current().executeAsOneOrNull()
+            require(session == null || session.uid == account.uid)
+            if (membership?.removed == true && journal == null) {
+                session?.let { store.clearRemovedFamily(account.uid, it.family_id) }
+                if (db.eventQueries.count().executeAsOne() > 0) {
+                    store.restoreLocal(FamilyHistory(baseline = emptyList(), operations = emptyList()), store.currentDigest())
+                }
+            }
+        } }
         if (repository.currentMember() == null) {
             repository.setUp(account.displayName.ifBlank { account.email.substringBefore('@') }, accounts.orEmpty())
         }
@@ -170,6 +186,12 @@ class FamilyViewModel @Inject constructor(
     fun cancelInvitations() = run { families.cancelInvitations(requireFamily()); load() }
     fun administrator(uid: String, value: Boolean) = run { families.setAdministrator(requireFamily(), uid, value); load() }
     fun removeMember(uid: String) = run { families.remove(requireFamily(), uid); load() }
+    fun leaveFamily() = run {
+        check(state.value.canLeave)
+        sync.leaveFamily(requireFamily())
+        mutableState.update { it.copy(family = null, completedEnrollment = false, needsCloudSetup = false) }
+        load()
+    }
     fun transfer(uid: String) = run { families.transferOwnership(requireFamily(), uid); load() }
     fun removeDevice(slot: String) = run { families.removeDevice(requireFamily(), slot); load() }
     fun deleteFamily() = run { sync.deleteFamily(requireFamily()); mutableState.update { it.copy(family = null) }; load() }
@@ -332,7 +354,8 @@ class FamilyViewModel @Inject constructor(
                     it.generation == family.generation && family.members[account.uid] == it.member_id
             } == true
         } }
-        mutableState.update { it.copy(account = account, family = family, invitations = invites, devices = devices, sessionMatchesCloud = matchesCloud) }
+        mutableState.update { it.copy(account = account, family = family, invitations = invites, devices = devices,
+            sessionMatchesCloud = matchesCloud, freshFamilyRequired = membership?.removed == true) }
     }
 
     private suspend fun loadLocal() = withContext(Dispatchers.IO) { store.read {

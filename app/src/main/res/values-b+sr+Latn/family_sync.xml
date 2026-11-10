@@ -40,7 +40,10 @@
     <string name="fbs_transfer">Prenesi vlasništvo</string>
     <string name="fbs_transfer_warning">Ovaj administrator postaje osnivač porodice i može da promeni tvoju ulogu ili te ukloni.</string>
     <string name="fbs_remove_member">Ukloni člana</string>
-    <string name="fbs_remove_warning">Ovaj član gubi pristup podacima u oblaku. Aplikacija briše porodične podatke nakon potvrde uklanjanja preko interneta. Postojeće izvezene kopije nije moguće obrisati.</string>
+    <string name="fbs_leave">Napusti porodicu</string>
+    <string name="fbs_leave_warning">Izgubićete pristup ovoj porodici. Zajednička istorija, uključujući vaše unose, ostaje porodici. Kopija sa ovog telefona, uključujući nesinhronizovane izmene, ostaje odvojeno sačuvana za izvoz u Rezervna kopija → Prethodne lokalne kopije. Pre napuštanja nije potrebno preuzimanje ni slanje podataka. Zatim možete da se pridružite drugoj porodici ili započnete novu, praznu porodicu.</string>
+    <string name="fbs_leave_owner">Da biste napustili porodicu, prvo postavite drugog člana za administratora i prenesite mu vlasništvo.</string>
+    <string name="fbs_remove_warning">Ovaj član gubi pristup podacima u oblaku. Nakon potvrde uklanjanja preko interneta, ažurirana aplikacija čuva istoriju i nesinhronizovane izmene sa telefona odvojeno za izvoz. Zajednička istorija ostaje porodici. Postojeće kopije nije moguće obrisati na daljinu.</string>
     <string name="fbs_devices">Povezani telefoni</string>
     <string name="fbs_remove_device">Ukloni neaktivan telefon</string>
     <string name="fbs_remove_device_warning">Ovo oslobađa mesto za povezivanje. Telefon koji je i dalje prijavljen na porodični nalog može ponovo da se poveže.</string>
@@ -48,7 +51,7 @@
     <string name="fbs_cancel_restore_warning">Zadrži prethodne podatke porodice. Svoje vraćanje možeš da otkažeš, a drugi administrator može da ga otkaže nakon isteka vremena.</string>
     <string name="fbs_cleanup">Završi čišćenje starih podataka</string>
     <string name="fbs_delete">Obriši porodicu</string>
-    <string name="fbs_delete_warning">Trajno obriši ovu porodicu iz Firebase-a i ukloni sve članove. Aplikacija briše lokalne porodične podatke nakon potvrde uklanjanja. Sačuvaj rezervnu kopiju ako ti je potrebna.</string>
+    <string name="fbs_delete_warning">Trajno obriši ovu porodicu iz Firebase-a i ukloni sve članove. Nakon potvrde uklanjanja, ažurirane aplikacije čuvaju lokalnu istoriju i nesinhronizovane izmene sa svakog telefona odvojeno za izvoz. Podaci u oblaku biće obrisani.</string>
     <string name="fbs_sign_out">Odjavi se</string>
     <string name="fbs_conflicts">Promene koje traže odluku</string>
     <string name="fbs_other_phone">Drugi telefon</string>

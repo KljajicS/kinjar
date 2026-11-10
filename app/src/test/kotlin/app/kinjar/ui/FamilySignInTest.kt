@@ -1,5 +1,6 @@
 package app.kinjar.ui
 
+import android.net.Uri
 import app.kinjar.data.*
 import app.kinjar.data.auth.FirebaseAuthRepository
 import app.kinjar.data.auth.GoogleAccount
@@ -30,6 +31,7 @@ class FamilySignInTest {
     private val auth = mock(FirebaseAuthRepository::class.java)
     private val families = mock(FamilyRepository::class.java)
     private val sync = mock(SyncCoordinator::class.java)
+    private val backups = mock(BackupFiles::class.java)
     private val cloud = FamilyInfo("family", "user", listOf("user"), mapOf("user" to "member"), "dataset", 1, "ACTIVE")
 
     @Before fun prepare() {
@@ -42,12 +44,54 @@ class FamilySignInTest {
     private suspend fun viewModel(): FamilyViewModel {
         doReturn(emptyList<FamilyInvitation>()).`when`(families).invitations()
         doReturn(emptyList<FamilyDevice>()).`when`(families).devices(anyString())
-        return FamilyViewModel(auth, families, sync, mock(BackupFiles::class.java), db, store, repo).also {
+        return FamilyViewModel(auth, families, sync, backups, db, store, repo).also {
             it.writes.state.first { state -> !state.busy }
         }
     }
 
     private suspend fun FamilyViewModel.awaitIdle() { writes.state.first { !it.busy } }
+
+    @Test fun `leaving returns to fresh family setup without uploading old finances`() = runTest(dispatcher) {
+        repo.setUp("Test", listOf(Account("test-cash", "Test cash", Currency.RSD)))
+        val history = store.snapshot()
+        store.activate("user", "family", "dataset", repo.currentMember()!!.id, 1,
+            history, HistoryCodec.digest(HistoryCodec.encode(history)), false)
+        var removed = false
+        doAnswer { FamilyMembership("family", "member", removed) }.`when`(families).membership()
+        doReturn(cloud.copy(owner = "owner", admins = listOf("owner", "user"))).`when`(families).info("family")
+        doAnswer {
+            store.clearRemovedFamily("user", "family")
+            removed = true
+            Unit
+        }.`when`(sync).leaveFamily("family")
+        val vm = viewModel()
+        assertTrue(vm.state.value.canLeave)
+        vm.leaveFamily()
+        vm.awaitIdle()
+        advanceUntilIdle()
+        assertNull(vm.state.value.family)
+        assertFalse(vm.state.value.enrolled)
+        assertFalse(vm.state.value.hasLocalMember)
+        assertFalse(vm.state.value.completedEnrollment)
+        val copy = vm.state.value.copies.single()
+        val uri = mock(Uri::class.java)
+        doAnswer { call ->
+            val saved = call.getArgument<StoredHistory>(1)
+            assertEquals(history.source().records().toList(), store.historySource(saved.id).records().toList())
+            Unit
+        }.`when`(backups).write(eq(uri) ?: uri, any(StoredHistory::class.java) ?: store.captureHistory(), any(CharArray::class.java) ?: charArrayOf())
+        vm.prepareExport("passphrase".toCharArray(), copy.id)
+        vm.export(uri)
+        vm.awaitIdle()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.savedBackup)
+        vm.continueSignIn()
+        vm.awaitIdle()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.needsCloudSetup)
+        assertTrue(db.accountQueries.active().executeAsList().isEmpty())
+        verify(sync, never()).createFamily(anyString())
+    }
 
     @Test fun `new Google account chooses accounts before saving personal cloud`() = runTest(dispatcher) {
         val vm = viewModel()
@@ -64,6 +108,41 @@ class FamilySignInTest {
         assertEquals("cash", db.accountQueries.active().executeAsList().single().id)
         verify(sync).createFamily(repo.currentMember()!!.id)
         assertTrue(vm.state.value.completedEnrollment)
+    }
+
+    @Test fun `removed account retains standalone history before explicit fresh accounts`() = runTest(dispatcher) {
+        repo.setUp("Old", listOf(Account("old", "Old cash", Currency.RSD)))
+        val before = store.snapshot()
+        doReturn(FamilyMembership("family", "member", true)).`when`(families).membership()
+        val vm = viewModel()
+        vm.continueSignIn()
+        vm.awaitIdle()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.needsCloudSetup)
+        assertEquals(before, store.snapshot())
+        verify(sync, never()).createFamily(anyString())
+        vm.createWithAccounts(listOf(Account("fresh", "Fresh cash", Currency.RSD)))
+        vm.awaitIdle()
+        advanceUntilIdle()
+        assertEquals(listOf("fresh"), db.accountQueries.active().executeAsList().map { it.id })
+        val copy = db.syncDraftQueries.draftInfo("local").executeAsList().single()
+        assertEquals(before.source().records().toList(), store.historySource(requireNotNull(store.draftHistory("local", copy.id)).id).records().toList())
+        assertTrue(db.txQueries.all().executeAsList().isEmpty())
+        verify(sync).createFamily(repo.currentMember()!!.id)
+    }
+
+    @Test fun `CREATE retry does not reset chosen accounts when membership remains removed`() = runTest(dispatcher) {
+        repo.setUp("Chosen", listOf(Account("chosen", "Chosen cash", Currency.RSD)))
+        val before = store.snapshot()
+        store.saveJournal("user", "new-family", "", "new-dataset", "token", "CREATE", byteArrayOf(1), store.captureHistory())
+        doReturn(FamilyMembership("family", "member", true)).`when`(families).membership()
+        val vm = viewModel()
+        vm.createWithAccounts(listOf(Account("ignored", "Ignored", Currency.RSD)))
+        vm.awaitIdle()
+        advanceUntilIdle()
+        assertEquals(before, store.snapshot())
+        assertTrue(db.syncDraftQueries.draftInfo("local").executeAsList().isEmpty())
+        verify(sync).createFamily(repo.currentMember()!!.id)
     }
 
     @Test fun `existing local profile uploads on explicit Google sign in`() = runTest(dispatcher) {

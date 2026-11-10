@@ -75,6 +75,104 @@ class SyncCoordinatorTest {
 
     @After fun close() = driver.close()
 
+    @Test fun `leaving retains local history and pending writes only after server removal`() = runTest {
+        enroll()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        val before = store.snapshot()
+        doAnswer {
+            assertEquals(before, store.snapshot())
+            membership = membership!!.copy(removed = true)
+            Unit
+        }.`when`(families).leave("family", "user")
+        val sync = coordinator()
+        sync.leaveFamily("family")
+        verify(families).leave("family", "user")
+        assertEquals(before.source().records().toList(), drafts().single())
+        assertNull(db.syncSessionQueries.current().executeAsOneOrNull())
+        assertEquals(0L, db.eventQueries.count().executeAsOne())
+        assertEquals(0, accounts())
+        assertTrue(db.syncOutboxQueries.pending("family", "dataset").executeAsList().isEmpty())
+        assertEquals(SyncPhase.REMOVED, sync.status.value.phase)
+        assertNull(sync.observedFamily.value)
+        verifyNoInteractions(transport)
+    }
+
+    @Test fun `failed leave preserves finances and a lost response recovers through sync`() = runTest {
+        enroll()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        val before = store.snapshot()
+        doThrow(IllegalStateException("Offline")).`when`(families).leave("family", "user")
+        val sync = coordinator()
+        assertTrue(runCatching { sync.leaveFamily("family") }.isFailure)
+        assertEquals(before, store.snapshot())
+        assertEquals("family", sessionFamily())
+        assertTrue(drafts().isEmpty())
+        membership = membership!!.copy(removed = true)
+        coordinator().synchronize()
+        assertNull(db.syncSessionQueries.current().executeAsOneOrNull())
+        assertEquals(0, accounts())
+        assertEquals(before.source().records().toList(), drafts().single())
+        verifyNoInteractions(transport)
+    }
+
+    @Test fun `authoritative removal detaches stale family and repeated restart keeps one copy`() = runTest {
+        enroll()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        val before = store.snapshot()
+        membership = FamilyMembership("target", "other-member", true)
+        coordinator().synchronize()
+        coordinator().synchronize()
+        assertNull(db.syncSessionQueries.current().executeAsOneOrNull())
+        assertEquals(before.source().records().toList(), drafts().single())
+        verifyNoInteractions(transport)
+    }
+
+    @Test fun `leave rejects foreign local account and preserves account switch after remote commit`() = runTest {
+        enroll()
+        val before = store.snapshot()
+        doReturn("other-user").`when`(user).uid
+        assertTrue(runCatching { coordinator().leaveFamily("family") }.isFailure)
+        verify(families, never()).leave(anyString(), anyString())
+        doReturn("user").`when`(user).uid
+        doAnswer { doReturn("other-user").`when`(user).uid; Unit }.`when`(families).leave("family", "user")
+        assertTrue(runCatching { coordinator().leaveFamily("family") }.isFailure)
+        assertEquals(before, store.snapshot())
+        assertEquals("family", sessionFamily())
+        assertTrue(drafts().isEmpty())
+    }
+
+    @Test fun `no session leave preserves unrelated standalone budget`() = runTest {
+        val before = store.snapshot()
+        coordinator().leaveFamily("family")
+        verify(families).leave("family", "user")
+        assertEquals(before, store.snapshot())
+        assertTrue(drafts().isEmpty())
+        verifyNoInteractions(transport)
+    }
+
+    @Test fun `phone reconnecting after another phone creates family retains old edits on replacement`() = runTest {
+        enroll()
+        store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
+        val before = store.snapshot()
+        target = target.copy(members = target.members + ("user" to "new-member"))
+        membership = FamilyMembership("target", "new-member", false)
+        val sync = coordinator()
+        sync.synchronize()
+        assertEquals(SyncPhase.REPLACEMENT_REQUIRED, sync.status.value.phase)
+        assertEquals(before, store.snapshot())
+        verifyNoInteractions(transport)
+        val fresh = FamilyHistory(baseline = before.baseline.filter { it.event is MemberCreated }
+            .map { it.copy(event = MemberCreated(Member("new-member", "New", "user"))) }, operations = emptyList())
+        doReturn(source(fresh)).`when`(transport).downloadBaseline("user", "target", "shared", true)
+        sync.stageRecovery()
+        coordinator().confirmReplacement()
+        assertEquals("target", sessionFamily())
+        assertEquals(before.source().records().toList(), drafts().single())
+        assertTrue(db.txQueries.all().executeAsList().isEmpty())
+        assertEquals(0, accounts())
+        verify(transport, never()).upload(anyString(), anyString(), anyString(), anyString(), anyBytes())
+    }
+
     @Test fun `unapproved workspace creation leaves local editing available without a journal`() = runTest {
         doReturn(false).`when`(families).admitted()
         val before = store.snapshot()
