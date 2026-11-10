@@ -27,6 +27,9 @@ import app.kinjar.data.rates.RateRepository
 import app.kinjar.data.rates.RateRefresh
 import app.kinjar.data.rates.RateAttempts
 import app.kinjar.data.rates.NbsClient
+import app.kinjar.data.update.GitHubUpdateSource
+import app.kinjar.data.update.UpdateSource
+import java.io.File
 import java.time.Instant
 import javax.inject.Singleton
 
@@ -58,6 +61,10 @@ object DataModule {
 
     @Provides @Singleton
     fun clock(): Clock = SystemClock()
+
+    @Provides @Singleton
+    fun updates(@ApplicationContext context: Context): UpdateSource =
+        GitHubUpdateSource(File(context.cacheDir, "updates"))
 
     @Provides @Singleton
     fun themeStore(@ApplicationContext context: Context): ThemeStore = ThemeStore.fromPreferences(context)

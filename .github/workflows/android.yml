@@ -90,8 +90,8 @@ jobs:
           BUDGET_KEYSTORE_PASSWORD: ${{ secrets.BUDGET_KEYSTORE_PASSWORD }}
           BUDGET_KEY_ALIAS: ${{ secrets.BUDGET_KEY_ALIAS }}
           BUDGET_KEY_PASSWORD: ${{ secrets.BUDGET_KEY_PASSWORD }}
-      - name: Verify release identity
-        run: python3 scripts/verify-release.py app/build/outputs/apk/release/kinjar-release.apk "$GITHUB_REF_NAME"
+      - name: Verify release identity and generate update metadata
+        run: python3 scripts/verify-release.py app/build/outputs/apk/release/kinjar-release.apk "$GITHUB_REF_NAME" --metadata app/build/outputs/apk/release/update.json
       - name: Remove temporary signing key
         if: always()
         env:
@@ -102,7 +102,7 @@ jobs:
         run: |
           cp mapping/release/mapping.txt apk/release/kinjar-mapping.txt
           cd apk/release
-          sha256sum kinjar-release.apk kinjar-mapping.txt > SHA256SUMS
+          sha256sum kinjar-release.apk kinjar-mapping.txt update.json > SHA256SUMS
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,6 +111,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             app/build/outputs/apk/release/kinjar-release.apk \
             app/build/outputs/apk/release/kinjar-mapping.txt \
+            app/build/outputs/apk/release/update.json \
             app/build/outputs/apk/release/SHA256SUMS \
             --verify-tag --title "${GITHUB_REF_NAME#v}" \
             --notes 'Signed KinJar release. Update both family phones before using new sync features. Install over the existing app to retain local data.'

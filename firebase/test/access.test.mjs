@@ -153,6 +153,33 @@ function createWorkspace(d, uid, fid, slot) {
   return b.commit();
 }
 
+test('workspace slots hide occupied and free capacity from unapproved accounts', async () => {
+  await seed({ owner: 'm-owner', wife: 'm-wife' });
+  await admit('disabled', { enabled: false });
+  await admit('string', { enabled: 'true' });
+  await admit('creator');
+  for (const d of [env.unauthenticatedContext().firestore(), db('stranger'), db('wife'),
+    db('disabled'), db('string'), db('creator', 'password')]) {
+    await assertFails(getDoc(doc(d, 'slots/0')));
+    await assertFails(getDoc(doc(d, 'slots/1')));
+  }
+  await assertSucceeds(getDoc(doc(db('owner'), 'slots/0')));
+  await assertFails(getDoc(doc(db('owner'), 'slots/1')));
+});
+test('admitted creators can inspect all slots and allocate an unoccupied one', async () => {
+  await seed();
+  await admit('creator');
+  const d = db('creator');
+  const slots = await assertSucceeds(Promise.all(Array.from({ length: 10 }, (_, i) => getDoc(doc(d, `slots/${i}`)))));
+  const free = slots.find(slot => !slot.exists());
+  assert.equal(free.id, '1');
+  await assertSucceeds(createWorkspace(d, 'creator', 'new-family', free.id));
+  assert.equal((await getDoc(doc(d, 'slots/1'))).data().familyId, 'new-family');
+  await admit('creator', { enabled: false });
+  await assertFails(getDoc(doc(d, 'slots/0')));
+  await assertFails(getDoc(doc(d, 'slots/2')));
+  await assertSucceeds(getDoc(doc(d, 'slots/1')));
+});
 test('family creation reserves one public slot and links account atomically', async () => {
   await admit('owner');
   const d = db('owner');
@@ -260,6 +287,8 @@ test('owner can appoint admin but cannot transfer ownership to outsider', async 
   transfer.update(doc(d, 'families/family'), { owner: 'wife', action: 'transfer' });
   transfer.update(doc(d, 'slots/0'), { owner: 'wife' });
   await assertSucceeds(transfer.commit());
+  await assertFails(getDoc(doc(d, 'slots/0')));
+  await assertSucceeds(getDoc(doc(db('wife'), 'slots/0')));
   await assertFails(updateDoc(doc(d, 'families/family'), { admins: ['owner'], action: 'roles' }));
 });
 test('lifetime operation count and bytes do not stop subsequent uploads', async () => {

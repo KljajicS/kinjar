@@ -1,14 +1,14 @@
 # Publish KinJar releases on GitHub
 
-This checklist configures the existing workflow to publish a signed APK under [KinJar Releases](https://github.com/KljajicS/kinjar/releases). A normal branch push does not publish an APK. A new version tag, such as `v0.3.8`, starts the release workflow.
+This checklist configures the existing workflow to publish a signed APK under [KinJar Releases](https://github.com/KljajicS/kinjar/releases). A normal branch push does not publish an APK. A new version tag matching `vMAJOR.MINOR.PATCH` starts the release workflow.
 
-Setup status, 9 November 2026: protected environment, signing secrets, Firebase variables and repository rules are configured. The hardened workflow is on main and compatible Firebase rules are deployed. Tag `v0.3.7` failed a JVM test cleanup race before signing; no APK was published. The test lifecycle fix ships as `v0.3.8`, preserving the immutable failed tag.
+Setup status, 10 November 2026: signing secrets and Firebase variables are configured, and releases through `v0.3.10` have been published. The private repository's `release` environment has deployment branch restrictions but no required reviewer. The rulesets API reports that an upgraded plan or public visibility is needed. Immutability for future releases is enabled and verified; existing releases remain mutable. Vulnerability alerts and automated security fixes are enabled. Other intended protections below must be verified in GitHub; this checklist does not establish that they are active.
 
 ## 1. Protect signing secrets
 
 Open [repository environments](https://github.com/KljajicS/kinjar/settings/environments), then select **release**.
 
-Navigation: **Settings > Environments > release > Environment secrets**. Add or update the four secrets below here, not under repository secrets. The release job explicitly selects this environment. It requires approval from `KljajicS`, allows only `v*` tags, and disables administrator bypass. Self-approval is allowed because this is a single-maintainer repository. [GitHub instructions](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+Navigation: **Settings > Environments > release > Environment secrets**. Add or update the four secrets below here, not under repository secrets. The release job explicitly selects this environment. Where supported by repository visibility and plan, configure owner approval, allow only `v*` tags and disable administrator bypass. Self-approval can remain allowed for a single-maintainer repository. Confirm the required reviewer appears in live protection rules before relying on an approval gate. [GitHub instructions](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
 | Secret name | What to enter |
 |---|---|
@@ -17,7 +17,7 @@ Navigation: **Settings > Environments > release > Environment secrets**. Add or 
 | `BUDGET_KEY_ALIAS` | Alias of the signing key inside that keystore. The current retained key uses `androiddebugkey`. |
 | `BUDGET_KEY_PASSWORD` | Password for that signing key. |
 
-The retained file on this PC is `/var/home/sinisa/.android/debug.keystore`. It signed the current private releases, including the non-debuggable 0.3.7 APK. Its filename does not determine whether the APK is a debug build. Do not generate a replacement key or use an unrelated old release key.
+Use the privately retained keystore that signed the installed app. Its filename does not determine whether the APK is a debug build. Do not generate a replacement key or use an unrelated old release key.
 
 Expected certificate SHA-256:
 
@@ -27,13 +27,13 @@ Expected certificate SHA-256:
 
 Keep the keystore and passwords backed up privately. Do not paste passwords or Base64 key contents into this document, chat, issues, or commits. GitHub cannot display an existing secret's value; if uncertain, replace all four entries together from the verified retained key.
 
-For someone configuring this through an authenticated GitHub CLI, the keystore can be uploaded without printing it:
+For someone configuring this through an authenticated GitHub CLI, set `BUDGET_KEYSTORE_PATH` to that retained file, then upload it without printing it:
 
 ```bash
-base64 -w0 /var/home/sinisa/.android/debug.keystore | gh secret set BUDGET_KEYSTORE_BASE64 --repo KljajicS/kinjar --env release
+base64 -w0 "$BUDGET_KEYSTORE_PATH" | gh secret set BUDGET_KEYSTORE_BASE64 --repo KljajicS/kinjar --env release
 ```
 
-The other three entries can be entered through the environment settings form. No `BUDGET_KEYSTORE_PATH` secret is needed; the workflow supplies its own temporary path. Remove repository-level signing secrets after the protected environment is configured, so another workflow cannot bypass its approval gate.
+The other three entries can be entered through the environment settings form. No `BUDGET_KEYSTORE_PATH` secret is needed; the workflow supplies its own temporary path. Remove repository-level signing secrets so signing credentials remain confined to the release environment.
 
 ## 2. Add Firebase variables
 
@@ -72,26 +72,27 @@ This feature batch needs no new index. Keep the existing project, memberships, d
 
 Once the settings are complete:
 
-1. Merge the tested feature and hardened workflow into main. The workflow rejects tags whose commits are not contained in main. Feature commit `49fe80c` and the subsequent workflow changes must be included before publishing this release.
-2. Verify `app/build.gradle.kts` has version name `0.3.8` and code `11`.
+1. Merge the tested changes into main. The workflow rejects tags whose commits are not contained in main. Review the selected source and live release protections before pushing a tag.
+2. Increment `versionName` and `versionCode` in `app/build.gradle.kts`. Set `VERSION_TAG` to `v` followed by the chosen version name, and `RELEASE_COMMIT_SHA` to the verified full commit SHA.
 3. Create a new tag on the selected release commit and push it. Do not move an existing published tag.
 
 ```bash
-git tag -a v0.3.8 RELEASE_COMMIT_SHA -m 'KinJar 0.3.8'
-git push origin v0.3.8
+git tag -a "$VERSION_TAG" "$RELEASE_COMMIT_SHA" -m "KinJar ${VERSION_TAG#v}"
+git push origin "$VERSION_TAG"
 ```
 
-Replace `RELEASE_COMMIT_SHA` with the verified full commit SHA. This is a release operation; branch push alone is insufficient.
+This is a release operation; branch push alone is insufficient.
 
-Watch [GitHub Actions](https://github.com/KljajicS/kinjar/actions). The `android` workflow must complete `build` and `sync-rules`. Then review the tagged source and select **Review deployments > release > Approve and deploy**. Only then can the release job access signing secrets. The assistant must not approve its own release on your behalf. It creates the release automatically with:
+Watch [GitHub Actions](https://github.com/KljajicS/kinjar/actions). The `android` workflow must complete `build` and `sync-rules`. If a required reviewer is configured, the owner then selects **Review deployments > release > Approve and deploy** after reviewing the tagged source. Without that protection, signing and publication proceed automatically after the checks pass. The workflow creates the release with:
 
 - `kinjar-release.apk`
 - `kinjar-mapping.txt`
+- `update.json`
 - `SHA256SUMS`
 
 No manual APK upload or personal access token secret is required by the workflow. Its release job already requests `contents: write`.
 
-Actions are pinned to full commit SHAs and the Gradle distribution has a checksum. Release builds do not restore or save Gradle caches. Before publication, the workflow verifies the package, tag/version match, non-debuggable manifest and retained signing certificate, then deletes the temporary keystore. Repository rules restrict version-tag creation to the owner and prevent version-tag updates/deletion. Main cannot be deleted or force-pushed; these rules do not impose pull-request review requirements.
+Actions are pinned to full commit SHAs and the Gradle distribution has a checksum. Release builds do not restore or save Gradle caches. Before publication, the workflow verifies the package, tag/version match, non-debuggable manifest and retained signing certificate, then deletes the temporary keystore. Configure and verify repository rules that restrict version-tag creation to the owner, prevent version-tag updates/deletion and prevent deleting or force-pushing main. Required pull-request checks and immutable releases are separate settings; neither follows from tag protection alone.
 
 ## 5. Verify the downloadable APK
 
@@ -99,14 +100,15 @@ Download the APK from [Releases](https://github.com/KljajicS/kinjar/releases), t
 
 Install as an update, without uninstalling or clearing data. Update both family phones before using income-category icons or cross-currency transfers. Confirm Google sign-in, automatic sync and existing balances on both phones.
 
-## Completion checklist
+## Per-release checklist
 
 - [x] Four environment signing secrets configured from the retained key, with no repository-level copies.
 - [x] Five repository Firebase variables configured, sync enabled.
 - [x] Compatible Firebase rules deployed to the existing project.
 - [ ] Release source commit selected and new version tag pushed.
-- [ ] Release approved manually after reviewing the tagged source.
+- [ ] Live release approval and repository protections verified; source reviewed before tagging.
+- [ ] Release approved manually if the configured environment requires it.
 - [ ] All three Actions jobs green.
-- [ ] APK, mapping and checksums visible on GitHub Releases.
+- [ ] APK, mapping, update metadata and checksums visible on GitHub Releases.
 - [ ] Downloaded APK signing certificate verified.
 - [ ] Both phones updated and automatic sync checked.

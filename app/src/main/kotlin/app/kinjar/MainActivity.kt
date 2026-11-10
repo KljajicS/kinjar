@@ -2,9 +2,12 @@ package app.kinjar
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -21,6 +24,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.graphics.Color
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -103,10 +109,18 @@ import app.kinjar.ui.theme.BodyStyle
 import app.kinjar.ui.theme.KinjarTheme
 import app.kinjar.ui.theme.LocalColors
 import app.kinjar.ui.theme.sans
+import app.kinjar.ui.update.UpdateHost
+import app.kinjar.ui.update.UpdateViewModel
+import java.io.File
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+    private val updates: UpdateViewModel by viewModels()
+    private val updatePermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        updates.permissionReturned(packageManager.canRequestPackageInstalls())
+    }
+    private val updateInstaller = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(app.kinjar.ui.withSerbianLatin(newBase))
     }
@@ -118,6 +132,7 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             appLock.onScreenOff()
             prompter.cancel()
+            updates.onBackground()
         }
     }
 
@@ -148,7 +163,10 @@ class MainActivity : AppCompatActivity() {
             val screens = rememberSaveableStateHolder()
             KinjarTheme(dark) {
                 if (lock.locked) LockScreen(lock) { appLock.request(LockPurpose.UNLOCK) }
-                else screens.SaveableStateProvider("kinjar") { KinjarRoot(root) }
+                else screens.SaveableStateProvider("kinjar") {
+                    KinjarRoot(root, updates)
+                    UpdateHost(updates, ::installUpdate)
+                }
             }
         }
     }
@@ -167,6 +185,7 @@ class MainActivity : AppCompatActivity() {
         if (!isChangingConfigurations) {
             appLock.onBackground()
             prompter.cancel()
+            updates.onBackground()
         }
         super.onStop()
     }
@@ -174,6 +193,24 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         unregisterReceiver(screenOff)
         super.onDestroy()
+    }
+
+    private fun installUpdate(file: File) {
+        if (appLock.state.value.locked || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        try {
+            if (!packageManager.canRequestPackageInstalls()) {
+                updatePermission.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                return
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+            updateInstaller.launch(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                clipData = ClipData.newRawUri("update", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (_: Exception) {
+            updates.installationFailed()
+        }
     }
 }
 
@@ -211,7 +248,7 @@ class RootViewModel @Inject constructor(private val repo: Lazy<BudgetRepository>
 }
 
 @Composable
-fun KinjarRoot(root: RootViewModel) {
+fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
     val hasMember by root.hasMember.collectAsStateWithLifecycle()
     val failed by root.failed.collectAsStateWithLifecycle()
     if (hasMember == null) {
@@ -278,6 +315,7 @@ fun KinjarRoot(root: RootViewModel) {
                     onRates = { nav.navigate(Routes.EXCHANGE_RATES) },
                     onFamily = { nav.navigate(Routes.family()) },
                     onBackup = { nav.navigate(Routes.BACKUP) },
+                    updates = updates,
                 )
             }
             composable(Routes.PROFILE) { app.kinjar.ui.settings.ProfileScreen(onBack = { nav.popBackStack() }) }

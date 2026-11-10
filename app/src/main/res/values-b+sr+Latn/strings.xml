@@ -310,4 +310,26 @@
     <string name="lock_unavailable">Zaključavanje aplikacije zahteva zaključavanje ekrana telefona. Podesite PIN, šablon ili lozinku u podešavanjima telefona, pa pokušajte ponovo.</string>
     <string name="lock_error">Identitet nije potvrđen. Pokušajte ponovo.</string>
     <string name="lock_save_failed">Podešavanje zaključavanja nije sačuvano. Pokušajte ponovo.</string>
+    <string name="update_title">Ažuriranje aplikacije</string>
+    <string name="update_check">Proveri ažuriranja</string>
+    <string name="update_current_version">Instalirana verzija: %1$s</string>
+    <string name="update_available">Dostupna je verzija %1$s.</string>
+    <string name="update_checking">Provera ažuriranja…</string>
+    <string name="update_verifying">Provera preuzete verzije…</string>
+    <string name="update_downloading">Preuzimanje: %1$d%%</string>
+    <string name="update_ready">Ažuriranje je spremno. Android će tražiti potvrdu instalacije.</string>
+    <string name="update_install">Instaliraj ažuriranje</string>
+    <string name="update_download">Preuzmi ažuriranje</string>
+    <string name="update_retry">Pokušaj ponovo</string>
+    <string name="update_cancel">Otkaži preuzimanje</string>
+    <string name="update_later">Kasnije</string>
+    <string name="update_close">Zatvori</string>
+    <string name="update_current">Imate najnoviju dostupnu verziju.</string>
+    <string name="update_check_failed">Provera ažuriranja nije uspela. Proverite vezu i pokušajte ponovo.</string>
+    <string name="update_incompatible">Ovo ažuriranje zahteva noviju verziju Androida.</string>
+    <string name="update_download_failed">Preuzimanje nije uspelo. Proverite vezu i slobodan prostor pa pokušajte ponovo.</string>
+    <string name="update_verify_failed">Provera ažuriranja nije uspela. Preuzmite ga ponovo.</string>
+    <string name="update_permission_required">Dozvolite aplikaciji Kinjar da instalira ažuriranja u podešavanjima Androida, pa ponovo dodirnite Instaliraj ažuriranje.</string>
+    <string name="update_install_failed">Instalacioni program Androida nije dostupan. Proverite dozvolu za instaliranje i pokušajte ponovo.</string>
+    <string name="update_debug_disabled">Ažuriranja su dostupna u izdanjima za korišćenje.</string>
 </resources>

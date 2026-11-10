@@ -311,4 +311,26 @@
     <string name="lock_unavailable">App lock needs a phone screen lock. Set a PIN, pattern or password in phone settings, then try again.</string>
     <string name="lock_error">Could not verify your identity. Try again.</string>
     <string name="lock_save_failed">Could not save the app lock setting. Try again.</string>
+    <string name="update_title">App update</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_current_version">Installed version: %1$s</string>
+    <string name="update_available">Version %1$s is available.</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_verifying">Verifying update…</string>
+    <string name="update_downloading">Downloading: %1$d%%</string>
+    <string name="update_ready">Update ready. Android will ask you to confirm installation.</string>
+    <string name="update_install">Install update</string>
+    <string name="update_download">Download update</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_cancel">Cancel download</string>
+    <string name="update_later">Later</string>
+    <string name="update_close">Close</string>
+    <string name="update_current">You have the latest available version.</string>
+    <string name="update_check_failed">Could not check for updates. Check your connection and retry.</string>
+    <string name="update_incompatible">This update needs a newer Android version.</string>
+    <string name="update_download_failed">Download failed. Check your connection and free space, then retry.</string>
+    <string name="update_verify_failed">This update could not be verified. Download it again.</string>
+    <string name="update_permission_required">Allow Kinjar to install updates in Android Settings, then tap Install update again.</string>
+    <string name="update_install_failed">Could not open the Android installer. Check installation permissions and retry.</string>
+    <string name="update_debug_disabled">Updates are available in release builds.</string>
 </resources>

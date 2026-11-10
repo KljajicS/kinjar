@@ -77,7 +77,7 @@ service cloud.firestore {
     }
 
     match /slots/{id} {
-      allow get: if signedIn();
+      allow get: if signedIn() && ((resource != null && resource.data.owner == request.auth.uid) || admitted());
       allow create: if signedIn() && slot(id) && request.resource.data.keys().hasOnly(['familyId', 'owner'])
         && identifier(request.resource.data.familyId) && request.resource.data.owner == request.auth.uid
         && !exists(familyPath(request.resource.data.familyId))
