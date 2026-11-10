@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 24
       - run: npm --prefix firebase ci --ignore-scripts
-      - run: make lint-sync test-sync
+      - run: make lint-sync audit-sync test-sync
   build:
     if: github.event.created
     runs-on: ubuntu-latest
