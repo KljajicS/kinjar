@@ -1,6 +1,8 @@
 # 5. One shared family key, AES-GCM via Tink
 
-Date: 2026-10-14. Status: accepted.
+Date: 2026-10-14. Status: superseded by [0014: Optional Firebase sync and password-protected recovery](0014-firebase-family-sync.md).
+
+This record describes the original design. Current cloud sync is not end-to-end encrypted; exported backups use password-based encryption.
 
 ## Context
 

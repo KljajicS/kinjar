@@ -12,3 +12,4 @@ captures/
 node_modules/
 *-debug.log
 .firebase/
+__pycache__/

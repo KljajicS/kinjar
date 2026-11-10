@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+  - package-ecosystem: npm
+    directory: /firebase
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]

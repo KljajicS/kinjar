@@ -1,6 +1,6 @@
 # Design tokens
 
-Extracted from `screens.html` (the Claude Design export). Compose code in `app/src/main/kotlin/app/kinjar/ui/theme` mirrors these values; change them here and there together.
+Extracted from the UI mockups in `screens.html`. Compose code in `app/src/main/kotlin/app/kinjar/ui/theme` mirrors these values; change them here and there together.
 
 ## Fonts
 

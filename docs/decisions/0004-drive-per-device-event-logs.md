@@ -1,6 +1,8 @@
 # 4. Sync through Google Drive with one event log per device
 
-Date: 2026-10-14. Status: accepted.
+Date: 2026-10-14. Status: superseded by [0014: Optional Firebase sync and password-protected recovery](0014-firebase-family-sync.md).
+
+This record describes the original design. Current sync uses Firebase, not Google Drive.
 
 ## Context
 

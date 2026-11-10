@@ -1,4 +1,4 @@
-.PHONY: check lint lint-sync lint-workflows test test-sync build release run shot emu
+.PHONY: check lint lint-sync lint-workflows test test-sync test-release-metadata build release run shot emu
 
 check: lint test
 
@@ -14,7 +14,10 @@ lint-workflows:
 lint:
 	./gradlew --quiet :app:lintDebug :app:checkDomainPurity
 
-test:
+test-release-metadata:
+	python3 -B scripts/test-verify-release.py
+
+test: test-release-metadata
 	./gradlew :app:testDebugUnitTest
 
 build:

@@ -40,11 +40,13 @@ import app.kinjar.ui.theme.OutlinedBox
 import app.kinjar.ui.theme.RoundIconButton
 import app.kinjar.ui.theme.TitleStyle
 import app.kinjar.ui.theme.sans
+import app.kinjar.ui.update.UpdateViewModel
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onProfile: () -> Unit, onCategories: () -> Unit, onRecurring: () -> Unit, onRates: () -> Unit,
-                   onFamily: () -> Unit, onBackup: () -> Unit, lockVm: AppLockViewModel = hiltViewModel()) {
+                   onFamily: () -> Unit, onBackup: () -> Unit, updates: UpdateViewModel, lockVm: AppLockViewModel = hiltViewModel()) {
     val c = LocalColors.current
+    val update by updates.state.collectAsStateWithLifecycle()
 
     Column(
         Modifier.fillMaxSize().background(c.bg).verticalScroll(rememberScrollState()).padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 24.dp),
@@ -58,6 +60,16 @@ fun SettingsScreen(onBack: () -> Unit, onProfile: () -> Unit, onCategories: () -
         SettingsRow(stringResource(R.string.rates_title), onRates)
         SettingsRow(stringResource(R.string.fbs_family), onFamily)
         SettingsRow(stringResource(R.string.fbs_backups), onBackup)
+        if (updates.enabled) {
+            SettingsRow(
+                stringResource(R.string.update_check),
+                { if (update.busy) updates.show() else updates.check() },
+                stringResource(R.string.update_current_version, updates.currentVersion),
+            )
+        } else {
+            Text(stringResource(R.string.update_current_version, updates.currentVersion), style = CaptionStyle, color = c.muted)
+            Text(stringResource(R.string.update_debug_disabled), style = CaptionStyle, color = c.muted)
+        }
     }
 }
 

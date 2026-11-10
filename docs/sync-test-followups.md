@@ -21,13 +21,13 @@ Recorded 2026-11-06. User requested deferring fixes while testing sync.
 - User reports phone uploads occurred automatically throughout testing. Earlier emulator checks explicitly triggered sync, so those alone did not establish automatic receiving.
 - Offline-created expense reached emulator after phone reconnected.
 - Later edit arrived on emulator without pressing Sync now; edited amount and balance matched.
-- Deleting TEST Coffee on phone automatically removed it from emulator. Balance matched at 60,998 RSD, with eight transactions remaining.
+- Deleting TEST Coffee on phone automatically removed it from emulator. Both devices showed matching balances and remaining transactions.
 - Concurrent edits tested: emulator disconnected, same transaction edited from 1,200 to 1,400 RSD there and to 1,300 RSD on online phone. After reconnecting emulator, both devices automatically showed both changes held for resolution. Detection passed; resolution and convergence still untested. User rejected placement of conflict controls in Family settings.
 - New-install recovery and backup/restore remain untested on devices.
-- Conflict resolution passed on emulator: discarding 1,400 RSD edit on phone automatically cleared conflicts and activated 1,300 RSD, balance 60,898 RSD.
+- Conflict resolution passed on emulator: discarding 1,400 RSD edit on phone automatically cleared conflicts and activated 1,300 RSD. Both devices showed the expected balance.
 - Backup export reported successful by user. Wrong-password attempt rejected; correct-password attempt opened backup preview. Actual family restore has not passed (member role blocked).
-- Follow-up after admin retry: emulator Get family data successfully downloaded/validated a snapshot, then Use family data confirmed local replacement and returned Up to date. All eight transactions were present, including resolved groceries at 1,300 RSD; balance 60,898 RSD. This proves an active restored cloud snapshot was available, not that the originating phone finished successfully.
-- Emulator cold restart preserved restored totals and membership. Added TEST After Restore expense of 1 RSD; automatic sync returned Up to date. Expected new balance 60,897 RSD. Phone receipt and originating restore-journal state still require phone-side observation.
+- Follow-up after admin retry: emulator Get family data successfully downloaded/validated a snapshot, then Use family data confirmed local replacement and returned Up to date. All transactions were present, including the resolved test edit; the balance matched the expected total. This proves an active restored cloud snapshot was available, not that the originating phone finished successfully.
+- Emulator cold restart preserved restored totals and membership. Added TEST After Restore expense of 1 RSD; automatic sync returned Up to date and the balance decreased by that amount. Phone receipt and originating restore-journal state still require phone-side observation.
 
 ## Implementation follow-up
 
@@ -48,9 +48,9 @@ Validation: `make lint` and all 315 JVM tests pass. `make lint-sync test-sync` p
 
 Emulator acceptance on the updated APK:
 
-- NBS refresh returned the official 2026-11-06 EUR and USD rates. Home showed 517.79 EUR alongside the unchanged 60,897 RSD balance, without the missing-rate warning.
+- NBS refresh returned the official 2026-11-06 EUR and USD rates. Home showed the converted EUR total alongside the unchanged RSD balance, without the missing-rate warning.
 - Exported current synthetic finances with a temporary passphrase, opened that backup, and confirmed shared replacement once. The app reported success and returned to Home without extra recovery or cleanup actions.
-- Restored totals remained 64,500 RSD income, 3,603 RSD spending, and 60,897 RSD balance. Family returned to Up to date automatically.
+- Restored income, spending and balance matched their pre-restore totals. Family returned to Up to date automatically.
 - A cold app restart retained the restored totals, cached rates, and Home onboarding state.
 - Removed the disposable encrypted export after acceptance; the temporary passphrase was not retained.
 - Live two-device conflict review on the new UI still needs the phone updated. Existing concurrent-edit and offline convergence evidence above predates this UI change; new resolution behavior has JVM regression coverage.
@@ -69,4 +69,4 @@ The resolver correction changes how rejected dependent changes are replayed. Bot
 - Independent UI review identified a stale sync-status account-switch race. Home completion now checks session account, family, dataset and generation; tests include an old READY status from another account.
 - Personal-to-family joining now uses an atomic cloud archive and membership switch, with a durable local journal and retained local history. Owner-only archives can be exported from Backup and restore. The earlier deletion-based proposal was rejected before execution; no cloud workspace was deleted.
 - Local rules validation passes all 30 tests, including archive privacy, immutable archived finances, invalid joins and atomic membership switching. New rules have not been deployed to the live project, and the new personal-cloud handoff has not been accepted on two devices.
-- Final combined Android validation: `make lint`, all 335 JVM tests and `make build` passed with Firebase enabled. Added regressions verify foreground sign-out clears stale status and a stale switch journal cannot commit the cloud handoff. The APK was installed over the original emulator app without clearing its account or finances; cold launch retained 60,897 RSD and Family returned to Up to date automatically.
+- Final combined Android validation: `make lint`, all 335 JVM tests and `make build` passed with Firebase enabled. Added regressions verify foreground sign-out clears stale status and a stale switch journal cannot commit the cloud handoff. The APK was installed over the original emulator app without clearing its account or finances; cold launch retained the balance and Family returned to Up to date automatically.
