@@ -153,6 +153,17 @@
     <string name="app_check_cooldown">Please wait before trying again. Frequent checks may be limited by Google.</string>
     <string name="app_check_failed">Verification failed. Share the code below for troubleshooting.</string>
     <string name="app_check_details">Code: %1$s\nVersion: %2$s\nChecked at (UTC): %3$s</string>
+    <string name="app_check_show_details">Verification details</string>
+    <string name="app_check_stage">Stage: %1$s</string>
+    <string name="app_check_stage_initialization">Firebase initialization</string>
+    <string name="app_check_stage_token">Verification token request (SDK substep unavailable)</string>
+    <string name="app_check_stage_integrity">Google Play Integrity</string>
+    <string name="app_check_stage_configuration">App configuration</string>
+    <string name="app_check_stage_complete">Verification complete</string>
+    <string name="app_check_stage_not_started">Request not started</string>
+    <string name="app_check_error_types">Error types: %1$s</string>
+    <string name="app_check_no_error">None reported</string>
+    <string name="app_check_details_privacy">These details contain no tokens, account information or raw logs. Share this panel for troubleshooting. A successful check does not enable enforcement.</string>
     <string name="settings_name">Your name</string>
     <string name="settings_categories">Categories</string>
     <string name="settings_save_name">Save name</string>
