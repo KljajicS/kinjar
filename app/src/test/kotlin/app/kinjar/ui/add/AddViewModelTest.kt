@@ -82,7 +82,7 @@ class AddViewModelTest {
     fun `save disabled until amount entered, then saves expense with defaults`() = runTest(dispatcher) {
         val vm = seeded()
         assertFalse(vm.state.value.canSave)
-        "1240".forEach(vm::press)
+        vm.setAmount("1240")
         vm.setCategory("cat-household")
         assertTrue(vm.state.value.canSave)
         vm.save()
@@ -102,7 +102,7 @@ class AddViewModelTest {
         val state = vm.state.first { it.categories.none { category -> category.id == "cat-groceries" } }
         assertTrue(state.categories.any { it.id == state.categoryId })
         assertEquals(state.categories.first().id, state.categoryId)
-        "100".forEach(vm::press)
+        vm.setAmount("100")
         vm.save()
         vm.state.first { it.saved }
         assertEquals(state.categoryId, repo.transactions.first().single().categoryId)
@@ -111,7 +111,7 @@ class AddViewModelTest {
     @Test
     fun `zero amount cannot be saved`() = runTest(dispatcher) {
         val vm = seeded()
-        "0.00".forEach(vm::press)
+        vm.setAmount("0.00")
         assertFalse(vm.state.value.canSave)
     }
 
@@ -119,7 +119,7 @@ class AddViewModelTest {
     fun `transfer to same account is rejected with a message`() = runTest(dispatcher) {
         val vm = seeded()
         vm.setType(TransactionType.TRANSFER)
-        "500".forEach(vm::press)
+        vm.setAmount("500")
         vm.setAccount("cash")
         vm.setToAccount("cash")
         assertFalse(vm.state.value.canSave)
@@ -130,7 +130,7 @@ class AddViewModelTest {
     fun `transfer across currencies without a rate waits for the received amount`() = runTest(dispatcher) {
         val vm = seeded()
         vm.setType(TransactionType.TRANSFER)
-        "500".forEach(vm::press)
+        vm.setAmount("500")
         vm.setAccount("cash")
         vm.setToAccount("eur")
         assertNull(vm.state.value.error)
@@ -167,8 +167,8 @@ class AddViewModelTest {
         assertEquals(clock.today(), vm.state.value.date)
         vm.setType(TransactionType.INCOME)
         assertEquals(TransactionType.EXPENSE, vm.state.value.type)
-        vm.press('<')
-        vm.press('5')
+        vm.setAmount(vm.state.value.amount.text.dropLast(1))
+        vm.setAmount(vm.state.value.amount.text + "5")
         vm.save()
         vm.state.first { it.saved }
         val t = repo.transactions.first().single()
@@ -188,8 +188,8 @@ class AddViewModelTest {
         other.state.first { it.saved }
         val payment = repo.transactions.first().single()
 
-        vm.press('<')
-        vm.press('5')
+        vm.setAmount(vm.state.value.amount.text.dropLast(1))
+        vm.setAmount(vm.state.value.amount.text + "5")
         vm.save()
         val rejected = vm.state.first { it.saved || it.saveError != null }
         assertFalse(rejected.saved)
@@ -204,8 +204,8 @@ class AddViewModelTest {
         assertNull(vm.state.value.bill)
         assertEquals(payment, vm.state.value.editing)
         assertEquals("40000", vm.state.value.amount.text)
-        vm.press('<')
-        vm.press('5')
+        vm.setAmount(vm.state.value.amount.text.dropLast(1))
+        vm.setAmount(vm.state.value.amount.text + "5")
         vm.save()
         vm.state.first { it.saved }
         assertEquals(payment.copy(money = Money.of("40005", Currency.RSD)), repo.transactions.first().single())
@@ -250,8 +250,8 @@ class AddViewModelTest {
         assertFalse(vm.state.value.canSave)
         vm.setAccount("cash")
         vm.setMerchant("Edited")
-        vm.press('<')
-        vm.press('5')
+        vm.setAmount(vm.state.value.amount.text.dropLast(1))
+        vm.setAmount(vm.state.value.amount.text + "5")
         vm.prefillReceipt(receipt, "cat-groceries")
         assertEquals("Edited", vm.state.value.merchant)
         assertEquals("cat-household", vm.state.value.categoryId)
@@ -332,7 +332,7 @@ class AddViewModelTest {
     @Test fun `only successful saves remember the account independently for each type across form restarts`() = runTest(dispatcher) {
         val expense = seeded()
         expense.setAccount("cash")
-        "100".forEach(expense::press)
+        expense.setAmount("100")
         assertTrue(remembered.isEmpty())
         expense.save()
         expense.state.first { it.saved }
@@ -341,7 +341,7 @@ class AddViewModelTest {
         val income = newVm()
         income.setType(TransactionType.INCOME)
         income.setAccount("eur")
-        "200".forEach(income::press)
+        income.setAmount("200")
         income.save()
         income.state.first { it.saved }
         assertEquals(mapOf(TransactionType.EXPENSE to "cash", TransactionType.INCOME to "eur"), remembered)
@@ -357,7 +357,7 @@ class AddViewModelTest {
         remembered[TransactionType.EXPENSE] = "card"
         val vm = seeded()
         vm.setAccount("cash")
-        "100".forEach(vm::press)
+        vm.setAmount("100")
         driver.execute(null, "CREATE TRIGGER fail_tx BEFORE INSERT ON tx BEGIN SELECT RAISE(ABORT, 'disk full'); END", 0)
         vm.save()
         vm.state.first { it.saveError != null }
@@ -375,7 +375,7 @@ class AddViewModelTest {
     @Test fun `preference write failure keeps persisted transaction successful and prevents retry duplicates`() = runTest(dispatcher) {
         val vm = seeded(TransactionAccountStore({ "card" }, { _, _ -> error("Preferences unavailable") }))
         vm.setAccount("cash")
-        "100".forEach(vm::press)
+        vm.setAmount("100")
         vm.save()
         vm.state.first { it.saved }
         assertEquals(null, vm.state.value.saveError)
@@ -388,7 +388,7 @@ class AddViewModelTest {
     @Test fun `preference captures saved snapshot when user changes form during persistence`() = runTest(dispatcher) {
         val vm = seeded()
         vm.setAccount("cash")
-        "100".forEach(vm::press)
+        vm.setAmount("100")
         vm.save()
         vm.setAccount("eur")
         vm.setType(TransactionType.INCOME)
@@ -408,7 +408,7 @@ class AddViewModelTest {
         vm.state.first { it.accounts.none { account -> account.id == "eur" } }
         vm.setType(TransactionType.INCOME)
         assertEquals(repo.accounts.first().first().id, vm.state.value.accountId)
-        "100".forEach(vm::press)
+        vm.setAmount("100")
         for (account in repo.accounts.first()) repo.archiveAccount(account.id)
         vm.state.first { it.accounts.isEmpty() }
         assertEquals(null, vm.state.value.accountId)
@@ -517,7 +517,7 @@ class AddViewModelTest {
         assertEquals("cash", vm.state.value.accountId)
         vm.setAccount("card")
         vm.setToAccount("cash")
-        "100".forEach(vm::press)
+        vm.setAmount("100")
         vm.save()
         vm.state.first { it.saved }
         assertEquals(previous, remembered)
