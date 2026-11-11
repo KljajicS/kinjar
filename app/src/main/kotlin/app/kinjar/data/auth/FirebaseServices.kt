@@ -23,17 +23,17 @@ class FirebaseServices @Inject constructor(@ApplicationContext private val conte
 
     private val app: FirebaseApp by lazy {
         check(configured) { "Firebase sync is not configured" }
-        FirebaseApp.initializeApp(context, FirebaseOptions.Builder()
-            .setProjectId(BuildConfig.FIREBASE_PROJECT_ID)
-            .setApplicationId(BuildConfig.FIREBASE_APP_ID)
-            .setApiKey(BuildConfig.FIREBASE_API_KEY).build(), "kinjar-sync").also {
+        FirebaseApp.initializeApp(context, firebaseOptions(
+            BuildConfig.FIREBASE_PROJECT_ID, BuildConfig.FIREBASE_APP_ID, BuildConfig.FIREBASE_API_KEY,
+        ), "kinjar-sync").also {
             it.setDataCollectionDefaultEnabled(false)
             FirebaseAppCheck.getInstance(it).installAppCheckProviderFactory(FirebaseAttestation.provider())
         }
     }
     val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance(app) }
     suspend fun verifyAppCheck() {
-        FirebaseAppCheck.getInstance(app).getAppCheckToken(true).await()
+        val check = appCheckStep(AppCheckStage.INITIALIZATION) { FirebaseAppCheck.getInstance(app) }
+        appCheckStep(AppCheckStage.TOKEN_REQUEST) { check.getAppCheckToken(true).await() }
     }
 
     val firestore: FirebaseFirestore by lazy {
@@ -42,4 +42,16 @@ class FirebaseServices @Inject constructor(@ApplicationContext private val conte
                 .setLocalCacheSettings(MemoryCacheSettings.newBuilder().build()).build()
         }
     }
+}
+
+internal fun firebaseOptions(projectId: String, appId: String, apiKey: String): FirebaseOptions {
+    val projectNumber = Regex("1:([1-9][0-9]*):android:[0-9a-fA-F]+").matchEntire(appId)?.groupValues?.get(1)
+    if (projectNumber?.toLongOrNull() == null) throw AppCheckConfigurationException()
+    return FirebaseOptions.Builder()
+        .setProjectId(projectId)
+        .setApplicationId(appId)
+        .setApiKey(apiKey)
+        // Play Integrity reads the numeric project number from this option, even without messaging.
+        .setGcmSenderId(projectNumber)
+        .build()
 }
