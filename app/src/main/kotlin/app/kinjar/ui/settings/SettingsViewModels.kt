@@ -237,6 +237,7 @@ data class EditAccountState(
     val name: String = "",
     val currency: Currency = Currency.RSD,
     val kind: AccountKind = AccountKind.SPENDING,
+    val excludedFromGoals: Boolean = false,
     val currencyLocked: Boolean = false,
     val balance: Money? = null,
     val balanceRsd: Money? = null,
@@ -265,7 +266,7 @@ class EditAccountViewModel @Inject constructor(private val repo: BudgetRepositor
                 if (!initialized) {
                     val used = repo.accountInUse(id)
                     val a = requireNotNull(repo.accounts.first().firstOrNull { it.id == id })
-                    _state.update { it.copy(name = a.name, currency = a.currency, kind = a.kind, currencyLocked = used) }
+                    _state.update { it.copy(name = a.name, currency = a.currency, kind = a.kind, currencyLocked = used, excludedFromGoals = a.excludedFromGoals) }
                     initialized = true
                 }
                 combine(repo.financial, repo.rules) { financial, rules -> financial to rules }.collect { (f, rules) ->
@@ -283,12 +284,13 @@ class EditAccountViewModel @Inject constructor(private val repo: BudgetRepositor
 
     fun setName(name: String) = _state.update { it.copy(name = name) }
     fun setCurrency(currency: Currency) = _state.update { if (it.currencyLocked) it else it.copy(currency = currency) }
+    fun setExcludedFromGoals(excluded: Boolean) = _state.update { it.copy(excludedFromGoals = excluded) }
 
     fun save() {
         val s = _state.value
         if (!s.canSave) return
         writes.run {
-            val account = Account(s.id ?: newId(), s.name.trim(), s.currency, s.kind)
+            val account = Account(s.id ?: newId(), s.name.trim(), s.currency, s.kind, excludedFromGoals = s.excludedFromGoals)
             if (s.id == null) repo.addAccount(account) else repo.updateAccount(account)
             _state.update { it.copy(done = true) }
         }

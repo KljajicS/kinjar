@@ -1,0 +1,1 @@
+ALTER TABLE account ADD COLUMN excluded_from_goals INTEGER NOT NULL DEFAULT 0;

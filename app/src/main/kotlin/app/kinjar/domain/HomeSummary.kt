@@ -8,7 +8,7 @@ import java.math.RoundingMode
 /**
  * Savings totals are null when a nonzero active balance has no exchange rate: a partial sum would read as the real figure.
  * Month figures skip unconvertible amounts and set [monthPartial] instead.
- * [savingsPoolRsd] is the unrounded RSD total: goals spend it so a foreign balance fully funds a goal of the same amount.
+ * [goalPoolRsd] excludes opted-out accounts and stays unrounded so foreign balances can fully fund matching goals.
  */
 data class HomeSummary(
     val savingsRsd: Money?,
@@ -18,6 +18,7 @@ data class HomeSummary(
     val monthPartial: Boolean,
     val balances: Map<String, Money>,
     val savingsPoolRsd: BigDecimal? = savingsRsd?.amount,
+    val goalPoolRsd: BigDecimal? = savingsPoolRsd,
 ) {
     val difference: Money get() = income - spent
 }
@@ -29,8 +30,8 @@ object HomeCalculator {
         val posted = transactions.filter { it.date <= today }
         val balances = balances(accounts.filterNot { it.archived }, posted)
 
-        fun total(currency: Currency): BigDecimal? {
-            val grouped = balances.values.groupBy { it.currency }
+        fun total(currency: Currency, amounts: Collection<Money> = balances.values): BigDecimal? {
+            val grouped = amounts.groupBy { it.currency }
                 .mapValues { (_, amounts) -> amounts.fold(BigDecimal.ZERO) { sum, m -> sum + m.amount } }
                 .filterValues { it.signum() != 0 }
             var native = BigDecimal.ZERO
@@ -55,9 +56,10 @@ object HomeCalculator {
         val income = sum(TransactionType.INCOME)
         val spent = sum(TransactionType.EXPENSE)
         val poolRsd = total(Currency.RSD)
+        val goalBalances = accounts.filterNot { it.archived || it.excludedFromGoals }.mapNotNull { balances[it.id] }
         return HomeSummary(
             poolRsd?.let { Money.of(it, Currency.RSD) }, total(Currency.EUR)?.let { Money.of(it, Currency.EUR) },
-            income, spent, partial, balances, poolRsd,
+            income, spent, partial, balances, poolRsd, total(Currency.RSD, goalBalances),
         )
     }
 
