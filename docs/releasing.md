@@ -1,6 +1,6 @@
 # Android releases
 
-Tagged releases publish a signed release APK, `kinjar-release.apk`, and `update.json` for in-app update checks. Metadata is derived from the verified APK rather than from the tag alone. Every release must use the same retained signing key. CI fails when signing configuration is missing instead of publishing an APK signed with a temporary debug key. See [app updates](updates.md) for initial installation and acceptance.
+Tagged releases publish a signed APK named `kinjar-<version>.apk` (for example, `kinjar-0.4.1.apk`), an identical `kinjar-release.apk` for existing in-app updaters, and `update.json`. Metadata retains the compatibility filename because installed versions 0.3.11 and 0.4.0 require that exact URL. Metadata is derived from the verified APK rather than from the tag alone. Every release must use the same retained signing key. CI fails when signing configuration is missing instead of publishing an APK signed with a temporary debug key. See [app updates](updates.md) for initial installation and acceptance.
 
 Each release also retains `kinjar-mapping.txt` from that exact minified build and `SHA256SUMS` covering the APK, mapping and update metadata. Keep them with the APK and tag; mapping files from another build cannot reliably retrace a crash. Application diagnostics contain only fixed operation/error categories and are rate-limited. They never include financial values, receipt URLs, account identifiers, exception messages, or stack traces.
 

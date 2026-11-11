@@ -6,7 +6,7 @@ An available update is optional. Download starts only after confirmation. Androi
 
 ## Release source
 
-The public GitHub release is the update source. The latest release must contain `update.json` and `kinjar-release.apk`. The release workflow creates metadata from the verified signed APK, including its version code, version name, minimum Android version, size and SHA-256 hash. Publish all assets together before exposing a release as latest. Increment both version code and version name for each release.
+The public GitHub release is the update source. Manual downloads use `kinjar-<version>.apk`, for example `kinjar-0.4.1.apk`. Releases also contain an identical `kinjar-release.apk` and `update.json` for existing in-app updaters. Keep the compatibility filename in metadata: installed versions 0.3.11 and 0.4.0 reject other APK URLs. The release workflow creates metadata from the verified signed APK, including its version code, version name, minimum Android version, size and SHA-256 hash. Publish all assets together before exposing a release as latest. Increment both version code and version name for each release.
 
 The app accepts only its configured repository's release URLs, bounds metadata and APK sizes, validates downloads, and checks the APK package, version and signing certificates before handing it to Android. Android performs final installation and signature verification. Checksums detect mismatched downloads; they are not a substitute for the signing key. Signing-key rotation needs a separately designed compatibility change.
 
