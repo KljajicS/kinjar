@@ -12,6 +12,7 @@ import com.google.firebase.firestore.MemoryCacheSettings
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.tasks.await
 
 @Singleton
 class FirebaseServices @Inject constructor(@ApplicationContext private val context: Context) {
@@ -31,6 +32,10 @@ class FirebaseServices @Inject constructor(@ApplicationContext private val conte
         }
     }
     val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance(app) }
+    suspend fun verifyAppCheck() {
+        FirebaseAppCheck.getInstance(app).getAppCheckToken(true).await()
+    }
+
     val firestore: FirebaseFirestore by lazy {
         FirebaseFirestore.getInstance(app).also {
             it.firestoreSettings = FirebaseFirestoreSettings.Builder()
