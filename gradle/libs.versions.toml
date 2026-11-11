@@ -26,7 +26,7 @@ firebase-appcheck = { module = "com.google.firebase:firebase-appcheck-playintegr
 firebase-appcheck-debug = { module = "com.google.firebase:firebase-appcheck-debug" }
 credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
 credentials-play = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
-googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version = "1.1.1" }
+googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version = "1.2.1" }
 coroutines-tasks = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "coroutines" }
 appcompat = { module = "androidx.appcompat:appcompat", version = "1.7.1" }
 biometric = { module = "androidx.biometric:biometric", version = "1.1.0" }

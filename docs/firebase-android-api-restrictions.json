@@ -1,0 +1,15 @@
+{
+  "restrictions": {
+    "apiTargets": [
+      { "service": "identitytoolkit.googleapis.com" },
+      { "service": "securetoken.googleapis.com" },
+      { "service": "firestore.googleapis.com" },
+      { "service": "datastore.googleapis.com" },
+      { "service": "firebaserules.googleapis.com" },
+      { "service": "firebaseappcheck.googleapis.com" },
+      { "service": "firebase.googleapis.com" },
+      { "service": "logging.googleapis.com" },
+      { "service": "firebaseinstallations.googleapis.com" }
+    ]
+  }
+}

@@ -14,6 +14,10 @@ No GitHub access token is packaged in the app. A private repository or a release
 
 ## Acceptance before rollout
 
+Version 0.4.1 includes **Settings > Check app verification** for diagnosing App Check without USB. After updating, run it on each phone and report the displayed code, version and check time. `VERIFIED` means Firebase issued a fresh App Check token; it does not mean enforcement is enabled or that family permissions have been tested. Other codes contain no token or account information. Wait at least one minute before retrying. See [key restrictions and verification](firebase-key-restrictions.md).
+
+Version 0.4.2 fixes the missing numeric Firebase project number needed by Play Integrity and adds **Verification details** to the result. Share that panel if verification still fails. Live enforcement and API-key restrictions are not changed by installing the update.
+
 1. Build a signed release with the retained key and verify its certificate using the existing release verifier.
 2. On a spare installation, install an older signed version containing the updater. Publish or provide the next complete release through the configured public release source.
 3. Verify manual checks, dismissal, download progress, cancellation and retry. Confirm that startup and foreground return do not trigger checks, and that an offline check never blocks local app use.
