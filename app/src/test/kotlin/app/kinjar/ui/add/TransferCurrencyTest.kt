@@ -70,7 +70,7 @@ class TransferCurrencyTest {
         setType(TransactionType.TRANSFER)
         setAccount("eur")
         setToAccount("cash")
-        amount.forEach(::press)
+        setAmount(amount)
     }
 
     @Test fun `NBS suggestion is labelled with its date, saved atomically and follows the sent amount`() = runTest(dispatcher) {
@@ -83,7 +83,7 @@ class TransferCurrencyTest {
         assertEquals(ReceivedSource.NBS, s.receivedSource)
         assertEquals(clock.today().minusDays(1), s.suggestion?.nbsDate)
         assertEquals(Money.of("1172", Currency.RSD), s.received)
-        vm.press('0')
+        vm.setAmount(vm.state.value.amount.text + "0")
         s = vm.state.value
         assertEquals(Money.of("11720", Currency.RSD), s.received)
         assertTrue(s.canSave)
@@ -104,7 +104,7 @@ class TransferCurrencyTest {
         assertEquals(ReceivedSource.MANUAL, vm.state.value.receivedSource)
         rates("118", "106")
         vm.state.first { it.rates.cached[Currency.EUR]?.rate?.compareTo(BigDecimal("118")) == 0 }
-        vm.press('0')
+        vm.setAmount(vm.state.value.amount.text + "0")
         assertEquals(Money.of("11650", Currency.RSD), vm.state.value.received)
         vm.useSuggestedReceived()
         assertEquals(Money.of("118000", Currency.RSD), vm.state.value.received)
@@ -241,7 +241,7 @@ class TransferCurrencyTest {
         assertNull(s.categoryId)
         assertTrue(s.pickableCategories.isNotEmpty() && s.pickableCategories.all { it.kind == CategoryKind.INCOME })
         assertTrue(s.pickableCategories.any { it.id == salary })
-        "1".forEach(vm::press)
+        vm.setAmount("1")
         assertTrue(vm.state.value.canSave)
         vm.setCategory("cat-household")
         assertFalse(vm.state.value.canSave)
