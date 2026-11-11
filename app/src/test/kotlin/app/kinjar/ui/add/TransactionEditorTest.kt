@@ -77,7 +77,7 @@ class TransactionEditorTest {
         assertEquals("100", s.amount.text)
         assertEquals("cash", s.accountId)
         assertEquals(clock.today().minusDays(2), s.date)
-        "5".forEach(vm::press)
+        vm.setAmount("1005")
         vm.setAccount("card")
         vm.setDate(clock.today().plusDays(3))
         vm.setMerchant(" Market ")
@@ -223,7 +223,7 @@ class TransactionEditorTest {
         vm.setAccount("eur")
         assertFalse(vm.state.value.canSave)
         vm.setAccount("card")
-        vm.press('5')
+        vm.setAmount(vm.state.value.amount.text + "5")
         vm.setMerchant("Corrected merchant")
         vm.save()
         vm.state.first { it.saved }
@@ -247,7 +247,7 @@ class TransactionEditorTest {
         assertTrue(vm.state.value.loading)
         assertFalse(vm.state.value.canSave)
         vm.state.first { it.loadFailed }
-        vm.press('5')
+        vm.setAmount(vm.state.value.amount.text + "5")
         vm.setAccount("cash")
         vm.save()
         vm.delete()
@@ -309,7 +309,7 @@ class TransactionEditorTest {
         val missing = editor("gone")
         assertTrue(missing.state.value.missing)
         assertFalse(missing.state.value.canSave)
-        "5".forEach(missing::press)
+        missing.setAmount("5")
         missing.save()
         advanceUntilIdle()
         assertEquals(1, repo.transactions.first().size)
@@ -322,7 +322,7 @@ class TransactionEditorTest {
         first.setType(TransactionType.TRANSFER)
         first.setAccount("cash")
         first.setToAccount("card")
-        "12.5".forEach(first::press)
+        first.setAmount("12.5")
         first.setDate(clock.today().plusDays(1))
         first.setMerchant("Rent split")
         advanceUntilIdle()
@@ -351,7 +351,7 @@ class TransactionEditorTest {
         repo.setRule(RecurringRule("rent", "Rent", rsd("100"), "cash", "cat-bills", Cadence.MONTHLY, LocalDate.of(2026, 10, 20)))
         val billHandle = SavedStateHandle(mapOf("rule" to "rent", "due" to "2026-10-20"))
         val bill = AddViewModel(repo, clock, billHandle, accountStore).also { models += it }.also { vm -> vm.state.first { it.bill != null && it.accounts.isNotEmpty() } }
-        bill.press('5')
+        bill.setAmount(bill.state.value.amount.text + "5")
         bill.setAccount("card")
         advanceUntilIdle()
         billHandle["draft.type"] = TransactionType.INCOME.name

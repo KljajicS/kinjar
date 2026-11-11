@@ -2,7 +2,6 @@ package app.kinjar.ui.add
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
@@ -53,6 +54,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -103,7 +105,7 @@ fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts
         pending != null -> ConflictReview(review, pending, conflicts, onClose)
         reviewed -> Unit
         s.editing != null && !s.loading && !s.loadFailed && !editing -> TransactionDetails(s, onClose, onEdit = { editing = true })
-        else -> AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::press, vm::setCategory, vm::setAccount,
+        else -> AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::setAmount, vm::setCategory, vm::setAccount,
             vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad, vm::reload,
             vm::setReceived, vm::useSuggestedReceived)
     }
@@ -111,7 +113,7 @@ fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts
 
 @Composable
 fun AddContent(
-    s: AddState, onClose: () -> Unit, onType: (TransactionType) -> Unit, onKey: (Char) -> Unit,
+    s: AddState, onClose: () -> Unit, onType: (TransactionType) -> Unit, onAmount: (String) -> Unit,
     onCategory: (String?) -> Unit, onAccount: (String) -> Unit, onToAccount: (String) -> Unit,
     onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit, onSave: () -> Unit,
     onDelete: () -> Unit = {}, onRetry: () -> Unit = {}, onReload: () -> Unit = {},
@@ -149,7 +151,7 @@ fun AddContent(
                 s.loadFailed -> Unit
                 s.missing -> Text(stringResource(R.string.audit_finance_missing), style = sans(15), color = c.orange)
                 s.loanLocked -> Text(stringResource(R.string.audit_finance_loan_locked), style = sans(15), color = c.orange)
-                else -> Fields(s, locale, separator, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip, onReceived, onUseSuggested) {
+                else -> Fields(s, locale, separator, onAmount, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip, onReceived, onUseSuggested) {
                     confirmDelete = true
                 }
             }
@@ -157,7 +159,6 @@ fun AddContent(
         }
 
         if (!readOnly) {
-            Keypad(separator, onKey = onKey)
             val account = s.accounts.firstOrNull { it.id == s.accountId }
             val saveLabel = when {
                 s.editing != null -> stringResource(R.string.audit_finance_save_changes)
@@ -177,7 +178,7 @@ fun AddContent(
 
 @Composable
 private fun Fields(
-    s: AddState, locale: Locale, separator: Char,
+    s: AddState, locale: Locale, separator: Char, onAmount: (String) -> Unit,
     onCategory: (String?) -> Unit, onAccount: (String) -> Unit, onToAccount: (String) -> Unit,
     onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit,
     onReceived: (String) -> Unit, onUseSuggested: () -> Unit, onDelete: () -> Unit,
@@ -185,7 +186,22 @@ private fun Fields(
     val c = LocalColors.current
     Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(s.amount.text.ifEmpty { "0" }.replace('.', separator), style = mono(48, FontWeight.SemiBold, (-0.03).em), color = c.text, maxLines = 1)
+            val amountLabel = stringResource(R.string.recurring_amount)
+            BasicTextField(
+                value = s.amount.text.replace('.', separator),
+                onValueChange = { onAmount(it.replace(separator, '.')) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                textStyle = mono(48, FontWeight.SemiBold, (-0.03).em).copy(color = c.text, textAlign = TextAlign.End),
+                cursorBrush = SolidColor(c.primary),
+                modifier = Modifier.weight(1f).semantics { contentDescription = amountLabel },
+                decorationBox = { field ->
+                    Box(contentAlignment = Alignment.CenterEnd) {
+                        if (s.amount.text.isEmpty()) Text("0", style = mono(48, FontWeight.SemiBold, (-0.03).em), color = c.muted)
+                        field()
+                    }
+                },
+            )
             Text(s.currency.name, style = sans(18, FontWeight.Medium), color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
         }
     }
@@ -429,33 +445,6 @@ fun DateBox(date: LocalDate, onPick: (LocalDate) -> Unit, modifier: Modifier, la
     }
 
     if (open) KinjarDatePickerDialog(date, onDismiss = { open = false }, onPick = { onPick(it); open = false })
-}
-
-/** The decimal key shows the locale separator but always sends '.', the only separator [AmountInput] stores. */
-@Composable
-private fun Keypad(separator: Char, onKey: (Char) -> Unit) {
-    val c = LocalColors.current
-    val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "<")
-    val backspace = stringResource(R.string.add_backspace)
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        keys.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { k ->
-                    val semantics = if (k == "<") Modifier.semantics { contentDescription = backspace } else Modifier
-                    val shown = when (k) {
-                        "<" -> "⌫"
-                        "." -> separator.toString()
-                        else -> k
-                    }
-                    Box(
-                        Modifier.weight(1f).height(52.dp).background(c.surface2, RoundedCornerShape(14.dp))
-                            .clickable(role = Role.Button) { onKey(k[0]) }.then(semantics),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(shown, style = mono(22), color = c.text) }
-                }
-            }
-        }
-    }
 }
 
 private fun TransactionType.label() = when (this) {

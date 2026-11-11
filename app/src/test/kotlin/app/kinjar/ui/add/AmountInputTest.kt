@@ -15,4 +15,28 @@ class AmountInputTest {
     @Test fun `backspace`() = assertEquals("12", type("123<").text)
     @Test fun `empty and zero are null`() { assertNull(type("").value); assertNull(type("0.00").value) }
     @Test fun `length cap at 12 characters`() = assertEquals(12, type("1234567890123456").text.length)
+
+    @Test fun `native edits support replacement insertion and clearing`() {
+        val amount = AmountInput("12.50")
+        assertEquals("19.50", amount.edit("19.50").text)
+        assertEquals("123.50", amount.edit("123.50").text)
+        assertEquals("", amount.edit("").text)
+        assertNull(amount.edit("").value)
+    }
+
+    @Test fun `native input accepts comma and unfinished decimals`() {
+        assertEquals(BigDecimal("12.50"), AmountInput().edit("12,50").value)
+        assertEquals("12.", AmountInput().edit("12,").text)
+        assertEquals(BigDecimal("0.5"), AmountInput().edit(".5").value)
+        assertNull(AmountInput().edit(".").value)
+        assertNull(AmountInput().edit("0.00").value)
+    }
+
+    @Test fun `invalid native edits preserve previous amount without truncation`() {
+        val amount = AmountInput("12.50")
+        listOf("12.501", "1.234,56", "1,234.56", "-12", "1e3", "12a", "1234567890123").forEach {
+            assertEquals(it, amount, amount.edit(it))
+        }
+        assertEquals("123456789012", amount.edit("123456789012").text)
+    }
 }
