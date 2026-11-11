@@ -394,7 +394,7 @@ class AddViewModel @Inject constructor(
             }
         }
     }
-    fun press(key: Char) = _state.update { it.copy(amount = it.amount.press(key)) }
+    fun setAmount(text: String) = _state.update { it.copy(amount = it.amount.edit(text)) }
     fun setCategory(id: String?) = _state.update { it.copy(categoryId = id) }
     fun setDate(date: LocalDate) = _state.update { if (it.bill != null) it else it.copy(date = date) }
     fun setMerchant(text: String) = _state.update { it.copy(merchant = text) }
