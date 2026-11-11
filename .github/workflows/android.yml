@@ -102,16 +102,18 @@ jobs:
         run: |
           cp mapping/release/mapping.txt apk/release/kinjar-mapping.txt
           cd apk/release
-          sha256sum kinjar-release.apk kinjar-mapping.txt update.json > SHA256SUMS
+          cp kinjar-release.apk "kinjar-${GITHUB_REF_NAME#v}.apk"
+          sha256sum "kinjar-${GITHUB_REF_NAME#v}.apk" kinjar-release.apk kinjar-mapping.txt update.json > SHA256SUMS
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            "app/build/outputs/apk/release/kinjar-${GITHUB_REF_NAME#v}.apk" \
             app/build/outputs/apk/release/kinjar-release.apk \
             app/build/outputs/apk/release/kinjar-mapping.txt \
             app/build/outputs/apk/release/update.json \
             app/build/outputs/apk/release/SHA256SUMS \
             --verify-tag --title "${GITHUB_REF_NAME#v}" \
-            --notes 'Signed KinJar release. Update both family phones before using new sync features. Install over the existing app to retain local data.'
+            --notes "Install kinjar-${GITHUB_REF_NAME#v}.apk over the existing app to retain local data. The identical kinjar-release.apk supports older in-app updaters. Update both family phones before using new sync features."

@@ -85,7 +85,8 @@ This is a release operation; branch push alone is insufficient.
 
 Watch [GitHub Actions](https://github.com/KljajicS/kinjar/actions). The `android` workflow must complete `build` and `sync-rules`. If a required reviewer is configured, the owner then selects **Review deployments > release > Approve and deploy** after reviewing the tagged source. Without that protection, signing and publication proceed automatically after the checks pass. The workflow creates the release with:
 
-- `kinjar-release.apk`
+- `kinjar-<version>.apk` for manual installation, for example `kinjar-0.4.1.apk`
+- `kinjar-release.apk`, an identical compatibility copy for existing in-app updaters
 - `kinjar-mapping.txt`
 - `update.json`
 - `SHA256SUMS`
