@@ -99,7 +99,7 @@ fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, o
     BackHandler { if (editing) editing = false else close() }
 
     if (editing && draft.receipt != null) {
-        AddContent(draft, { editing = false }, add::setType, add::press, add::setCategory, add::setAccount,
+        AddContent(draft, { editing = false }, add::setType, add::setAmount, add::setCategory, add::setAccount,
             add::setToAccount, add::setDate, add::setMerchant, add::skip, { save(false) }, onRetry = add::retryLoad)
         return
     }
