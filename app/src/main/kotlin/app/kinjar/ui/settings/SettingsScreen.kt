@@ -60,6 +60,7 @@ fun SettingsScreen(onBack: () -> Unit, onProfile: () -> Unit, onCategories: () -
         SettingsRow(stringResource(R.string.rates_title), onRates)
         SettingsRow(stringResource(R.string.fbs_family), onFamily)
         SettingsRow(stringResource(R.string.fbs_backups), onBackup)
+        AppCheckRow()
         if (updates.enabled) {
             SettingsRow(
                 stringResource(R.string.update_check),
