@@ -336,7 +336,7 @@ class BudgetRepository(
     private fun RuleRow.toDomain() = RecurringRule(
         id, name, Money.of(amount, Currency.valueOf(currency)), account_id, category_id, Cadence.valueOf(cadence), LocalDate.parse(first_due), archived == 1L,
     )
-    private fun AccountRow.toDomain() = Account(id, name, Currency.valueOf(currency), AccountKind.valueOf(kind), archived == 1L)
+    private fun AccountRow.toDomain() = Account(id, name, Currency.valueOf(currency), AccountKind.valueOf(kind), archived == 1L, excluded_from_goals == 1L)
     private fun CategoryRow.toDomain() = Category(id, name, color, archived == 1L, CategoryKind.valueOf(kind), icon)
     private fun MemberRow.toDomain() = Member(id, display_name, device_id)
     private fun Recent.toRecent() = RecentTx(

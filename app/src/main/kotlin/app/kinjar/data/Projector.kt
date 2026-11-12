@@ -62,9 +62,11 @@ class Projector(private val db: KinjarDb) {
             is MemberRenamed -> db.memberQueries.rename(e.displayName, e.memberId)
             is AccountCreated -> db.accountQueries.insertIgnore(
                 e.account.id, e.account.name, e.account.currency.name, e.account.kind.name, if (e.account.archived) 1 else 0,
+                if (e.account.excludedFromGoals) 1 else 0,
             )
             // Edits never change archived: a stale edit from the other phone must not bring a deleted row back (ADR 8).
-            is AccountUpdated -> db.accountQueries.update(e.account.name, e.account.currency.name, e.account.kind.name, e.account.id)
+            is AccountUpdated -> db.accountQueries.update(e.account.name, e.account.currency.name, e.account.kind.name,
+                if (e.account.excludedFromGoals) 1 else 0, e.account.id)
             is AccountArchived -> db.accountQueries.archive(e.accountId)
             is AccountsReordered -> {
                 val existing = db.accountQueries.all().executeAsList().map { it.id }

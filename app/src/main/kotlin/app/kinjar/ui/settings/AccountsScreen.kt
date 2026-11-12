@@ -2,6 +2,7 @@ package app.kinjar.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -143,6 +145,17 @@ fun EditAccountScreen(onClose: () -> Unit, vm: EditAccountViewModel = hiltViewMo
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Currency.entries.forEach { cur -> SelectPill(cur.name, s.currency == cur, { vm.setCurrency(cur) }, style = mono(13)) }
                 }
+            }
+            Row(
+                Modifier.fillMaxWidth().toggleable(s.excludedFromGoals, role = Role.Switch, onValueChange = vm::setExcludedFromGoals).padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.account_exclude_goals), style = BodyStyle, color = c.text)
+                    Text(stringResource(R.string.account_exclude_goals_hint), style = LabelStyle, color = c.muted)
+                }
+                Switch(checked = s.excludedFromGoals, onCheckedChange = null)
             }
             if (s.editing) {
                 Spacer(Modifier.size(6.dp))

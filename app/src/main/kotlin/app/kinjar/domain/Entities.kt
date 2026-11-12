@@ -20,6 +20,7 @@ enum class CategoryKind { EXPENSE, INCOME }
 @Serializable
 data class Member(val id: String, val displayName: String, val deviceId: String)
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class Account(
     val id: String,
@@ -27,6 +28,7 @@ data class Account(
     val currency: Currency,
     val kind: AccountKind = AccountKind.SPENDING,
     val archived: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val excludedFromGoals: Boolean = false,
 )
 
 /** [kind] never changes after creation. New fields are omitted at their defaults so legacy events keep their exact bytes. */

@@ -6,6 +6,15 @@ import org.junit.Test
 import java.time.LocalDate
 
 class EventSerializationTest {
+    @Test fun `legacy account bytes remain unchanged and exclusion round trips`() {
+        val legacy = """{"type":"AccountCreated","account":{"id":"a","name":"Cash","currency":"RSD","kind":"SPENDING","archived":false}}"""
+        val event = EventJson.decodeFromString(Event.serializer(), legacy) as AccountCreated
+        assertEquals(false, event.account.excludedFromGoals)
+        assertEquals(legacy, EventJson.encodeToString(Event.serializer(), event))
+        val excluded: Event = AccountUpdated(event.account.copy(excludedFromGoals = true))
+        assertEquals(excluded, EventJson.decodeFromString(Event.serializer(), EventJson.encodeToString(Event.serializer(), excluded)))
+    }
+
     @Test fun `receipt decimals reject expansion on decode and encode`() {
         for (value in listOf("1E+3000000", "1E-3000000", "0E-2147483647", "9".repeat(257))) {
             assertThrows(IllegalArgumentException::class.java) {

@@ -22,6 +22,29 @@ class HomeSummaryTest {
     private fun rsd(s: String) = Money.of(s, Currency.RSD)
 
     @Test
+    fun `excluded foreign balance without a rate does not block goals`() {
+        val excluded = eurSavings.copy(excludedFromGoals = true)
+        val home = HomeCalculator.summarize(today, listOf(cash, excluded), listOf(
+            tx("cash", TransactionType.INCOME, "1000", cash),
+            tx("eur", TransactionType.INCOME, "100", excluded, currency = Currency.EUR),
+        ), Rates(emptyMap()))
+        assertNull(home.savingsRsd)
+        assertEquals(rsd("1000"), GoalCalculator.progress(listOf(Goal("g", "Goal", rsd("2000"))), home, Rates(emptyMap())).single().funded)
+    }
+
+    @Test
+    fun `excluded negative balances do not reduce funding and transfers change eligibility`() {
+        val excluded = card.copy(excludedFromGoals = true)
+        val txs = listOf(tx("in", TransactionType.INCOME, "1000", cash), tx("out", TransactionType.EXPENSE, "100", excluded))
+        val before = HomeCalculator.summarize(today, listOf(cash, excluded), txs, rates)
+        val after = HomeCalculator.summarize(today, listOf(cash, excluded), txs + tx("move", TransactionType.TRANSFER, "300", cash, to = excluded), rates)
+        assertEquals(rsd("900"), before.savingsRsd)
+        assertEquals(before.savingsRsd, after.savingsRsd)
+        assertEquals(0, before.goalPoolRsd!!.compareTo(BigDecimal("1000")))
+        assertEquals(0, after.goalPoolRsd!!.compareTo(BigDecimal("700")))
+    }
+
+    @Test
     fun `same currency transfers cannot change converted savings`() {
         val a = Account("a", "A", Currency.USD)
         val b = Account("b", "B", Currency.USD)
