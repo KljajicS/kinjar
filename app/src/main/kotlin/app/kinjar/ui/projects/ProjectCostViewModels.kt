@@ -38,6 +38,7 @@ data class PastCostForm(
     @Serializable(with = LocalDateSerializer::class) val date: LocalDate,
     val categoryId: String? = null,
     val note: String = "",
+    val unpaid: Boolean = false,
 ) {
     fun original(project: Project): Money? =
         parseMoneyInput(amount, currency ?: project.currency)?.takeIf { !it.isZero && !it.isNegative }
@@ -103,7 +104,7 @@ class PastCostViewModel @Inject constructor(
         val conv = conversion(original, project.currency, f.date).first ?: return
         val category = f.categoryId?.takeIf { c -> d.categories(id).any { it.id == c && !it.archived } }
         // The draft keeps its id, so a retry after an unclear failure cannot add the cost twice.
-        val cost = ProjectCost(f.costId, id, category, original, conv.converted, f.date, f.note.trim(), null, conv.ratesToRsd, conv.rateDate, conv.source)
+        val cost = ProjectCost(f.costId, id, category, original, conv.converted, f.date, f.note.trim(), null, conv.ratesToRsd, conv.rateDate, conv.source, unpaid = f.unpaid)
         writes.run { projects.record(listOf(cost)) }
     }
 

@@ -121,12 +121,17 @@ fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, onClick: (() -
     val tx = cost.transactionId?.let(data.transactionsById::get)
     val household = tx?.categoryId?.let(data.householdById::get)
     val title = when {
+        cost.unpaid -> cost.note.ifBlank { stringResource(R.string.project_unpaid) }
         cost.transactionId == null -> cost.note.ifBlank { stringResource(R.string.project_past_cost) }
         tx?.merchant?.isNotBlank() == true -> tx.merchant
         household != null -> categoryDisplayName(household.id, household.name)
         else -> stringResource(R.string.project_linked_expense)
     }
-    val kind = stringResource(if (cost.transactionId == null) R.string.project_past_cost else R.string.project_linked_expense)
+    val kind = stringResource(when {
+        cost.unpaid -> R.string.project_unpaid
+        cost.transactionId == null -> R.string.project_past_cost
+        else -> R.string.project_linked_expense
+    })
     OutlinedBox(Modifier.fillMaxWidth(), radius = 14, onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ColorDot(categoryColor(category), 12.dp)

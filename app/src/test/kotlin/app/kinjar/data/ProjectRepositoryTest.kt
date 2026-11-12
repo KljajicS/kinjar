@@ -94,6 +94,38 @@ class ProjectRepositoryTest {
         refused("Cost date is in the future") { projects.record(listOf(manual("later", rsd("1"), date = day.plusDays(5)))) }
     }
 
+    @Test fun `settlement replaces unpaid cost once with actual expense and preserves finances`() = runTest {
+        seed()
+        val unpaid = manual("pending", eur("100")).copy(unpaid = true, note = "Tiles")
+        val before = repo.financial.first()
+        projects.record(listOf(unpaid))
+        assertEquals(before, repo.financial.first())
+        val tx = expense("payment", rsd("23434"), date = day.plusDays(1))
+        val paid = link("paid", tx).copy(note = unpaid.note)
+        val afterPayment = repo.financial.first()
+        projects.settle(unpaid, paid)
+        assertEquals(listOf(paid), projects.readBook().costsFor(kitchen.id))
+        assertEquals(eur("200.00"), paid.converted)
+        assertEquals(afterPayment, repo.financial.first())
+        refused("Cost changed; reopen it") { projects.settle(unpaid, paid.copy(id = "duplicate")) }
+        store.rebuild()
+        assertEquals(listOf(paid), projects.readBook().costsFor(kitchen.id))
+    }
+
+    @Test fun `failed settlement keeps unpaid cost and rejects stale and already linked payments`() = runTest {
+        seed()
+        val unpaid = manual("pending", eur("100")).copy(unpaid = true)
+        val tx = expense("payment", eur("100"))
+        projects.record(listOf(unpaid, link("existing", tx)))
+        val before = projects.readBook()
+        refused("Expense already linked") { projects.settle(unpaid, link("paid", tx)) }
+        assertEquals(before, projects.readBook())
+        val next = unpaid.copy(note = "Changed")
+        projects.record(listOf(next), listOf(unpaid))
+        refused("Cost changed; reopen it") { projects.settle(unpaid, link("paid", tx)) }
+        assertTrue(projects.readBook().costs.contains(next))
+    }
+
     @Test fun `an expense links once across all projects, archived included, and a failing batch writes nothing`() = runTest {
         seed()
         val first = expense("first", eur("10"))

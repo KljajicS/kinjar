@@ -47,10 +47,12 @@ data class ProjectCost(
     val ratesToRsd: Map<Currency, String> = emptyMap(),
     @Serializable(with = LocalDateSerializer::class) val rateDate: LocalDate = date,
     val rateSource: String = "same-currency",
+    val unpaid: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && projectId.isNotBlank())
         require(transactionId == null || transactionId.isNotBlank())
+        require(!unpaid || transactionId == null) { "An unpaid cost cannot have a payment expense" }
         require(categoryId == null || categoryId.isNotBlank())
         require(!original.isNegative && !original.isZero) { "Project cost must be positive" }
         require(date.year in 1900..2100 && rateDate <= date && rateDate.year >= 1900)
