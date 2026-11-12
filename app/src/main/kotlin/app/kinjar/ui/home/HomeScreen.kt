@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Handshake
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -92,7 +93,9 @@ fun HomeScreen(
     val c = LocalColors.current
     val s = state
     if (s == null) {
-        if (failed) Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.Center) { LoadFailed(vm::retry) }
+        Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.Center) {
+            if (failed) LoadFailed(vm::retry) else CircularProgressIndicator(color = c.primary)
+        }
         return
     }
     val locale = LocalLocale.current.platformLocale
