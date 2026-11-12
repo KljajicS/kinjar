@@ -2,6 +2,7 @@ package app.kinjar.ui.projects
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -132,7 +133,10 @@ fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, onClick: (() -
         cost.transactionId == null -> R.string.project_past_cost
         else -> R.string.project_linked_expense
     })
-    OutlinedBox(Modifier.fillMaxWidth(), radius = 14, onClick = onClick) {
+    OutlinedBox(
+        Modifier.fillMaxWidth().then(if (cost.unpaid) Modifier.border(3.dp, Color(0xFFFF8A00), RoundedCornerShape(14.dp)) else Modifier),
+        radius = 14, onClick = onClick,
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ColorDot(categoryColor(category), 12.dp)
             Column(Modifier.weight(1f)) {
