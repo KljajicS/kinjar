@@ -19,8 +19,8 @@ android {
         applicationId = "app.kinjar"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "0.5.1"
+        versionCode = 20
+        versionName = "0.5.2"
         val syncEnabled = providers.gradleProperty("firebaseSyncEnabled").orElse("false").get().toBooleanStrict()
         buildConfigField("boolean", "FIREBASE_SYNC_ENABLED", syncEnabled.toString())
         listOf("PROJECT_ID", "APP_ID", "API_KEY", "WEB_CLIENT_ID").forEach { key ->

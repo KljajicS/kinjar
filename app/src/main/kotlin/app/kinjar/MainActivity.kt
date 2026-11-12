@@ -307,6 +307,8 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
             exitTransition = { navExit() },
             popEnterTransition = { EnterTransition.None },
             popExitTransition = { navPopExit() },
+            predictivePopEnterTransition = { EnterTransition.None },
+            predictivePopExitTransition = { navPopExit() },
         ) {
             composable(Tab.HOME.route) {
                 TabPage(Tab.HOME, selectTab) {
