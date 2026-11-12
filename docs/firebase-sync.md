@@ -142,3 +142,9 @@ The following require the configured signed APK on two devices and remain pendin
 - English and Serbian Latin, font scaling, keyboard, TalkBack labels, rotation, and app lock around Google/file-picker screens.
 
 Do not mark these complete from JVM or rules-emulator results alone.
+
+## Project history compatibility
+
+Project commands use operation version 5; new backups and bootstrap histories use stream version 4. Older clients must update before reading project history. Deploy the matching Firestore rules before releasing a sync-enabled build that creates version 4 bootstrap histories. Existing family operations keep their original encoding and history digests remain stable.
+
+Project costs retain original amounts, converted amounts, rate source and effective date. A historical cost creates no account transaction. Linking writes a project association to an existing expense, and conflicts on that expense prevent two devices linking it to different projects silently. Archived projects retain their links.

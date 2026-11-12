@@ -1,0 +1,20 @@
+CREATE TABLE project_category (
+    id TEXT NOT NULL PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+
+save:
+INSERT OR REPLACE INTO project_category(id, project_id, payload) VALUES (?, ?, ?);
+
+all:
+SELECT * FROM project_category ORDER BY id;
+
+byId:
+SELECT * FROM project_category WHERE id = ?;
+
+byProject:
+SELECT * FROM project_category WHERE project_id = ?;
+
+deleteAll:
+DELETE FROM project_category;

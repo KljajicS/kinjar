@@ -95,8 +95,9 @@ import app.kinjar.ui.add.AddScreen
 import app.kinjar.ui.scan.ScanScreen
 import app.kinjar.ui.home.HomeScreen
 import app.kinjar.ui.goals.EditGoalScreen
-import app.kinjar.ui.goals.GoalsScreen
 import app.kinjar.ui.insights.InsightsScreen
+import app.kinjar.ui.projects.ProjectsScreen
+import app.kinjar.ui.projects.projectRoutes
 import app.kinjar.ui.settings.AccountsScreen
 import app.kinjar.ui.settings.CategoriesScreen
 import app.kinjar.ui.settings.EditAccountScreen
@@ -373,8 +374,14 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                 )
             }
             composable(Tab.GOALS.route) {
-                GoalsScreen(onNew = { nav.navigate(Routes.NEW_GOAL) }, onOpen = { nav.navigate(Routes.editGoal(it)) })
+                ProjectsScreen(
+                    onNewProject = { nav.navigate(Routes.NEW_PROJECT) },
+                    onProject = { nav.navigate(Routes.project(it)) },
+                    onNewGoal = { nav.navigate(Routes.NEW_GOAL) },
+                    onGoal = { nav.navigate(Routes.editGoal(it)) },
+                )
             }
+            projectRoutes(nav)
             composable(Routes.NEW_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.EDIT_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
             composable(Routes.EDIT_TRANSACTION) { AddScreen(onClose = { nav.popBackStack() }) }

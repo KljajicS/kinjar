@@ -37,6 +37,13 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DataModule {
     @Provides @Singleton
+    fun projects(db: KinjarDb, store: EventStore, clock: Clock): app.kinjar.data.ProjectRepository =
+        app.kinjar.data.ProjectRepository(db, store, clock)
+
+    @Provides @Singleton
+    fun projectRates(): app.kinjar.data.rates.ProjectRateLookup = app.kinjar.data.rates.NbsHistoricalClient()
+
+    @Provides @Singleton
     fun loans(repo: BudgetRepository): app.kinjar.data.LoanRepository = repo.loans
     @Provides @Singleton
     fun rates(repo: BudgetRepository): RateRepository = repo.exchangeRates

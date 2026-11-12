@@ -21,6 +21,7 @@ Screenshots use demo data.
 - Income, expenses, transfers and recurring bills.
 - Multiple accounts and currencies, with total savings in EUR and RSD.
 - Drag-to-reorder accounts and goals. Savings fill goals in priority order.
+- Projects with configurable categories, expense linking, historical costs, charts, optional budgets and archive/restore. Project currency can switch between EUR and RSD using saved expense-date conversions.
 - Monthly insights, spending categories and transaction history.
 - Serbian fiscal receipt QR scanning and manual loan repayment tracking.
 - English and Serbian Latin, selectable in Settings, with light, dark and AMOLED themes.

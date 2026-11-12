@@ -1,0 +1,17 @@
+CREATE TABLE project (
+    id TEXT NOT NULL PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+CREATE TABLE project_category (
+    id TEXT NOT NULL PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE TABLE project_cost (
+    id TEXT NOT NULL PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    tx_id TEXT,
+    payload TEXT,
+    removed INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX project_cost_tx ON project_cost(tx_id) WHERE removed = 0;

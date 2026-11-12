@@ -23,6 +23,23 @@ internal fun operationResources(events: List<Event>, db: KinjarDb): Map<String, 
     }
     events.forEach { event ->
         when (event) {
+            is ProjectSaved -> {
+                write("project:${event.project.id}")
+                event.project.sourceCategoryIds.forEach { read("category:$it") }
+            }
+            is ProjectCategorySaved -> {
+                write("project:${event.category.projectId}")
+                write("project-category:${event.category.id}")
+            }
+            is ProjectCostSaved -> {
+                write("project:${event.cost.projectId}")
+                event.cost.categoryId?.let { read("project-category:$it") }
+                event.cost.transactionId?.let { transaction(it) }
+            }
+            is ProjectCostRemoved -> {
+                write("project:${event.projectId}")
+                event.transactionId?.let { transaction(it) }
+            }
             is AccountCreated -> write("account:${event.account.id}")
             is AccountUpdated -> write("account:${event.account.id}")
             is AccountArchived -> write("account:${event.accountId}")

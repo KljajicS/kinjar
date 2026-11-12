@@ -54,7 +54,7 @@ class CategoryTransferProtocolTest {
                 OperationCodec.decode(String(bytes).replace("\"version\":4", "\"version\":3").toByteArray())
             }
             assertThrows(UnsupportedSyncVersion::class.java) {
-                OperationCodec.decode(String(bytes).replace("\"version\":4", "\"version\":5").toByteArray())
+                OperationCodec.decode(String(bytes).replace("\"version\":4", "\"version\":6").toByteArray())
             }
         }
     }

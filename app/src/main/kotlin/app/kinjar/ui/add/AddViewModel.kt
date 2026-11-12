@@ -54,6 +54,8 @@ data class AddState(
     val categories: List<Category> = emptyList(),
     @StringRes val error: Int? = null,
     val saved: Boolean = false,
+    /** The new transaction's id once stored, so a project flow can offer to link it; null after edits and deletes. */
+    val savedId: String? = null,
     val saving: Boolean = false,
     @StringRes val saveError: Int? = null,
     val receipt: Receipt? = null,
@@ -415,6 +417,7 @@ class AddViewModel @Inject constructor(
         val accountId = requireNotNull(s.accountId)
         _state.update { it.copy(saving = true, saveError = null) }
         viewModelScope.launch {
+            var savedId: String? = null
             try {
                 val toAccountId = if (s.type == TransactionType.TRANSFER) s.toAccountId else null
                 val categoryId = if (s.type.categoryKind != null) s.categoryId else null
@@ -445,6 +448,7 @@ class AddViewModel @Inject constructor(
                         received = s.received,
                     )
                     if (s.receipt != null) repo.addReceipt(transaction, s.receipt) else repo.add(transaction)
+                    savedId = transaction.id
                 }
             } catch (e: CancellationException) {
                 _state.update { it.copy(saving = false) }
@@ -464,7 +468,7 @@ class AddViewModel @Inject constructor(
                 _state.update { it.copy(saving = false, saveError = message) }
                 return@launch
             }
-            _state.update { it.copy(saved = true, saving = false) }
+            _state.update { it.copy(saved = true, saving = false, savedId = savedId) }
             // A correction is not a fresh choice, so it does not change which account new entries default to.
             if (s.editing != null) return@launch
             try {
