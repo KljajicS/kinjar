@@ -28,7 +28,7 @@ import javax.inject.Inject
 
 data class CategoryTotal(val category: ProjectCategory?, val total: Money)
 
-data class ProjectSummary(val project: Project, val spent: Money, val byCategory: List<CategoryTotal>)
+data class ProjectSummary(val project: Project, val total: Money, val byCategory: List<CategoryTotal>, val unpaid: Money)
 
 fun sum(costs: List<ProjectCost>, currency: Currency): Money =
     costs.filter { it.converted.currency == currency }.fold(Money.zero(currency)) { total, cost -> total + cost.converted }
@@ -51,7 +51,8 @@ fun monthTotals(costs: List<ProjectCost>, currency: Currency, today: YearMonth):
 
 fun ProjectBook.summary(project: Project): ProjectSummary {
     val costs = costsFor(project.id)
-    return ProjectSummary(project, sum(costs, project.currency), categoryTotals(costs, categories.filter { it.projectId == project.id }, project.currency))
+    return ProjectSummary(project, sum(costs, project.currency), categoryTotals(costs, categories.filter { it.projectId == project.id }, project.currency),
+        sum(costs.filter { it.unpaid }, project.currency))
 }
 
 data class ProjectData(val book: ProjectBook, val household: List<Category>, val accounts: List<Account>) {

@@ -4,6 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Text
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,7 +29,7 @@ import app.kinjar.ui.theme.SelectPill
 import app.kinjar.ui.theme.sans
 
 @Composable
-fun PastCostScreen(onBack: () -> Unit, vm: PastCostViewModel = hiltViewModel()) {
+fun PastCostScreen(onBack: () -> Unit, tabs: @Composable (Boolean) -> Unit, vm: PastCostViewModel = hiltViewModel()) {
     val loaded by vm.data.collectAsStateWithLifecycle()
     val failed by vm.loadFailed.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
@@ -36,7 +40,8 @@ fun PastCostScreen(onBack: () -> Unit, vm: PastCostViewModel = hiltViewModel()) 
     val back = { if (!write.busy) onBack() }
     val d = loaded
     val project = d?.project(vm.id)
-    ProjectPage(stringResource(R.string.project_record_past), back) {
+    ProjectPage(stringResource(R.string.project_link), back) {
+        item("tabs") { tabs(write.busy) }
         when {
             d == null -> item { LoadingOrError(failed, vm::retry) }
             project == null -> section { Hint(stringResource(R.string.project_not_found)) }
@@ -46,6 +51,11 @@ fun PastCostScreen(onBack: () -> Unit, vm: PastCostViewModel = hiltViewModel()) 
                 val currency = form.currency ?: project.currency
                 val busy = write.busy
                 Hint(stringResource(R.string.project_past_hint))
+                Row(Modifier.toggleable(form.unpaid, enabled = !busy, role = Role.Checkbox,
+                    onValueChange = { value -> vm.edit { it.copy(unpaid = value) } }), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(form.unpaid, onCheckedChange = null)
+                    Text(stringResource(R.string.project_unpaid), color = c.text)
+                }
                 AmountField(stringResource(R.string.project_amount), form.amount, currency) { text -> vm.edit { it.copy(amount = text) } }
                 Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Currency.entries.forEach { option -> SelectPill(option.name, option == currency, { vm.edit { it.copy(currency = option) } }) }
@@ -62,7 +72,7 @@ fun PastCostScreen(onBack: () -> Unit, vm: PastCostViewModel = hiltViewModel()) 
                     RateInputs(false, missing, manual, vm::setRate, vm::retryRates)
                 }
                 WriteFeedback(vm.writes)
-                PrimaryButton(stringResource(R.string.project_past_save), conversion != null && !future && !busy, vm::save)
+                PrimaryButton(stringResource(R.string.project_cost_save), conversion != null && !future && !busy, vm::save)
             }
         }
     }

@@ -49,4 +49,20 @@ class ProjectSyncStoreTest {
         assertEquals(listOf(tx), repo.readBook().transactions)
         assertEquals(1, db.syncQuarantineQueries.all().executeAsList().size)
     }
+
+    @Test fun `unpaid settlement syncs as one operation and replays without duplicate cost`() = runTest {
+        enrolled()
+        val unpaid = cost.copy(id = "pending", transactionId = null, unpaid = true)
+        repo.record(listOf(unpaid))
+        repo.settle(unpaid, cost)
+        val operations = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }
+        assertEquals(2, operations.size)
+        assertTrue(operations.any { operation ->
+            operation.events.map { it.event } == listOf(ProjectCostRemoved(unpaid.id, project.id), ProjectCostSaved(cost))
+        })
+        store.rebuild()
+        store.validateHistory(store.snapshot())
+        assertEquals(listOf(cost), repo.readBook().costs)
+        assertEquals(listOf(tx), repo.readBook().transactions)
+    }
 }

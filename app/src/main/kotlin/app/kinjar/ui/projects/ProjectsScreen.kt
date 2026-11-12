@@ -86,23 +86,29 @@ private fun ProjectCard(s: ProjectSummary, onClick: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(s.project.name, style = sans(16, FontWeight.SemiBold), color = c.text, modifier = Modifier.weight(1f))
-                Text(money(s.spent), style = mono(15, FontWeight.SemiBold), color = c.text)
+                Text(money(s.total), style = mono(15, FontWeight.SemiBold), color = c.text)
             }
             ColorBar(s.byCategory)
-            BudgetLine(s.spent, s.project.budget)
+            BudgetLine(s.total, s.project.budget, includesUnpaid = !s.unpaid.isZero)
+            if (!s.unpaid.isZero) PaymentTotals(s.total - s.unpaid, s.unpaid)
         }
     }
 }
 
 @Composable
-fun BudgetLine(spent: Money, budget: Money?) {
+fun BudgetLine(spent: Money, budget: Money?, includesUnpaid: Boolean = false) {
     val over = budget != null && spent.amount > budget.amount
     Hint(
         when {
-            budget == null -> stringResource(R.string.project_spent_lifetime)
+            budget == null -> stringResource(if (includesUnpaid) R.string.project_total else R.string.project_spent_lifetime)
             over -> stringResource(R.string.project_over_budget, money(spent - budget), money(budget))
             else -> stringResource(R.string.project_budget_left, money(budget - spent), money(budget))
         },
         if (over) LocalColors.current.orange else LocalColors.current.muted,
     )
+}
+
+@Composable
+fun PaymentTotals(paid: Money, unpaid: Money) {
+    Hint(stringResource(R.string.project_payment_totals, money(paid), money(unpaid)))
 }

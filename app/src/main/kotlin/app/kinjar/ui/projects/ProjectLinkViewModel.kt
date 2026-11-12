@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -63,8 +62,7 @@ class ProjectLinkViewModel @Inject constructor(
     private val projects: ProjectRepository, repo: BudgetRepository, lookup: ProjectRateLookup, val clock: Clock, private val saved: SavedStateHandle,
 ) : ViewModel() {
     val id: String = requireNotNull(saved["id"])
-    /** The expense just saved from this project's "New expense" flow; it is selected but not linked until [save]. */
-    val fresh: String? = saved["select"]
+    val costId: String? = saved["costId"]
     val writes = WriteOperation(viewModelScope)
     private val quoteCache = QuoteCache(viewModelScope, lookup)
     val quotes: StateFlow<Map<LocalDate, QuoteResult>> = quoteCache.quotes
@@ -77,14 +75,6 @@ class ProjectLinkViewModel @Inject constructor(
     val manual: StateFlow<Map<RateKey, String>> = mutableManual
 
     init {
-        viewModelScope.launch {
-            val first = data.filterNotNull().first()
-            val project = first.project(id) ?: return@launch
-            if (fresh != null && saved.get<Boolean>(FRESH_DONE) != true) {
-                saved[FRESH_DONE] = true
-                if (first.candidates(project, clock.today()).any { it.id == fresh }) edit { it.copy(selected = it.selected + fresh) }
-            }
-        }
         viewModelScope.launch {
             combine(data.filterNotNull(), form) { d, f ->
                 val project = d.project(id) ?: return@combine emptyList<LocalDate>()
@@ -108,6 +98,7 @@ class ProjectLinkViewModel @Inject constructor(
     fun toggle(txId: String) = edit {
         when {
             txId in it.selected -> it.copy(selected = it.selected - txId, limited = false)
+            costId != null -> it.copy(selected = setOf(txId), limited = false)
             it.selected.size >= MAX_BATCH -> it.copy(limited = true)
             else -> it.copy(selected = it.selected + txId)
         }
@@ -131,6 +122,15 @@ class ProjectLinkViewModel @Inject constructor(
         val project = d.project(id)?.takeIf { !it.archived } ?: return
         val plan = linkPlan(chosen(d, project), project, quotes.value, manual.value)
         if (!plan.ready) return
+        if (costId != null) {
+            val unpaid = d.book.costs.find { it.id == costId && it.projectId == id && it.unpaid } ?: return
+            val (tx, conversion) = plan.items.singleOrNull() ?: return
+            val conv = requireNotNull(conversion)
+            val linked = ProjectCost("${unpaid.id}-paid", id, unpaid.categoryId, tx.money, conv.converted, tx.date,
+                unpaid.note, tx.id, conv.ratesToRsd, conv.rateDate, conv.source)
+            writes.run { projects.settle(unpaid, linked) }
+            return
+        }
         val category = form.value.categoryId?.takeIf { c -> d.categories(id).any { it.id == c && !it.archived } }
         val costs = plan.items.map { (tx, conversion) ->
             val conv = requireNotNull(conversion)
@@ -141,6 +141,5 @@ class ProjectLinkViewModel @Inject constructor(
 
     private companion object {
         const val FORM = "link.form"
-        const val FRESH_DONE = "link.freshDone"
     }
 }

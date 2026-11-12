@@ -1,9 +1,6 @@
 package app.kinjar.ui.projects
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -16,10 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
@@ -42,10 +37,9 @@ class ProjectActions(
     val onBack: () -> Unit,
     val onSettings: () -> Unit = {},
     val onLink: () -> Unit = {},
-    val onNewExpense: () -> Unit = {},
-    val onPastCost: () -> Unit = {},
     val onAllCosts: () -> Unit = {},
     val onReview: (String) -> Unit = {},
+    val onSettle: (String) -> Unit = {},
 )
 
 @Composable
@@ -82,7 +76,9 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
         }
     }
     stored.find { it.id == acting }?.let { cost ->
-        CostDialog(cost, project, cost.id in stale, write.busy, vm, onReview = { acting = null; actions.onReview(cost.id) }) { acting = null }
+        CostDialog(cost, project, cost.id in stale, write.busy, vm,
+            onReview = { acting = null; actions.onReview(cost.id) },
+            onSettle = { acting = null; actions.onSettle(cost.id) }) { acting = null }
     }
 }
 
@@ -95,22 +91,19 @@ private fun LazyListScope.overview(
         if (project.archived) Hint(stringResource(R.string.project_archived_notice), c.orange)
         Hint(stringResource(R.string.project_total))
         Text(money(total), style = mono(32, FontWeight.SemiBold), color = c.text)
-        BudgetLine(total, project.budget)
+        BudgetLine(total, project.budget, includesUnpaid = costs.any { it.unpaid })
+        if (costs.any { it.unpaid }) PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
         if (stale.isNotEmpty()) Hint(stringResource(R.string.project_review_needed, stale.size), c.orange)
         ProjectChart(costs, d.categories(project.id), project.currency, month)
         if (!project.archived) {
             PrimaryButton(stringResource(R.string.project_link), onClick = actions.onLink)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = actions.onNewExpense) { Text(stringResource(R.string.project_new_expense), color = c.primary) }
-                TextButton(onClick = actions.onPastCost) { Text(stringResource(R.string.project_record_past), color = c.primary) }
-            }
         }
         Text(stringResource(R.string.project_recent), style = SectionStyle, color = c.text)
     }
 }
 
 @Composable
-private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy: Boolean, vm: ProjectViewModel, onReview: () -> Unit, onDismiss: () -> Unit) {
+private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy: Boolean, vm: ProjectViewModel, onReview: () -> Unit, onSettle: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalColors.current
     val linked = cost.transactionId != null
     var confirming by rememberSaveable(cost.id) { mutableStateOf(false) }
@@ -125,6 +118,7 @@ private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy
         if (confirming) {
             Text(stringResource(if (linked) R.string.project_unlink_body else R.string.project_remove_body), style = sans(14), color = c.text)
         } else {
+            if (cost.unpaid) Hint(stringResource(R.string.project_unpaid), c.orange)
             Text("${date(cost.date)} · ${money(cost.converted)}", style = sans(14, FontWeight.Medium), color = c.text)
             if (cost.original != cost.converted) {
                 Hint(stringResource(R.string.project_original_amount, money(cost.original)))
@@ -133,6 +127,7 @@ private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy
             if (cost.note.isNotBlank() && linked) Hint(cost.note)
             if (stale) Hint(stringResource(R.string.project_cost_changed), c.orange)
             if (!project.archived) {
+                if (cost.unpaid) TextButton(onClick = onSettle, enabled = !busy) { Text(stringResource(R.string.project_link_payment), color = c.primary) }
                 if (stale) TextButton(onClick = onReview, enabled = !busy) { Text(stringResource(R.string.project_review), color = c.primary) }
                 TextButton(onClick = { confirming = true }, enabled = !busy) {
                     Text(stringResource(if (linked) R.string.project_unlink else R.string.project_remove), color = c.orange)

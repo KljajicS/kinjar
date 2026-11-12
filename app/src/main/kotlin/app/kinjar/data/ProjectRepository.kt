@@ -99,14 +99,27 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
      * [expected], so a change synced from another device is never silently overwritten.
      */
     suspend fun record(costs: List<ProjectCost>, expected: List<ProjectCost> = emptyList()) {
+        persist(costs, expected)
+    }
+
+    suspend fun settle(unpaid: ProjectCost, linked: ProjectCost) {
+        require(unpaid.unpaid && linked.transactionId != null && !linked.unpaid)
+        require(linked.id != unpaid.id && linked.projectId == unpaid.projectId)
+        require(linked.categoryId == unpaid.categoryId && linked.note == unpaid.note)
+        persist(listOf(linked), emptyList(), unpaid)
+    }
+
+    private suspend fun persist(costs: List<ProjectCost>, expected: List<ProjectCost>, unpaid: ProjectCost? = null) {
         require(costs.isNotEmpty() && costs.size <= 200 && costs.map { it.id }.distinct().size == costs.size)
         require(costs.map { it.projectId }.distinct().size == 1)
         val linked = costs.mapNotNull { it.transactionId }
         require(linked.distinct().size == linked.size) { "Expense selected more than once" }
         val before = expected.associateBy { it.id }
         require(before.size == expected.size)
-        store.appendAll(costs.map(::ProjectCostSaved)) {
+        val removals = unpaid?.let { listOf(ProjectCostRemoved(it.id, it.projectId)) }.orEmpty()
+        store.appendAll(removals + costs.map(::ProjectCostSaved)) {
             val target = activeProject(costs.first().projectId)
+            unpaid?.let { require(cost(it.id) == it) { "Cost changed; reopen it" } }
             costs.forEach { value ->
                 require(value.converted.currency == target.currency) { "Preview currency changes first" }
                 val row = db.projectCostQueries.byId(value.id).executeAsOneOrNull()
@@ -118,7 +131,7 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
                 }
                 value.categoryId?.let { id ->
                     val category = category(id)
-                    require(category != null && category.projectId == target.id && (!category.archived || previous?.categoryId == id)) {
+                    require(category != null && category.projectId == target.id && (!category.archived || previous?.categoryId == id || unpaid?.categoryId == id)) {
                         "Choose an active category of this project"
                     }
                 }

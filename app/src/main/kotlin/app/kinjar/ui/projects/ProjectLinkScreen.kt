@@ -11,10 +11,15 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -39,7 +44,25 @@ import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 
 @Composable
-fun ProjectLinkScreen(onBack: () -> Unit, vm: ProjectLinkViewModel = hiltViewModel()) {
+fun ProjectLinkScreen(onBack: () -> Unit) {
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val tabs: @Composable (Boolean) -> Unit = { busy ->
+        val c = LocalColors.current
+        TabRow(selectedTabIndex = selectedTab, containerColor = c.bg, contentColor = c.primary) {
+            listOf(R.string.project_existing_expenses, R.string.project_manual_cost).forEachIndexed { index, label ->
+                Tab(selected = selectedTab == index, onClick = { selectedTab = index }, enabled = !busy,
+                    text = { Text(stringResource(label)) })
+            }
+        }
+    }
+    if (selectedTab == 0) ExistingExpensesScreen(onBack, tabs) else PastCostScreen(onBack, tabs)
+}
+
+@Composable
+fun ProjectPaymentScreen(onBack: () -> Unit) = ExistingExpensesScreen(onBack, tabs = {})
+
+@Composable
+private fun ExistingExpensesScreen(onBack: () -> Unit, tabs: @Composable (Boolean) -> Unit, vm: ProjectLinkViewModel = hiltViewModel()) {
     val loaded by vm.data.collectAsStateWithLifecycle()
     val failed by vm.loadFailed.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
@@ -48,14 +71,18 @@ fun ProjectLinkScreen(onBack: () -> Unit, vm: ProjectLinkViewModel = hiltViewMod
     val write by vm.writes.state.collectAsStateWithLifecycle()
     LaunchedEffect(write.finished) { if (write.finished) onBack() }
     val back = { if (!write.busy) onBack() }
-    val title = stringResource(R.string.project_link)
+    val settling = vm.costId != null
+    val title = stringResource(if (settling) R.string.project_link_payment else R.string.project_link)
     val d = loaded
     val project = d?.project(vm.id)
-    if (d == null || project == null || project.archived) {
+    val unpaid = d?.book?.costs?.find { it.id == vm.costId && it.projectId == vm.id && it.unpaid }
+    if (d == null || project == null || project.archived || (settling && unpaid == null)) {
         ProjectPage(title, back) {
+            item("tabs") { tabs(write.busy) }
             when {
                 d == null -> item { LoadingOrError(failed, vm::retry) }
                 project == null -> section { Hint(stringResource(R.string.project_not_found)) }
+                settling && unpaid == null -> section { Hint(stringResource(R.string.project_unpaid_gone)) }
                 else -> section { Hint(stringResource(R.string.project_archived_notice)) }
             }
         }
@@ -79,21 +106,18 @@ fun ProjectLinkScreen(onBack: () -> Unit, vm: ProjectLinkViewModel = hiltViewMod
         Text(stringResource(R.string.project_link_summary, chosen.size, money(total)), style = sans(14, FontWeight.Medium), color = c.text)
         if (waiting > 0) Hint(stringResource(R.string.project_link_waiting, waiting), c.orange)
         WriteFeedback(vm.writes)
-        PrimaryButton(stringResource(R.string.project_link_save, chosen.size), plan.ready && !write.busy, vm::save)
+        PrimaryButton(if (settling) stringResource(R.string.project_link_payment) else stringResource(R.string.project_link_save, chosen.size),
+            plan.ready && (!settling || chosen.size == 1) && !write.busy, vm::save)
     }) {
+        item("tabs") { tabs(write.busy) }
         section("controls") {
-            vm.fresh?.let { fresh ->
-                when {
-                    candidates.none { it.id == fresh } -> Hint(stringResource(R.string.project_fresh_ineligible), c.orange)
-                    fresh in form.selected -> Hint(stringResource(R.string.project_fresh_selected), c.text)
-                }
-            }
+            if (unpaid != null) Hint(stringResource(R.string.project_settle_hint, money(unpaid.converted)))
             SourceCategories(project.sourceCategoryIds.mapNotNull(d.householdById::get), names)
-            ProjectCategoryField(d.categories(project.id), form.categoryId, !write.busy, vm::setCategory)
+            if (!settling) ProjectCategoryField(d.categories(project.id), form.categoryId, !write.busy, vm::setCategory)
             FieldBox(stringResource(R.string.project_search), form.query, vm::setQuery)
             RateInputs(plan.loading, plan.missing, manual, vm::setRate, vm::retryRates)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { vm.selectAll(visible.map { it.id }) }, enabled = visible.isNotEmpty()) {
+                if (!settling) TextButton(onClick = { vm.selectAll(visible.map { it.id }) }, enabled = visible.isNotEmpty()) {
                     Text(stringResource(R.string.project_select_all, visible.size), color = c.primary)
                 }
                 TextButton(onClick = vm::clear, enabled = form.selected.isNotEmpty()) { Text(stringResource(R.string.project_clear_selection), color = c.primary) }

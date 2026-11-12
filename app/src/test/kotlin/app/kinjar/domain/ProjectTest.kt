@@ -6,6 +6,15 @@ import org.junit.Test
 import java.time.LocalDate
 
 class ProjectTest {
+    @Test fun `old costs default to paid and unpaid costs cannot link an expense`() {
+        val old = """{"id":"c","projectId":"p","categoryId":null,"original":{"amount":"10.00","currency":"EUR"},"converted":{"amount":"10.00","currency":"EUR"},"date":"2026-10-10","note":""}"""
+        val paid = EventJson.decodeFromString(ProjectCost.serializer(), old)
+        assertEquals(false, paid.unpaid)
+        val unpaid = paid.copy(unpaid = true)
+        assertEquals(unpaid, EventJson.decodeFromString(ProjectCost.serializer(), EventJson.encodeToString(ProjectCost.serializer(), unpaid)))
+        assertThrows(IllegalArgumentException::class.java) { unpaid.copy(transactionId = "payment") }
+    }
+
     private val day = LocalDate.of(2026, 10, 10)
     private val nbs = mapOf(Currency.EUR to "117.17")
     private fun rsd(value: String) = Money.of(value, Currency.RSD)

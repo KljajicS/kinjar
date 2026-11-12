@@ -11,6 +11,17 @@ import java.math.BigDecimal
 import java.time.LocalDate
 
 class ProjectFxTest {
+    @Test fun `project total includes unpaid while payment breakdown stays separate`() {
+        val project = app.kinjar.domain.Project("p", "House")
+        val paid = ProjectCost("paid", project.id, null, Money.of("40", Currency.EUR), Money.of("40", Currency.EUR), day, "")
+        val unpaid = paid.copy(id = "unpaid", original = Money.of("60", Currency.EUR), converted = Money.of("60", Currency.EUR), unpaid = true)
+        val summary = app.kinjar.data.ProjectBook(listOf(project), emptyList(), listOf(paid, unpaid), emptyList()).summary(project)
+        assertEquals(Money.of("100", Currency.EUR), summary.total)
+        assertEquals(Money.of("60", Currency.EUR), summary.unpaid)
+        assertEquals(Money.of("40", Currency.EUR), summary.total - summary.unpaid)
+        assertEquals(summary.total, summary.byCategory.single().total)
+    }
+
     private val day = LocalDate.of(2026, 11, 8)
     private val original = Money.of("11750", Currency.RSD)
     private val quote = ProjectRateQuote(day.minusDays(2), mapOf(Currency.EUR to BigDecimal("117.5")), "NBS middle rate")
