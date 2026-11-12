@@ -1,0 +1,39 @@
+CREATE TABLE project_cost (
+    id TEXT NOT NULL PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    tx_id TEXT,
+    payload TEXT,
+    removed INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX project_cost_tx ON project_cost(tx_id) WHERE removed = 0;
+
+insertIgnore:
+INSERT OR IGNORE INTO project_cost(id, project_id, tx_id, payload) VALUES (?, ?, ?, ?);
+
+update:
+UPDATE project_cost SET payload = ? WHERE id = ? AND removed = 0;
+
+insertTombstone:
+INSERT OR IGNORE INTO project_cost(id, project_id, removed) VALUES (?, ?, 1);
+
+remove:
+UPDATE project_cost SET removed = 1 WHERE id = ?;
+
+all:
+SELECT * FROM project_cost WHERE removed = 0 ORDER BY id;
+
+byId:
+SELECT * FROM project_cost WHERE id = ?;
+
+byProject:
+SELECT * FROM project_cost WHERE project_id = ? AND removed = 0;
+
+linkedTo:
+SELECT id FROM project_cost WHERE tx_id = ? AND removed = 0;
+
+expense:
+SELECT * FROM tx WHERE id = ?;
+
+deleteAll:
+DELETE FROM project_cost;

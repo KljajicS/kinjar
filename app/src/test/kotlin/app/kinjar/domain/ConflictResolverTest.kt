@@ -74,7 +74,7 @@ class ConflictResolverTest {
         val original = op("a")
         val bytes = OperationCodec.encode(original)
         assertEquals(original, OperationCodec.decode(bytes))
-        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(bytes.toString(Charsets.UTF_8).replace("\"version\":1", "\"version\":5").toByteArray()) }
+        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(bytes.toString(Charsets.UTF_8).replace("\"version\":1", "\"version\":6").toByteArray()) }
     }
 
     @Test fun `invalid resolution cannot reject unobserved commands or block independent work`() {

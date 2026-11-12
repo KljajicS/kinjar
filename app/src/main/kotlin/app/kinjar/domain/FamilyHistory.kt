@@ -119,15 +119,14 @@ fun interface HistorySource {
 data class HistorySummary(val digest: String, val bytes: Long, val baselineCount: Long, val operationCount: Long, val quarantineCount: Long)
 
 /**
- * Version 2 and 3 history: one JSON object per line, a version header, records in canonical kind order and an end line
- * with the record counts. Lines are bounded individually; the history as a whole is not. Version 3 has the same lines;
- * its header only makes version 2 readers stop with [UnsupportedSyncVersion] before reading records they would misread.
+ * One JSON object per line, a version header, records in canonical kind order and an end line with record counts.
+ * Lines are bounded individually; history as a whole is not. New headers make older readers stop before unknown events.
  *
  * [HistorySummary.digest] always identifies the content as its version 2 stream, whatever header was written, so
  * digests stored or confirmed before version 3 still compare equal.
  */
 object HistoryStream {
-    const val VERSION = 3
+    const val VERSION = 4
     const val DIGEST_PREFIX = "2:"
     private const val DIGEST_VERSION = 2
     const val MAX_LINE_BYTES = 1024 * 1024

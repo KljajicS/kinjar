@@ -319,7 +319,7 @@ service cloud.firestore {
             && after.diff(before).affectedKeys().hasOnly(['count', 'bytes', 'day', 'dailyCount', 'dailyBytes', 'lastOpId']);
         }
         function manifest(d) {
-          return (d.get('historyVersion', 1) in [2, 3] ||
+          return (d.get('historyVersion', 1) in [2, 3, 4] ||
               (d.get('historyVersion', 1) == 1 && d.expectedChunks <= 128 && d.expectedBytes <= 67108864))
             && d.expectedBytes is int && d.expectedBytes > 0 && d.expectedBytes <= 9007199254740991
             && d.expectedChunks is int && d.expectedChunks >= 1 && d.expectedChunks <= d.expectedBytes
@@ -353,7 +353,7 @@ service cloud.firestore {
             && getAfter(familyPath(fid)).data.activeDataset == did;
         }
         allow create: if initializing() && stateShape(request.resource.data)
-          && request.resource.data.historyVersion in [2, 3]
+          && request.resource.data.historyVersion in [2, 3, 4]
           && request.resource.data.get('restoreToken', '') == get(familyPath(fid)).data.get('restoreToken', '')
           && request.resource.data.count == 0 && request.resource.data.bytes == 0
           && request.resource.data.dailyCount == 0 && request.resource.data.dailyBytes == 0 && request.resource.data.day == request.time

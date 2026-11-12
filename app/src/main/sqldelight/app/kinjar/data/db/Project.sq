@@ -1,0 +1,20 @@
+CREATE TABLE project (
+    id TEXT NOT NULL PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+
+save:
+INSERT OR REPLACE INTO project(id, payload) VALUES (?, ?);
+
+all:
+SELECT * FROM project ORDER BY id;
+
+byId:
+SELECT * FROM project WHERE id = ?;
+
+observe:
+SELECT (SELECT count(*) FROM project) + (SELECT count(*) FROM project_category) +
+       (SELECT count(*) FROM project_cost) + (SELECT count(*) FROM tx);
+
+deleteAll:
+DELETE FROM project;

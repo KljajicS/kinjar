@@ -61,8 +61,9 @@ data class SyncOperation(
 }
 
 // Older readers must request an update before replaying data they cannot interpret: version 3 receipt restorations,
-// version 4 income categories, category icons and cross-currency transfer amounts.
+// version 4 income categories, category icons and cross-currency transfer amounts; version 5 projects.
 private fun requiredVersion(parents: Set<String>, rejected: Set<String>, events: List<OperationEvent>): Int = when {
+    events.any { it.event is ProjectSaved || it.event is ProjectCategorySaved || it.event is ProjectCostSaved || it.event is ProjectCostRemoved } -> 5
     events.any { it.event.needsVersion4() } -> 4
     events.any { (it.event as? TransactionAdded)?.receiptDeletionId != null } -> 3
     parents.size > 1_000 || rejected.size > 1_000 -> 2
@@ -171,7 +172,7 @@ class UnsupportedSyncVersion : IllegalArgumentException("Unsupported sync versio
 
 object OperationCodec {
     const val MAX_BYTES = 512 * 1024
-    const val MAX_VERSION = 4
+    const val MAX_VERSION = 5
     private val json = Json { encodeDefaults = true; classDiscriminator = "type" }
 
     fun encode(operation: SyncOperation): ByteArray = when (operation.version) {

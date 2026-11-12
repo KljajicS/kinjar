@@ -160,8 +160,8 @@ class OperationCodecTest {
     }
 
     @Test fun `future versions require an update`() {
-        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(OperationCodec.encode(op()).withVersion(1, 5)) }
-        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(OperationCodec.encode(op(parents = ids(1_001))).withVersion(2, 5)) }
+        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(OperationCodec.encode(op()).withVersion(1, 6)) }
+        assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(OperationCodec.encode(op(parents = ids(1_001))).withVersion(2, 6)) }
     }
 
     @Test fun `version 2 operations still respect the payload limit`() {

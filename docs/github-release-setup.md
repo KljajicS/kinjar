@@ -57,7 +57,7 @@ If the Web OAuth client is missing, verify Google sign-in configuration in the e
 
 ## 3. Prepare Firebase for this release
 
-The GitHub workflow tests Firestore rules but does not deploy them. This feature release writes history version 3, so deploy the compatible rules from the release commit before using its new cloud features.
+The GitHub workflow tests Firestore rules but does not deploy them. The Projects release writes history version 4 and project operation version 5, so deploy the compatible rules from the release commit before using its new cloud features.
 
 From the repository, with Firebase CLI authenticated as the project owner, replace `YOUR_EXISTING_PROJECT_ID` with the project ID from step 2:
 
@@ -99,7 +99,7 @@ Actions are pinned to full commit SHAs and the Gradle distribution has a checksu
 
 Download the APK from [Releases](https://github.com/KljajicS/kinjar/releases), then verify its version, non-debuggable manifest and signing certificate. Its SHA-256 signing certificate must match step 1. GitHub builds may have different APK file hashes from local builds; certificate compatibility is the upgrade requirement.
 
-Install as an update, without uninstalling or clearing data. Update both family phones before using income-category icons or cross-currency transfers. Confirm Google sign-in, automatic sync and existing balances on both phones.
+Install as an update, without uninstalling or clearing data. Update both family phones before using projects, income-category icons or cross-currency transfers. Confirm Google sign-in, automatic sync and existing balances on both phones.
 
 ## Per-release checklist
 

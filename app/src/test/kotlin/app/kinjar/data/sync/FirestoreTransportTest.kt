@@ -48,7 +48,7 @@ class FirestoreTransportTest {
         assertEquals(summary.digest.removePrefix("2:"), manifest.digest)
         assertEquals(summary.bytes, manifest.bytes)
         val current = historyPieces(source).fold(ByteArray(0)) { all, piece -> all + piece }
-        assertTrue(current.toString(Charsets.UTF_8).startsWith("{\"version\":3}\n"))
+        assertTrue(current.toString(Charsets.UTF_8).startsWith("{\"version\":4}\n"))
         assertEquals(summary.bytes, current.size.toLong())
         assertEquals(history.source().records().toList(), HistoryStream.read(current.inputStream()).toList())
         val legacy = temporary.newFile()

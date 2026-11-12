@@ -399,7 +399,7 @@ class FirestoreTransport @Inject constructor(
         const val MAX_DAILY_BYTES = 8L * 1024 * 1024
         const val REFERENCE_COST = 32L
         // Matches HistoryStream.VERSION; datasets started at version 1 or 2 finish and stay readable at their version.
-        const val HISTORY_VERSION = 3L
+        const val HISTORY_VERSION = 4L
         // Datasets written by version 1 apps were capped by the rules of that release.
         private const val MAX_LEGACY_CHUNKS = 128L
 

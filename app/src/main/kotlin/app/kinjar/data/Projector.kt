@@ -35,6 +35,10 @@ import app.kinjar.domain.LoanPaymentUpdated
 import app.kinjar.domain.LoanPaymentRemoved
 import app.kinjar.domain.LoanPrincipalAdjusted
 import app.kinjar.domain.LoanReceiptLinked
+import app.kinjar.domain.ProjectSaved
+import app.kinjar.domain.ProjectCategorySaved
+import app.kinjar.domain.ProjectCostSaved
+import app.kinjar.domain.ProjectCostRemoved
 
 // Replay in log order so older edits cannot overwrite newer changes.
 class Projector(private val db: KinjarDb) {
@@ -42,6 +46,24 @@ class Projector(private val db: KinjarDb) {
     fun apply(record: EventRecord) {
         val at = record.occurredAt.toEpochMilli()
         when (val e = record.event) {
+            is ProjectSaved -> db.projectQueries.save(e.project.id, EventJson.encodeToString(e.project))
+            is ProjectCategorySaved -> with(e.category) {
+                db.projectCategoryQueries.save(id, projectId, EventJson.encodeToString(this))
+            }
+            is ProjectCostSaved -> with(e.cost) {
+                val previous = db.projectCostQueries.byId(id).executeAsOneOrNull()
+                if (previous?.removed == 1L) return
+                require(previous == null || (previous.project_id == projectId && previous.tx_id == transactionId)) { "Project cost identity changed" }
+                transactionId?.let { tx ->
+                    require(db.projectCostQueries.linkedTo(tx).executeAsList().all { it == id }) { "Expense already linked" }
+                }
+                db.projectCostQueries.insertIgnore(id, projectId, transactionId, EventJson.encodeToString(this))
+                db.projectCostQueries.update(EventJson.encodeToString(this), id)
+            }
+            is ProjectCostRemoved -> {
+                db.projectCostQueries.insertTombstone(e.costId, e.projectId)
+                db.projectCostQueries.remove(e.costId)
+            }
             is LoanCreated -> db.loanQueries.insertIgnore(e.loan.id, EventJson.encodeToString(e.loan))
             is LoanUpdated -> db.loanQueries.update(EventJson.encodeToString(e.loan), e.loan.id)
             is LoanArchived -> db.loanQueries.archive(e.loanId)
@@ -134,6 +156,9 @@ class Projector(private val db: KinjarDb) {
     }
 
     fun clear() {
+        db.projectCostQueries.deleteAll()
+        db.projectCategoryQueries.deleteAll()
+        db.projectQueries.deleteAll()
         db.loanPaymentQueries.deleteAll()
         db.loanReceiptQueries.deleteAll()
         db.loanAdjustmentQueries.deleteAll()
@@ -154,7 +179,7 @@ class Projector(private val db: KinjarDb) {
 
     companion object {
         /** Bump when a projector change must reach existing installs; the app rebuilds once on mismatch. */
-        const val VERSION = 8
+        const val VERSION = 9
     }
 }
 

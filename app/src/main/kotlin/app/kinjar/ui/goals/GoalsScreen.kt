@@ -7,13 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -25,7 +25,6 @@ import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
 import app.kinjar.domain.GoalProgress
@@ -39,39 +38,31 @@ import app.kinjar.ui.theme.CaptionStyle
 import app.kinjar.ui.theme.LoadingOrError
 import app.kinjar.ui.theme.LocalColors
 import app.kinjar.ui.theme.OutlinedBox
-import app.kinjar.ui.theme.TitleStyle
+import app.kinjar.ui.theme.SectionStyle
 import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 
-@Composable
-fun GoalsScreen(onNew: () -> Unit, onOpen: (String) -> Unit, vm: GoalsViewModel = hiltViewModel()) {
-    val state by vm.state.collectAsStateWithLifecycle()
-    val failed by vm.loadFailed.collectAsStateWithLifecycle()
-    val s = state ?: return LoadingOrError(failed, vm::retryLoad)
-    val c = LocalColors.current
-    val list = rememberLazyListState()
-
-    LazyColumn(
-        Modifier.fillMaxSize().background(c.bg),
-        state = list,
-        contentPadding = PaddingValues(start = 20.dp, top = 24.dp, end = 20.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.goals_title), style = TitleStyle, color = c.text, modifier = Modifier.weight(1f))
-                AddButton(stringResource(R.string.goal_new_title), onNew)
-            }
+/** Savings goals as a group of a parent [LazyColumn] whose [list] state drives drag autoscroll. */
+fun LazyListScope.goalsGroup(vm: GoalsViewModel, list: LazyListState, onNew: () -> Unit, onOpen: (String) -> Unit) {
+    item(key = "goals-header") {
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.projects_goals_title), style = SectionStyle, color = LocalColors.current.text, modifier = Modifier.weight(1f))
+            AddButton(stringResource(R.string.goal_new_title), onNew)
         }
+    }
+    item(key = "goals") {
+        val state by vm.state.collectAsStateWithLifecycle()
+        val failed by vm.loadFailed.collectAsStateWithLifecycle()
+        val s = state ?: return@item LoadingOrError(failed, vm::retryLoad)
         if (s.goals.isEmpty()) {
-            item { Text(stringResource(R.string.goals_empty), style = BodyStyle, color = c.muted) }
+            Text(stringResource(R.string.goals_empty), style = BodyStyle, color = LocalColors.current.muted)
         } else {
-            item {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 ReorderColumn(s.goals, { it.goal.id }, s.reorderFailures, vm::reorder, list, spacing = 12.dp) { goal, index, handle, actions ->
                     GoalCard(goal, index, actions, handle) { onOpen(goal.goal.id) }
                 }
+                WriteFeedback(vm.writes)
             }
-            item { WriteFeedback(vm.writes) }
         }
     }
 }

@@ -11,13 +11,15 @@ class FinancialIntegrity private constructor(
     private val receipts: MutableMap<String, Receipt>,
     private val removedPayments: MutableSet<String>,
     private val deletions: MutableMap<String, String>,
+    private var projectIntegrity: ProjectIntegrity = ProjectIntegrity(),
 ) {
     constructor() : this(mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableSetOf(), mutableMapOf())
 
     fun applying(events: List<Event>, strict: Boolean): FinancialIntegrity {
         val next = FinancialIntegrity(accounts.toMutableMap(), transactions.toMutableMap(), loans.toMutableMap(), payments.toMutableMap(),
-            adjustments.toMutableMap(), receipts.toMutableMap(), removedPayments.toMutableSet(), deletions.toMutableMap())
+            adjustments.toMutableMap(), receipts.toMutableMap(), removedPayments.toMutableSet(), deletions.toMutableMap(), projectIntegrity.copy())
         events.forEach { next.apply(it, strict) }
+        next.projectIntegrity.apply(events, strict, next.transactions)
         if (strict) next.validate()
         return next
     }
@@ -75,6 +77,11 @@ class FinancialIntegrity private constructor(
                 validateTransactions(if (changedAccounts) transactions.values else changedTransactions.mapNotNull(transactions::get))
                 validateLoans()
             }
+            if (events.any { it is ProjectSaved || it is ProjectCategorySaved || it is ProjectCostSaved || it is ProjectCostRemoved }) {
+                val updated = projectIntegrity.copy()
+                updated.apply(events, strict, transactions)
+                projectIntegrity = updated
+            }
         } catch (failure: Throwable) {
             undo.asReversed().forEach { it() }
             throw failure
@@ -84,6 +91,7 @@ class FinancialIntegrity private constructor(
     fun validate() {
         validateTransactions(transactions.values)
         validateLoans()
+        projectIntegrity.validate()
     }
 
     private fun validateTransactions(values: Collection<Transaction>) {
