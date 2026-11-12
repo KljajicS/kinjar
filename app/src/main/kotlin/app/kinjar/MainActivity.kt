@@ -37,7 +37,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -75,6 +74,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
+import androidx.compose.animation.EnterTransition
+import androidx.compose.runtime.remember
+import app.kinjar.ui.navigation.navEnter
+import app.kinjar.ui.navigation.navExit
+import app.kinjar.ui.navigation.navPopExit
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.Lazy
@@ -276,38 +283,46 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
     val route = backStack?.destination?.route
     var scanEditing by rememberSaveable { mutableStateOf(false) }
     val cameraSurface = route == Tab.SCAN.route && !scanEditing
-    val showBar = route != Tab.SCAN.route && Tab.entries.any { it.route == route }
     val activity = LocalActivity.current
     LaunchedEffect(c.dark, cameraSurface) {
         activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView).isAppearanceLightStatusBars = !c.dark && !cameraSurface }
     }
+    val selectTab = remember(nav) {
+        { tab: Tab ->
+            nav.navigate(tab.route) {
+                popUpTo(Tab.HOME.route) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
-    Scaffold(
-        containerColor = if (cameraSurface) (if (c.dark) Color.Black else Color(0xFF111315)) else c.bg,
-        bottomBar = {
-            if (showBar) BottomBar(route) { tab ->
-                nav.navigate(tab.route) {
-                    popUpTo(Tab.HOME.route) { saveState = true }
-                    launchSingleTop = true
-                    restoreState = true
+    // The bottom bar lives inside each tab page, so content padding never changes between routes and pages do not remeasure mid-transition.
+    Scaffold(containerColor = if (cameraSurface) (if (c.dark) Color.Black else Color(0xFF111315)) else c.bg) { padding ->
+        NavHost(
+            nav,
+            startDestination = if (hasMember == true) Tab.HOME.route else Routes.SETUP,
+            modifier = Modifier.padding(padding),
+            enterTransition = { navEnter() },
+            exitTransition = { navExit() },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { navPopExit() },
+        ) {
+            composable(Tab.HOME.route) {
+                TabPage(Tab.HOME, selectTab) {
+                    HomeScreen(
+                        onAdd = { nav.navigate(Routes.add()) },
+                        onActivity = { nav.navigate(Routes.ACTIVITY) },
+                        onGoal = { nav.navigate(Routes.editGoal(it)) },
+                        onSettings = { nav.navigate(Routes.SETTINGS) },
+                        onEditTransaction = { nav.navigate(Routes.editTransaction(it)) },
+                    )
                 }
             }
-        },
-    ) { padding ->
-        NavHost(nav, startDestination = if (hasMember == true) Tab.HOME.route else Routes.SETUP, modifier = Modifier.padding(padding)) {
-            composable(Tab.HOME.route) {
-                HomeScreen(
-                    onAdd = { nav.navigate(Routes.add()) },
-                    onActivity = { nav.navigate(Routes.ACTIVITY) },
-                    onGoal = { nav.navigate(Routes.editGoal(it)) },
-                    onSettings = { nav.navigate(Routes.SETTINGS) },
-                    onEditTransaction = { nav.navigate(Routes.editTransaction(it)) },
-                )
-            }
-            composable(Routes.ACTIVITY, arguments = listOf(navArgument("activity") { defaultValue = true })) {
+            page(Routes.ACTIVITY, arguments = listOf(navArgument("activity") { defaultValue = true })) {
                 app.kinjar.ui.home.ActivityScreen(onBack = { nav.popBackStack() }, onEdit = { nav.navigate(Routes.editTransaction(it)) })
             }
-            composable(Routes.SETTINGS) {
+            page(Routes.SETTINGS) {
                 SettingsScreen(
                     onBack = { nav.popBackStack() },
                     onCategories = { nav.navigate(Routes.CATEGORIES) },
@@ -319,23 +334,23 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                     updates = updates,
                 )
             }
-            composable(Routes.PROFILE) { app.kinjar.ui.settings.ProfileScreen(onBack = { nav.popBackStack() }) }
-            composable(Routes.FAMILY, arguments = listOf(navArgument("signIn") { type = androidx.navigation.NavType.BoolType; defaultValue = false })) { entry ->
+            page(Routes.PROFILE) { app.kinjar.ui.settings.ProfileScreen(onBack = { nav.popBackStack() }) }
+            page(Routes.FAMILY, arguments = listOf(navArgument("signIn") { type = androidx.navigation.NavType.BoolType; defaultValue = false })) { entry ->
                 app.kinjar.ui.sync.FamilyScreen(onBack = { nav.popBackStack() },
                     onContinue = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } },
                     onBackup = { nav.navigate(Routes.BACKUP) },
                     startSignIn = entry.arguments?.getBoolean("signIn") == true,
                     onCreate = { nav.navigate(Routes.CLOUD_SETUP) { launchSingleTop = true } })
             }
-            composable(Routes.CLOUD_SETUP) {
+            page(Routes.CLOUD_SETUP) {
                 app.kinjar.ui.setup.FamilySetupScreen(onBack = { nav.popBackStack() },
                     onDone = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } })
             }
-            composable(Routes.BACKUP) {
+            page(Routes.BACKUP) {
                 app.kinjar.ui.sync.BackupScreen(onBack = { nav.popBackStack() },
                     onContinue = { nav.navigate(Tab.HOME.route) { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true } })
             }
-            composable(Routes.RECURRING) {
+            page(Routes.RECURRING) {
                 RecurringScreen(
                     onBack = { nav.popBackStack() },
                     onNew = { nav.navigate(Routes.NEW_RECURRING) },
@@ -343,28 +358,30 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                     onPay = { ruleId, due -> nav.navigate(Routes.addBill(ruleId, due)) },
                 )
             }
-            composable(Routes.EXCHANGE_RATES) { ExchangeRatesScreen(onBack = { nav.popBackStack() }) }
-            composable(Routes.NEW_RECURRING) { EditRecurringScreen(onClose = { nav.popBackStack() }) }
-            composable(Routes.EDIT_RECURRING) { EditRecurringScreen(onClose = { nav.popBackStack() }) }
-            composable(Routes.CATEGORIES) {
+            page(Routes.EXCHANGE_RATES) { ExchangeRatesScreen(onBack = { nav.popBackStack() }) }
+            page(Routes.NEW_RECURRING) { EditRecurringScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.EDIT_RECURRING) { EditRecurringScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.CATEGORIES) {
                 CategoriesScreen(onBack = { nav.popBackStack() }, onNew = { nav.navigate(Routes.newCategory(it)) }, onEdit = { nav.navigate(Routes.editCategory(it)) })
             }
-            composable(Routes.NEW_CATEGORY, arguments = listOf(navArgument("kind") { defaultValue = "EXPENSE" })) {
+            page(Routes.NEW_CATEGORY, arguments = listOf(navArgument("kind") { defaultValue = "EXPENSE" })) {
                 EditCategoryScreen(onClose = { nav.popBackStack() })
             }
-            composable(Routes.EDIT_CATEGORY) { EditCategoryScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.EDIT_CATEGORY) { EditCategoryScreen(onClose = { nav.popBackStack() }) }
             composable(Tab.ACCOUNTS.route) {
-                AccountsScreen(onNew = { nav.navigate(Routes.NEW_ACCOUNT) }, onEdit = { nav.navigate(Routes.editAccount(it)) },
-                    onNewLoan = { nav.navigate(Routes.NEW_LOAN) }, onLoan = { nav.navigate(Routes.loan(it)) })
+                TabPage(Tab.ACCOUNTS, selectTab) {
+                    AccountsScreen(onNew = { nav.navigate(Routes.NEW_ACCOUNT) }, onEdit = { nav.navigate(Routes.editAccount(it)) },
+                        onNewLoan = { nav.navigate(Routes.NEW_LOAN) }, onLoan = { nav.navigate(Routes.loan(it)) })
+                }
             }
-            composable(Routes.NEW_LOAN) { app.kinjar.ui.loans.LoanEditorScreen(onBack = { nav.popBackStack() }) }
-            composable(Routes.EDIT_LOAN) { app.kinjar.ui.loans.LoanEditorScreen(onBack = { nav.popBackStack() }) }
-            composable(Routes.LOAN) {
+            page(Routes.NEW_LOAN) { app.kinjar.ui.loans.LoanEditorScreen(onBack = { nav.popBackStack() }) }
+            page(Routes.EDIT_LOAN) { app.kinjar.ui.loans.LoanEditorScreen(onBack = { nav.popBackStack() }) }
+            page(Routes.LOAN) {
                 app.kinjar.ui.loans.LoanDetailScreen(onBack = { nav.popBackStack() }, onEdit = { nav.navigate(Routes.editLoan(it)) })
             }
-            composable(Routes.NEW_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
-            composable(Routes.EDIT_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
-            composable(Tab.INSIGHTS.route) { InsightsScreen() }
+            page(Routes.NEW_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.EDIT_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
+            composable(Tab.INSIGHTS.route) { TabPage(Tab.INSIGHTS, selectTab) { InsightsScreen() } }
             composable(Tab.SCAN.route) {
                 ScanScreen(
                     onEditingChanged = { scanEditing = it },
@@ -374,22 +391,24 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                 )
             }
             composable(Tab.GOALS.route) {
-                ProjectsScreen(
-                    onNewProject = { nav.navigate(Routes.NEW_PROJECT) },
-                    onProject = { nav.navigate(Routes.project(it)) },
-                    onNewGoal = { nav.navigate(Routes.NEW_GOAL) },
-                    onGoal = { nav.navigate(Routes.editGoal(it)) },
-                )
+                TabPage(Tab.GOALS, selectTab) {
+                    ProjectsScreen(
+                        onNewProject = { nav.navigate(Routes.NEW_PROJECT) },
+                        onProject = { nav.navigate(Routes.project(it)) },
+                        onNewGoal = { nav.navigate(Routes.NEW_GOAL) },
+                        onGoal = { nav.navigate(Routes.editGoal(it)) },
+                    )
+                }
             }
             projectRoutes(nav)
-            composable(Routes.NEW_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
-            composable(Routes.EDIT_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
-            composable(Routes.EDIT_TRANSACTION) { AddScreen(onClose = { nav.popBackStack() }) }
-            composable(Routes.SETUP) {
+            page(Routes.NEW_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.EDIT_GOAL) { EditGoalScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.EDIT_TRANSACTION) { AddScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.SETUP) {
                 SetupScreen(onDone = { nav.navigate(Tab.HOME.route) { popUpTo(Routes.SETUP) { inclusive = true } } },
                     onFamily = { nav.navigate(Routes.family(signIn = true)) }, onBackup = { nav.navigate(Routes.BACKUP) })
             }
-            composable(
+            page(
                 Routes.ADD,
                 arguments = listOf(
                     navArgument("rule") { nullable = true; defaultValue = null },
@@ -400,10 +419,23 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
     }
 }
 
+private fun NavGraphBuilder.page(route: String, arguments: List<NamedNavArgument> = emptyList(), content: @Composable (NavBackStackEntry) -> Unit) =
+    composable(route, arguments) { entry ->
+        Box(Modifier.fillMaxSize().background(LocalColors.current.bg)) { content(entry) }
+    }
+
+@Composable
+private fun TabPage(tab: Tab, onSelect: (Tab) -> Unit, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxSize().background(LocalColors.current.bg)) {
+        Box(Modifier.weight(1f)) { content() }
+        BottomBar(tab.route, onSelect)
+    }
+}
+
 @Composable
 private fun BottomBar(route: String?, onSelect: (Tab) -> Unit) {
     val c = LocalColors.current
-    Box(Modifier.fillMaxWidth().navigationBarsPadding()) {
+    Box(Modifier.fillMaxWidth()) {
         Column(Modifier.matchParentSize().padding(top = 24.dp).background(c.bg)) {
             HorizontalDivider(color = c.border, thickness = 1.dp)
         }
