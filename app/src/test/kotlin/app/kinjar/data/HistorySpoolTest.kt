@@ -275,7 +275,7 @@ class HistorySpoolTest {
         javaClass.getResource("/schema-v5.sql")!!.readText().split(';').filter { it.isNotBlank() }.forEach { driver.execute(null, it, 0) }
         KinjarDb.Schema.migrate(driver, 5, 11)
         val old = KinjarDb(driver)
-        seedLegacyEvents(old, listOf(account("a")), Instant.EPOCH)
+        seedLegacyEventRows(old, listOf(account("a")), Instant.EPOCH)
         val legacy = FamilyHistory(baseline = listOf(OperationEvent("legacy-0", "legacy", 1, 0, account("a"))), operations = emptyList())
         old.syncBaselineQueries.save(HistoryCodec.encode(legacy))
         old.syncDraftQueries.save("copy", "user", "family", 1, HistoryCodec.encode(legacy))

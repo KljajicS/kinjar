@@ -31,6 +31,23 @@ class GoalRepositoryTest {
     }
 
     @Test
+    fun `excluding an account changes goals only and survives replay`() = runTest {
+        seed("1000")
+        repo.setGoal(Goal("goal", "Goal", rsd("2000")))
+        val account = repo.accounts.first().single()
+        repo.updateAccount(account.copy(excludedFromGoals = true))
+        store.rebuild()
+        assertTrue(repo.accounts.first().single().excludedFromGoals)
+        val excluded = repo.financial.first()
+        assertEquals(rsd("1000"), excluded.home.savingsRsd)
+        assertEquals(rsd("1000"), excluded.home.income)
+        assertEquals(rsd("1000"), excluded.home.balances[account.id])
+        assertEquals(rsd("0"), excluded.goals.single().funded)
+        repo.updateAccount(account)
+        assertEquals(rsd("1000"), repo.financial.first().goals.single().funded)
+    }
+
+    @Test
     fun `goals are set, edited and archived through events`() = runTest {
         seed()
         val fund = Goal("fund", "Emergency fund", rsd("100000"))

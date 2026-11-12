@@ -148,6 +148,7 @@ class CategoryTransferRepositoryTest {
         val migrated = KinjarDb(driver)
         val repository = BudgetRepository(migrated, EventStore(migrated, "one", clock, Projector(migrated)), clock)
         assertEquals(listOf(Category("c", "Food", "#3D4BD6")), repository.categories.first())
+        assertEquals(false, repository.accounts.first().single().excludedFromGoals)
         assertEquals(Transaction("t", TransactionType.EXPENSE, rsd("10"), "a", null, "c", today, "", "", "m", TransactionSource.MANUAL),
             repository.transactions.first().single())
         assertNull(repository.recent(1).first().single().categoryIcon)

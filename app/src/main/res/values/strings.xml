@@ -1,4 +1,6 @@
 <resources>
+    <string name="account_exclude_goals">Exclude from goals</string>
+    <string name="account_exclude_goals_hint">Keep this balance in total savings, but leave it out of goal progress.</string>
     <string name="settings_language">Language</string>
     <string name="language_system">System default</string>
     <string name="language_english" translatable="false">English</string>
@@ -193,7 +195,7 @@
     <string name="account_delete_hint">Past transactions stay in reports. The balance stops counting toward total savings and goals.</string>
     <string name="account_archive_title">Remove %1$s?</string>
     <string name="account_archive_balance">Remaining balance: %1$s</string>
-    <string name="account_archive_drop">Total savings and goal progress go down by this amount. Transfer the money to another account first if you still have it.</string>
+    <string name="account_archive_drop">Total savings goes down by this amount. Goal progress also decreases if this account counts toward goals. Transfer the money to another account first if you still have it.</string>
     <string name="account_archive_rise">Total savings goes up by this amount because the balance is negative.</string>
     <string name="account_archive_zero">The balance is zero, so total savings does not change.</string>
     <string name="account_archive_unknown">This balance stops counting toward total savings and goals.</string>

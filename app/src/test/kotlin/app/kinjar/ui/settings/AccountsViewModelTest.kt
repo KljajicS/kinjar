@@ -50,6 +50,25 @@ class AccountsViewModelTest {
     }
 
     @Test
+    fun `account exclusion can be created loaded and switched off`() = runTest(dispatcher) {
+        val create = EditAccountViewModel(repo, SavedStateHandle()).also { models += it }
+        assertEquals(false, create.state.value.excludedFromGoals)
+        create.setName("Separate savings")
+        create.setExcludedFromGoals(true)
+        create.save()
+        create.state.first { it.done }
+        val account = repo.accounts.first().single()
+        assertEquals(true, account.excludedFromGoals)
+        val edit = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to account.id))).also { models += it }
+        edit.state.first { it.balance != null }
+        assertEquals(true, edit.state.value.excludedFromGoals)
+        edit.setExcludedFromGoals(false)
+        edit.save()
+        edit.state.first { it.done }
+        assertEquals(false, repo.accounts.first().single().excludedFromGoals)
+    }
+
+    @Test
     fun `reorder is shared with home and a failed write keeps the stored order`() = runTest(dispatcher) {
         repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD), Account("card", "Card", Currency.RSD), Account("eur", "Euro", Currency.EUR)))
         val vm = AccountsViewModel(repo).also { models += it }

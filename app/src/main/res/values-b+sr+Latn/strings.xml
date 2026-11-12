@@ -1,4 +1,6 @@
 <resources>
+    <string name="account_exclude_goals">Isključi iz ciljeva</string>
+    <string name="account_exclude_goals_hint">Stanje ostaje u ukupnoj ušteđevini, ali se ne računa za napredak ciljeva.</string>
     <string name="settings_language">Jezik</string>
     <string name="language_system">Jezik uređaja</string>
     <string name="activity_title">Aktivnosti</string>
@@ -192,7 +194,7 @@
     <string name="account_delete_hint">Stare transakcije ostaju u izveštajima. Stanje se više ne računa u ukupnu štednju i ciljeve.</string>
     <string name="account_archive_title">Ukloniti %1$s?</string>
     <string name="account_archive_balance">Preostalo stanje: %1$s</string>
-    <string name="account_archive_drop">Ukupna štednja i napredak ciljeva smanjuju se za ovaj iznos. Ako novac još postoji, prvo ga prebaci na drugi račun.</string>
+    <string name="account_archive_drop">Ukupna štednja smanjuje se za ovaj iznos. Napredak ciljeva se takođe smanjuje ako se ovaj račun računa za ciljeve. Ako novac još postoji, prvo ga prebaci na drugi račun.</string>
     <string name="account_archive_rise">Ukupna štednja raste za ovaj iznos jer je stanje negativno.</string>
     <string name="account_archive_zero">Stanje je nula, pa se ukupna štednja ne menja.</string>
     <string name="account_archive_unknown">Ovo stanje se više ne računa u ukupnu štednju i ciljeve.</string>

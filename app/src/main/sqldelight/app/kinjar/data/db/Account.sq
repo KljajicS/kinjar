@@ -4,17 +4,18 @@ CREATE TABLE account (
     currency TEXT NOT NULL,
     kind TEXT NOT NULL,
     archived INTEGER NOT NULL DEFAULT 0,
-    position INTEGER
+    position INTEGER,
+    excluded_from_goals INTEGER NOT NULL DEFAULT 0
 );
 
 -- New accounts append to the saved order; rows without a position (older rows, or created while another device
 -- reordered) sort after positioned ones by name.
 insertIgnore:
-INSERT OR IGNORE INTO account(id, name, currency, kind, archived, position)
-VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM account));
+INSERT OR IGNORE INTO account(id, name, currency, kind, archived, excluded_from_goals, position)
+VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM account));
 
 update:
-UPDATE account SET name = ?, currency = ?, kind = ? WHERE id = ?;
+UPDATE account SET name = ?, currency = ?, kind = ?, excluded_from_goals = ? WHERE id = ?;
 
 archive:
 UPDATE account SET archived = 1 WHERE id = ?;
