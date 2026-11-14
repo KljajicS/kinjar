@@ -13,7 +13,7 @@ data class PaymentSlip(
     val payer: String?,
 ) {
     val merchant: String get() = recipient.lineSequence().first().trim()
-    val note: String get() = listOfNotNull(purpose, reference?.let { "${it.take(2)} ${it.drop(2)}" }).joinToString("\n")
+    val note: String get() = listOfNotNull(merchant, purpose?.trim()).joinToString(" - ")
 }
 
 class UnsupportedPaymentSlip : IllegalArgumentException("Unsupported payment slip")

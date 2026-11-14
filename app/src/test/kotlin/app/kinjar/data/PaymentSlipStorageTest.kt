@@ -45,7 +45,7 @@ class PaymentSlipStorageTest {
         val peerRepo = BudgetRepository(peerDb, peerStore, clock, "peer")
         assertEquals(expected, peerRepo.transactions.first().toSet())
         assertTrue(peerDb.syncConflictQueries.all().executeAsList().isEmpty())
-        assertEquals("Uplata vode\n00 000138", peerRepo.transaction(first.id)?.note)
+        assertEquals("ЈП Пример - Uplata vode", peerRepo.transaction(first.id)?.note)
         store.discardHistory(history.id)
     }
 }

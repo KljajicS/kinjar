@@ -55,6 +55,9 @@ internal fun ColumnScope.ReceiptReview(
             Text(stringResource(R.string.scan_ips_code, slip.paymentCode), style = sans(13), color = c.muted)
             slip.payer?.let { Text(stringResource(R.string.scan_ips_payer, it), style = sans(13), color = c.muted) }
             if (slip.note.isNotBlank()) Text(slip.note, style = sans(13), color = c.text)
+            slip.reference?.let {
+                Text(stringResource(R.string.scan_ips_reference, "${it.take(2)} ${it.drop(2)}"), style = sans(13), color = c.muted)
+            }
         }
         Text(stringResource(R.string.scan_category), style = sans(13), color = c.muted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

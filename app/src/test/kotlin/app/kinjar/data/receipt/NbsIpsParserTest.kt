@@ -17,7 +17,7 @@ class NbsIpsParserTest {
         assertEquals("221", slip.paymentCode)
         assertEquals("Uplata: voda", slip.purpose)
         assertEquals("00000138", slip.reference)
-        assertEquals("Uplata: voda\n00 000138", slip.note)
+        assertEquals("ЈП Пример - Uplata: voda", slip.note)
         assertEquals("Primer Platilac\r\nPrimer adresa", slip.payer)
     }
 
@@ -27,7 +27,7 @@ class NbsIpsParserTest {
             val slip = NbsIpsParser.parse(minimal.replace("3018,58", input))
             assertEquals(expected, slip.amount.amount.toPlainString())
             assertEquals("Čair Žito 365", slip.merchant)
-            assertEquals("", slip.note)
+            assertEquals("Čair Žito 365", slip.note)
             assertNull(slip.payer)
         }
     }

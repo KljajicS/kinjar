@@ -556,7 +556,7 @@ class AddViewModelTest {
         vm.state.first { it.saved }
         val tx = repo.transactions.first().single()
         assertEquals("Water company", tx.merchant)
-        assertEquals("Uplata vode\n00 000138", tx.note)
+        assertEquals("ЈП Пример - Uplata vode", tx.note)
         assertEquals("3020.00", tx.money.amount.toPlainString())
         assertEquals(clock.today().minusDays(1), tx.date)
         assertEquals("cat-household", tx.categoryId)

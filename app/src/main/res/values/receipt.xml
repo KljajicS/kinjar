@@ -4,6 +4,7 @@
     <string name="scan_ips_recipient">Recipient: %1$s</string>
     <string name="scan_ips_account">Recipient account: %1$s</string>
     <string name="scan_ips_code">Payment code: %1$s</string>
+    <string name="scan_ips_reference">Model / reference: %1$s</string>
     <string name="scan_ips_payer">Payer on slip: %1$s</string>
     <string name="scan_ips_invalid">Payment slip details are incomplete or invalid. Scan again or enter the expense manually.</string>
     <string name="scan_ips_unsupported">This payment QR format is not supported. Scan an NBS IPS payment slip in RSD or enter the expense manually.</string>

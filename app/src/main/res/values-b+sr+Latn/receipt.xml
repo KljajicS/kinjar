@@ -4,6 +4,7 @@
     <string name="scan_ips_recipient">Primalac: %1$s</string>
     <string name="scan_ips_account">Račun primaoca: %1$s</string>
     <string name="scan_ips_code">Šifra plaćanja: %1$s</string>
+    <string name="scan_ips_reference">Model / poziv na broj: %1$s</string>
     <string name="scan_ips_payer">Platilac na uplatnici: %1$s</string>
     <string name="scan_ips_invalid">Podaci uplatnice su nepotpuni ili neispravni. Skeniraj ponovo ili unesi trošak ručno.</string>
     <string name="scan_ips_unsupported">Ovaj format QR koda nije podržan. Skeniraj NBS IPS uplatnicu u RSD ili unesi trošak ručno.</string>
