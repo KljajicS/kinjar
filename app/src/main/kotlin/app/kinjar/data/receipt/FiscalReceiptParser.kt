@@ -61,7 +61,7 @@ object FiscalReceiptParser {
         val business = doc.select("pre").mapNotNull { pre ->
             val lines = pre.wholeText().lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
             // The journal header binds the business name to this issuer and registered shop.
-            lines.windowed(3).firstOrNull { it[0] == issuer && it[2] == shop }
+            lines.take(4).windowed(3).firstOrNull { it[0] == issuer && it[2] == shop }
                 ?.get(1)?.takeIf { it.length <= 500 && it != shop && it != issuer }
         }.firstOrNull()
         val merchant = if (registeredShop != null && codeOnly) business.orEmpty() else name

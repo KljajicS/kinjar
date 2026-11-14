@@ -1,4 +1,13 @@
 <resources>
+    <string name="scan_ips_review">Pregled uplatnice</string>
+    <string name="scan_ips_record">Čuvanje beleži trošak, ali ne plaća račun. Proveri datum plaćanja, kategoriju i račun.</string>
+    <string name="scan_ips_recipient">Primalac: %1$s</string>
+    <string name="scan_ips_account">Račun primaoca: %1$s</string>
+    <string name="scan_ips_code">Šifra plaćanja: %1$s</string>
+    <string name="scan_ips_payer">Platilac na uplatnici: %1$s</string>
+    <string name="scan_ips_invalid">Podaci uplatnice su nepotpuni ili neispravni. Skeniraj ponovo ili unesi trošak ručno.</string>
+    <string name="scan_ips_unsupported">Ovaj format QR koda nije podržan. Skeniraj NBS IPS uplatnicu u RSD ili unesi trošak ručno.</string>
+    <string name="scan_ips_rescan">Pregled uplatnice je prekinut. Skeniraj ponovo i proveri da li je trošak već sačuvan.</string>
     <string name="scan_merchant_missing">Naziv prodavnice nije dostupan. Unesi ga kroz izmenu detalja pre čuvanja.</string>
     <string name="transaction_details">Detalji transakcije</string>
     <string name="transaction_edit">Izmeni</string>

@@ -22,6 +22,7 @@ import app.kinjar.data.DiagnosticOperation
 import app.kinjar.data.Diagnostics
 import app.kinjar.data.StarterCategories
 import app.kinjar.data.TransactionAccountStore
+import app.kinjar.data.receipt.PaymentSlip
 import app.kinjar.domain.Account
 import app.kinjar.domain.Bill
 import app.kinjar.domain.BillCalculator
@@ -59,6 +60,7 @@ data class AddState(
     val saving: Boolean = false,
     @StringRes val saveError: Int? = null,
     val receipt: Receipt? = null,
+    val paymentSlip: PaymentSlip? = null,
     val savedReceipt: Receipt? = null,
     val paidByName: String = "",
     val bill: Bill? = null,
@@ -82,8 +84,9 @@ data class AddState(
     /** A typed received amount was dropped because the currencies changed. */
     val receivedReset: Boolean = false,
 ) {
-    val typeLocked: Boolean get() = bill != null || receipt != null || (editing != null && editing.source != TransactionSource.MANUAL)
-    val rsdOnly: Boolean get() = receipt != null || editing?.source == TransactionSource.RECEIPT
+    val scanned: Boolean get() = receipt != null || paymentSlip != null
+    val typeLocked: Boolean get() = bill != null || scanned || (editing != null && editing.source != TransactionSource.MANUAL)
+    val rsdOnly: Boolean get() = scanned || editing?.source == TransactionSource.RECEIPT
     val billInFuture: Boolean get() = editing?.source == TransactionSource.RECURRING && date > today
 
     /** Active categories the current type can use. */
@@ -113,7 +116,7 @@ data class AddState(
     val canSave: Boolean get() = !loading && !loadFailed && !saving && !saved && !missing && !loanLocked && !stale && amount.value != null && accountId != null && error == null &&
         accounts.any { it.id == accountId && !it.archived && it.currency == currency } &&
         (!rsdOnly || currency == Currency.RSD) && !billInFuture &&
-        (receipt == null || merchant.isNotBlank()) &&
+        (!scanned || merchant.isNotBlank()) &&
         (type.categoryKind == null || categoryId == null || pickableCategories.any { it.id == categoryId }) &&
         (type != TransactionType.TRANSFER || accounts.any { it.id == toAccountId && !it.archived }) &&
         (!crossCurrency || received != null)
@@ -178,7 +181,7 @@ class AddViewModel @Inject constructor(
                 val sortedCategories = categories.sortedBy { c -> StarterCategories.all.indexOfFirst { it.id == c.id }.let { if (it < 0) Int.MAX_VALUE else it } }
                 _state.update { s ->
                     val pickable = s.type.categoryKind?.let { kind -> sortedCategories.filter { it.kind == kind } }.orEmpty()
-                    val keepCategory = s.receipt != null || s.bill != null || s.editing != null || s.categoryId == null || pickable.any { it.id == s.categoryId }
+                    val keepCategory = s.scanned || s.bill != null || s.editing != null || s.categoryId == null || pickable.any { it.id == s.categoryId }
                     val replacement = if (s.type == TransactionType.EXPENSE) pickable.firstOrNull()?.id else null
                     selectAccount(s.copy(categoryId = if (keepCategory) s.categoryId else replacement,
                         paidByName = memberName, accounts = accounts, categories = sortedCategories, allCategories = all, rates = rates, loading = false))
@@ -265,10 +268,14 @@ class AddViewModel @Inject constructor(
         }
     }
 
-    /** Receipts are never persisted: the scan screen re-reads them, and the fiscal URL should not sit in saved state. */
+    /** Scans are reviewed again after recreation; payment instructions must not become a partial manual draft. */
     private fun persist(s: AddState) {
+        if (s.scanned) {
+            DRAFT_KEYS.forEach { savedState.remove<Any>(it) }
+            return
+        }
         if (s.loading || s.loadFailed) return
-        if (s.receipt != null || s.missing || s.loanLocked || s.saved || (!s.stale && s.editing?.let { matches(s, it) } == true)) {
+        if (s.missing || s.loanLocked || s.saved || (!s.stale && s.editing?.let { matches(s, it) } == true)) {
             DRAFT_KEYS.forEach { savedState.remove<Any>(it) }
             return
         }
@@ -290,7 +297,7 @@ class AddViewModel @Inject constructor(
      * A correction drafted over a different stored version is restored as stale.
      */
     private fun restoreDraft(s: AddState): AddState {
-        if (!savedState.contains(DRAFT_AMOUNT) || s.missing || s.loanLocked) return s
+        if (!savedState.contains(DRAFT_AMOUNT) || s.scanned || s.missing || s.loanLocked) return s
         val stale = s.editing != null && savedState.get<String>(DRAFT_BASE) != encode(s.editing)
         val type = savedState.get<String>(DRAFT_TYPE)
             ?.let { name -> TransactionType.entries.firstOrNull { it.name == name } }
@@ -366,9 +373,21 @@ class AddViewModel @Inject constructor(
             type = TransactionType.EXPENSE, amount = AmountInput(receipt.total.amount.toPlainString()),
             currency = Currency.RSD, categoryId = categoryId,
             accountId = null, toAccountId = null,
-            date = receipt.date, merchant = receipt.merchant, receipt = receipt, bill = null,
+            date = receipt.date, merchant = receipt.merchant, receipt = receipt, paymentSlip = null, bill = null,
             saved = false, saving = false, error = null, saveError = null,
         ), accountChoices[TransactionType.EXPENSE])
+    }
+
+    fun prefillPaymentSlip(slip: PaymentSlip) {
+        DRAFT_KEYS.forEach { savedState.remove<Any>(it) }
+        _state.update { s ->
+            if (s.paymentSlip == slip) s else selectAccount(s.copy(
+                type = TransactionType.EXPENSE, amount = AmountInput(slip.amount.amount.toPlainString()),
+                currency = Currency.RSD, categoryId = null, accountId = null, toAccountId = null,
+                date = clock.today(), merchant = slip.merchant, paymentSlip = slip, receipt = null, bill = null,
+                saved = false, saving = false, error = null, saveError = null,
+            ), accountChoices[TransactionType.EXPENSE])
+        }
     }
 
     fun resetReceipt() {
@@ -438,7 +457,7 @@ class AddViewModel @Inject constructor(
                         toAccountId = toAccountId,
                         categoryId = categoryId,
                         date = if (s.bill != null) clock.today() else s.date,
-                        note = "",
+                        note = s.paymentSlip?.note.orEmpty(),
                         merchant = s.merchant.trim(),
                         paidBy = member.id,
                         source = when {

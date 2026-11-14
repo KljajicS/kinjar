@@ -62,6 +62,9 @@ class FiscalReceiptTest {
         assertEquals("", FiscalReceiptParser.header(withoutJournal).merchant)
         assertEquals("", FiscalReceiptParser.header(coded.replace("               123456789", "               999999999")).merchant)
         assertEquals("", FiscalReceiptParser.header(coded.replace("               1345054-J072", "               Another shop")).merchant)
+        val unrelatedHeader = coded.replace("               123456789", "               999999999")
+        val fakeItem = unrelatedHeader.replace("</pre>", "123456789\nNot the merchant\n1345054-J072\n</pre>")
+        assertEquals("", FiscalReceiptParser.header(fakeItem).merchant)
     }
 
     @Test fun `invalid or unsupported page fails closed`() {
