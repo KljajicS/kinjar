@@ -45,6 +45,9 @@ internal fun ColumnScope.ReceiptReview(
             Text("RSD", style = sans(14), color = c.muted, modifier = Modifier.padding(bottom = 6.dp))
         }
         Text(listOf(date, s.merchant).filter { it.isNotBlank() }.joinToString(" · "), style = sans(14), color = c.muted)
+        if (s.receipt != null && s.merchant.isBlank()) {
+            Text(stringResource(R.string.scan_merchant_missing), style = sans(13), color = c.orange)
+        }
         Text(stringResource(R.string.scan_category), style = sans(13), color = c.muted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             s.categories.forEach { category ->

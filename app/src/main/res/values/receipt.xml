@@ -1,4 +1,5 @@
 <resources>
+    <string name="scan_merchant_missing">Store name unavailable. Edit expense details and enter it before saving.</string>
     <string name="transaction_details">Transaction details</string>
     <string name="transaction_edit">Edit</string>
     <string name="transaction_unavailable">Unavailable</string>

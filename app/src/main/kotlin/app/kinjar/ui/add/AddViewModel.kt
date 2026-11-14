@@ -113,6 +113,7 @@ data class AddState(
     val canSave: Boolean get() = !loading && !loadFailed && !saving && !saved && !missing && !loanLocked && !stale && amount.value != null && accountId != null && error == null &&
         accounts.any { it.id == accountId && !it.archived && it.currency == currency } &&
         (!rsdOnly || currency == Currency.RSD) && !billInFuture &&
+        (receipt == null || merchant.isNotBlank()) &&
         (type.categoryKind == null || categoryId == null || pickableCategories.any { it.id == categoryId }) &&
         (type != TransactionType.TRANSFER || accounts.any { it.id == toAccountId && !it.archived }) &&
         (!crossCurrency || received != null)

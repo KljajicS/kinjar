@@ -54,7 +54,18 @@ object FiscalReceiptParser {
             .withResolverStyle(ResolverStyle.STRICT)).toLocalDate()
         val money = Money.of(BigDecimal(total).setScale(2, RoundingMode.UNNECESSARY), Currency.RSD)
         require(!money.isZero && !money.isNegative)
-        return FiscalHeader(issuer, invoice, field("shopFullNameLabel"), date, money, token)
+        val shop = field("shopFullNameLabel")
+        val registeredShop = Regex("[0-9]{7}-(.+)").matchEntire(shop)?.groupValues?.get(1)
+        val name = registeredShop ?: shop
+        val codeOnly = name.matches(Regex("[A-Z]{1,4}[0-9]{2,6}"))
+        val business = doc.select("pre").mapNotNull { pre ->
+            val lines = pre.wholeText().lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+            // The journal header binds the business name to this issuer and registered shop.
+            lines.windowed(3).firstOrNull { it[0] == issuer && it[2] == shop }
+                ?.get(1)?.takeIf { it.length <= 500 && it != shop && it != issuer }
+        }.firstOrNull()
+        val merchant = if (registeredShop != null && codeOnly) business.orEmpty() else name
+        return FiscalHeader(issuer, invoice, merchant, date, money, token)
     }
 
     fun receipt(url: String, header: FiscalHeader, specifications: String): Receipt {

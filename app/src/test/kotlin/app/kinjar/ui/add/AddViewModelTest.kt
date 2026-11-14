@@ -265,6 +265,22 @@ class AddViewModelTest {
         assertEquals("123.00", db.receiptQueries.byId(receipt.id).executeAsOne().total)
     }
 
+    @Test fun `unresolved receipt merchant requires manual entry and preserves that entry`() = runTest(dispatcher) {
+        val vm = seeded()
+        val unresolved = receipt().copy(merchant = "")
+        vm.prefillReceipt(unresolved, null)
+        assertFalse(vm.state.value.canSave)
+        vm.save()
+        assertTrue(repo.transactions.first().isEmpty())
+        vm.setMerchant("My store")
+        vm.prefillReceipt(unresolved, null)
+        assertTrue(vm.state.value.canSave)
+        vm.save()
+        vm.state.first { it.saved }
+        assertEquals("My store", repo.transactions.first().single().merchant)
+        assertEquals("", repo.receiptForTransaction(unresolved.transactionId)?.merchant)
+    }
+
     @Test fun `duplicate save shows error and retains receipt review`() = runTest(dispatcher) {
         val vm = seeded()
         vm.prefillReceipt(receipt(), null)
