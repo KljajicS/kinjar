@@ -22,6 +22,7 @@ internal val formRoutes = setOf(
     Routes.NEW_ACCOUNT, Routes.EDIT_ACCOUNT, Routes.NEW_LOAN, Routes.EDIT_LOAN,
     Routes.NEW_GOAL, Routes.EDIT_GOAL,
     Routes.NEW_PROJECT, Routes.PROJECT_LINK, Routes.PROJECT_SETTLE, Routes.PROJECT_REVIEW, Routes.PROJECT_CURRENCY,
+    Routes.PROJECT_EDIT_COST,
 )
 
 internal val detailRoutes = setOf(

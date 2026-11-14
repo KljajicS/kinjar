@@ -40,12 +40,15 @@ fun PastCostScreen(onBack: () -> Unit, tabs: @Composable (Boolean) -> Unit, vm: 
     val back = { if (!write.busy) onBack() }
     val d = loaded
     val project = d?.project(vm.id)
-    ProjectPage(stringResource(R.string.project_link), back) {
+    ProjectPage(stringResource(if (vm.costId == null) R.string.project_link else R.string.transaction_edit), back) {
         item("tabs") { tabs(write.busy) }
         when {
             d == null -> item { LoadingOrError(failed, vm::retry) }
             project == null -> section { Hint(stringResource(R.string.project_not_found)) }
             project.archived -> section { Hint(stringResource(R.string.project_archived_notice)) }
+            vm.costId != null && d.book.costs.none { it.id == vm.costId && it.projectId == vm.id && it.transactionId == null } ->
+                section { Hint(stringResource(R.string.project_review_gone)) }
+            vm.costId != null && form.base == null -> item { LoadingOrError(false, vm::retry) }
             else -> section {
                 val c = LocalColors.current
                 val currency = form.currency ?: project.currency
@@ -66,9 +69,9 @@ fun PastCostScreen(onBack: () -> Unit, tabs: @Composable (Boolean) -> Unit, vm: 
                 ProjectCategoryField(d.categories(project.id), form.categoryId, !busy) { id -> vm.edit { it.copy(categoryId = id) } }
                 FieldBox(stringResource(R.string.project_note), form.note, { text -> vm.edit { it.copy(note = text.take(500)) } })
                 val original = form.original(project)
-                val (conversion, missing) = original?.let { vm.conversion(it, project.currency, form.date, quotes, manual) } ?: Pair(null, emptyList<RateKey>())
+                val (conversion, missing) = original?.let { vm.costConversion(it, project.currency, form.date, quotes, manual) } ?: Pair(null, emptyList<RateKey>())
                 if (original != null && !future) {
-                    ConversionStatus(original, conversion?.converted, original.currency != project.currency && quotes[form.date] == null, missing.isEmpty())
+                    ConversionStatus(original, conversion?.converted, conversion == null && original.currency != project.currency && quotes[form.date] == null, missing.isEmpty())
                     RateInputs(false, missing, manual, vm::setRate, vm::retryRates)
                 }
                 WriteFeedback(vm.writes)
