@@ -21,6 +21,7 @@ fun NavGraphBuilder.projectRoutes(nav: NavHostController) {
     }
     composable(Routes.PROJECT_SETTLE) { ProjectPaymentScreen(onBack = { nav.popBackStack() }) }
     composable(Routes.PROJECT_REVIEW) { CostReviewScreen(onBack = { nav.popBackStack() }) }
+    composable(Routes.PROJECT_EDIT_COST) { PastCostScreen(onBack = { nav.popBackStack() }, tabs = {}) }
     composable(Routes.PROJECT_SETTINGS) { entry ->
         ProjectSettingsScreen(onBack = { nav.popBackStack() }, onCurrency = { nav.navigate(Routes.projectCurrency(entry.projectId)) })
     }
@@ -36,4 +37,5 @@ private fun actions(nav: NavHostController, id: String) = ProjectActions(
     onSettle = { costId -> nav.navigate(Routes.projectSettle(id, costId)) },
     onAllCosts = { nav.navigate(Routes.projectCosts(id)) },
     onReview = { costId -> nav.navigate(Routes.projectReview(id, costId)) },
+    onEdit = { cost -> nav.navigate(cost.transactionId?.let(Routes::editTransaction) ?: Routes.projectEditCost(id, cost.id)) },
 )

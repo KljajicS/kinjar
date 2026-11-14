@@ -39,6 +39,7 @@ data class PastCostForm(
     val categoryId: String? = null,
     val note: String = "",
     val unpaid: Boolean = false,
+    val base: ProjectCost? = null,
 ) {
     fun original(project: Project): Money? =
         parseMoneyInput(amount, currency ?: project.currency)?.takeIf { !it.isZero && !it.isNegative }
@@ -76,6 +77,7 @@ class PastCostViewModel @Inject constructor(
     private val projects: ProjectRepository, repo: BudgetRepository, lookup: ProjectRateLookup, val clock: Clock, private val saved: SavedStateHandle,
 ) : ConversionViewModel(projects, repo, lookup) {
     val id: String = requireNotNull(saved["id"])
+    val costId: String? = saved["costId"]
     private val mutableForm = MutableStateFlow(
         saved.get<String>(FORM)?.let { runCatching { EventJson.decodeFromString(PastCostForm.serializer(), it) }.getOrNull() }
             ?: PastCostForm(newId(), date = clock.today()),
@@ -83,6 +85,16 @@ class PastCostViewModel @Inject constructor(
     val form: StateFlow<PastCostForm> = mutableForm
 
     init {
+        viewModelScope.launch {
+            data.filterNotNull().collect { d ->
+                if (costId != null && form.value.base == null) {
+                    d.book.costs.find { it.id == costId && it.projectId == id && it.transactionId == null }?.let { cost ->
+                        edit { PastCostForm(cost.id, cost.original.inputText(), cost.original.currency, cost.date,
+                            cost.categoryId, cost.note, cost.unpaid, cost) }
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             combine(data.filterNotNull(), form) { d, f -> f.date.takeIf { d.project(id)?.let { p -> (f.currency ?: p.currency) != p.currency } == true } }
                 .collect { date -> if (date != null && date <= clock.today()) ensure(date) }
@@ -99,13 +111,26 @@ class PastCostViewModel @Inject constructor(
         val d = data.value ?: return
         val project = d.project(id)?.takeIf { !it.archived } ?: return
         val f = form.value
+        if (costId != null && f.base == null) return
         val original = f.original(project) ?: return
         if (f.date > clock.today()) return
-        val conv = conversion(original, project.currency, f.date).first ?: return
-        val category = f.categoryId?.takeIf { c -> d.categories(id).any { it.id == c && !it.archived } }
+        val conv = costConversion(original, project.currency, f.date).first ?: return
+        val category = f.categoryId?.takeIf { c -> d.categories(id).any { it.id == c && (!it.archived || f.base?.categoryId == c) } }
         // The draft keeps its id, so a retry after an unclear failure cannot add the cost twice.
-        val cost = ProjectCost(f.costId, id, category, original, conv.converted, f.date, f.note.trim(), null, conv.ratesToRsd, conv.rateDate, conv.source, unpaid = f.unpaid)
-        writes.run { projects.record(listOf(cost)) }
+        val cost = f.base?.withConversion(original, f.date, conv)?.copy(categoryId = category, note = f.note.trim(), unpaid = f.unpaid)
+            ?: ProjectCost(f.costId, id, category, original, conv.converted, f.date, f.note.trim(), null, conv.ratesToRsd, conv.rateDate, conv.source, unpaid = f.unpaid)
+        writes.run { projects.record(listOf(cost), expected = listOfNotNull(f.base)) }
+    }
+
+    fun costConversion(
+        original: Money, target: Currency, date: LocalDate,
+        quotes: Map<LocalDate, QuoteResult> = this.quotes.value, manual: Map<RateKey, String> = this.manual.value,
+    ): Pair<Conversion?, List<RateKey>> {
+        val base = form.value.base
+        if (base != null && base.date == date && base.original.currency == original.currency) {
+            convert(original, target, date, savedQuote(base, target), emptyMap())?.let { return it to emptyList() }
+        }
+        return conversion(original, target, date, quotes, manual)
     }
 
     private companion object {

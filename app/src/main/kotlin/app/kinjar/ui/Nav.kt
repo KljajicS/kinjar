@@ -64,6 +64,8 @@ object Routes {
     const val PROJECT_SETTLE = "projects/{id}/settle/{costId}"
     fun projectSettle(id: String, costId: String) = "projects/$id/settle/$costId"
     const val PROJECT_REVIEW = "projects/{id}/review/{costId}"
+    const val PROJECT_EDIT_COST = "projects/{id}/costs/{costId}/edit"
+    fun projectEditCost(id: String, costId: String) = "projects/$id/costs/$costId/edit"
     fun projectReview(id: String, costId: String) = "projects/$id/review/$costId"
     const val PROJECT_SETTINGS = "projects/{id}/settings"
     fun projectSettings(id: String) = "projects/$id/settings"

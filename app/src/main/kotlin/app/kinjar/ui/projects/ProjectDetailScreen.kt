@@ -40,6 +40,7 @@ class ProjectActions(
     val onAllCosts: () -> Unit = {},
     val onReview: (String) -> Unit = {},
     val onSettle: (String) -> Unit = {},
+    val onEdit: (ProjectCost) -> Unit = {},
 )
 
 @Composable
@@ -77,6 +78,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
     }
     stored.find { it.id == acting }?.let { cost ->
         CostDialog(cost, project, cost.id in stale, write.busy, vm,
+            onEdit = { acting = null; actions.onEdit(cost) },
             onReview = { acting = null; actions.onReview(cost.id) },
             onSettle = { acting = null; actions.onSettle(cost.id) }) { acting = null }
     }
@@ -103,7 +105,7 @@ private fun LazyListScope.overview(
 }
 
 @Composable
-private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy: Boolean, vm: ProjectViewModel, onReview: () -> Unit, onSettle: () -> Unit, onDismiss: () -> Unit) {
+private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy: Boolean, vm: ProjectViewModel, onEdit: () -> Unit, onReview: () -> Unit, onSettle: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalColors.current
     val linked = cost.transactionId != null
     var confirming by rememberSaveable(cost.id) { mutableStateOf(false) }
@@ -127,6 +129,7 @@ private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy
             if (cost.note.isNotBlank() && linked) Hint(cost.note)
             if (stale) Hint(stringResource(R.string.project_cost_changed), c.orange)
             if (!project.archived) {
+                TextButton(onClick = onEdit, enabled = !busy) { Text(stringResource(R.string.transaction_edit), color = c.primary) }
                 if (cost.unpaid) TextButton(onClick = onSettle, enabled = !busy) { Text(stringResource(R.string.project_link_payment), color = c.primary) }
                 if (stale) TextButton(onClick = onReview, enabled = !busy) { Text(stringResource(R.string.project_review), color = c.primary) }
                 TextButton(onClick = { confirming = true }, enabled = !busy) {
