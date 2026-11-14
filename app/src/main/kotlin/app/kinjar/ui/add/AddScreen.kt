@@ -132,6 +132,7 @@ fun AddContent(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             RoundIconButton(Icons.Default.Close, stringResource(R.string.add_close), { if (!s.saving) onClose() })
             val title = when {
+                s.paymentSlip != null -> R.string.scan_ips_review
                 s.receipt != null -> R.string.scan_review
                 s.bill != null -> R.string.add_bill_title
                 s.editing != null && s.typeLocked || readOnly -> R.string.audit_finance_edit_title
@@ -240,6 +241,11 @@ private fun Fields(
     }
 
     FieldBox(stringResource(R.string.add_merchant), s.merchant, onMerchant)
+    if (s.scanned && s.merchant.isBlank()) Text(stringResource(R.string.scan_merchant_missing), style = sans(13), color = c.orange)
+    s.paymentSlip?.let { slip ->
+        Text(stringResource(R.string.scan_ips_record), style = sans(13), color = c.muted)
+        if (slip.note.isNotBlank()) Text(slip.note, style = sans(13), color = c.text)
+    }
     (s.receipt ?: s.savedReceipt)?.let { receipt ->
         Text(stringResource(R.string.scan_original, formatAmount(receipt.total, locale = locale), receipt.items.size), style = sans(12), color = c.muted)
     }

@@ -1,4 +1,15 @@
 <resources>
+    <string name="scan_ips_review">Review payment slip</string>
+    <string name="scan_ips_record">Save records an expense. It does not pay this bill. Check the payment date, category and account.</string>
+    <string name="scan_ips_recipient">Recipient: %1$s</string>
+    <string name="scan_ips_account">Recipient account: %1$s</string>
+    <string name="scan_ips_code">Payment code: %1$s</string>
+    <string name="scan_ips_reference">Model / reference: %1$s</string>
+    <string name="scan_ips_payer">Payer on slip: %1$s</string>
+    <string name="scan_ips_invalid">Payment slip details are incomplete or invalid. Scan again or enter the expense manually.</string>
+    <string name="scan_ips_unsupported">This payment QR format is not supported. Scan an NBS IPS payment slip in RSD or enter the expense manually.</string>
+    <string name="scan_ips_rescan">Payment slip review was interrupted. Scan again and check whether the expense was already saved.</string>
+    <string name="scan_merchant_missing">Store name unavailable. Edit expense details and enter it before saving.</string>
     <string name="transaction_details">Transaction details</string>
     <string name="transaction_edit">Edit</string>
     <string name="transaction_unavailable">Unavailable</string>

@@ -36,6 +36,56 @@ class ScanViewModelTest {
     @Before fun setup() = Dispatchers.setMain(dispatcher)
     @After fun cleanup() = Dispatchers.resetMain()
 
+    private val ips = "K:PR|V:01|C:1|R:200000000000000001|N:ЈП Пример|I:RSD3018,58|SF:221|RO:00000138"
+
+    @Test fun `IPS scans offline without fetching or saving and repeated frames preserve review`() = runTest(dispatcher) {
+        val saved = SavedStateHandle()
+        val vm = ScanViewModel(ReceiptLookup { error("IPS must not fetch") }, repo, saved)
+        vm.scanned(ips)
+        assertEquals(ScanStage.REVIEW, vm.state.value.stage)
+        assertEquals("ЈП Пример", vm.state.value.paymentSlip?.merchant)
+        assertNull(vm.state.value.receipt)
+        vm.scanned(url)
+        vm.scanned(ips.replace("3018,58", "9999,00"))
+        assertEquals("3018.58", vm.state.value.paymentSlip?.amount?.amount?.toPlainString())
+        assertEquals(setOf("paymentSlipPending"), saved.keys())
+        assertEquals(0L, db.eventQueries.count().executeAsOne())
+        vm.reset()
+        assertNull(vm.state.value.paymentSlip)
+        assertTrue(saved.keys().isEmpty())
+        vm.scanned(ips)
+        assertEquals(ScanStage.REVIEW, vm.state.value.stage)
+    }
+
+    @Test fun `IPS recreation requires rescan instead of restoring partial payment details`() = runTest(dispatcher) {
+        val saved = SavedStateHandle(mapOf("paymentSlipPending" to true))
+        val vm = ScanViewModel(ReceiptLookup { error("No lookup") }, repo, saved)
+        assertEquals(ScanStage.ERROR, vm.state.value.stage)
+        assertEquals(R.string.scan_ips_rescan, vm.state.value.error)
+        assertFalse(vm.state.value.canRetry)
+        assertNull(vm.state.value.paymentSlip)
+        vm.retry()
+        assertEquals(ScanStage.ERROR, vm.state.value.stage)
+        vm.reset()
+        vm.scanned(ips)
+        assertEquals(ScanStage.REVIEW, vm.state.value.stage)
+    }
+
+    @Test fun `invalid or unsupported IPS shows local errors and can scan another code`() = runTest(dispatcher) {
+        val vm = ScanViewModel(ReceiptLookup { receipt }, repo, SavedStateHandle())
+        vm.scanned(ips.replace("3018,58", "bad"))
+        assertEquals(R.string.scan_ips_invalid, vm.state.value.error)
+        assertFalse(vm.state.value.canRetry)
+        vm.reset()
+        vm.scanned(ips.replace("V:01", "V:02"))
+        assertEquals(R.string.scan_ips_unsupported, vm.state.value.error)
+        vm.reset()
+        vm.scanned(url)
+        vm.state.first { it.stage == ScanStage.REVIEW }
+        assertEquals(receipt, vm.state.value.receipt)
+        assertNull(vm.state.value.paymentSlip)
+    }
+
     @Test fun `invalid QR never fetches and repeated frames make only one request`() = runTest(dispatcher) {
         var requests = 0
         val gate = CompletableDeferred<Receipt>()

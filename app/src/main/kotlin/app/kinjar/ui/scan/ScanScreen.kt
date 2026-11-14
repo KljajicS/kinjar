@@ -67,8 +67,8 @@ fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, o
     var requested by rememberSaveable { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     var editing by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(draft.receipt, s.stage) {
-        if (draft.receipt == null && s.stage != ScanStage.REVIEW) editing = false
+    LaunchedEffect(draft.scanned, s.stage) {
+        if (!draft.scanned && s.stage != ScanStage.REVIEW) editing = false
     }
     DisposableEffect(editing) {
         onEditingChanged(editing)
@@ -86,6 +86,7 @@ fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, o
         }
     }
     LaunchedEffect(s.receipt?.id) { s.receipt?.let { add.prefillReceipt(it, s.categoryId) } }
+    LaunchedEffect(s.paymentSlip) { s.paymentSlip?.let(add::prefillPaymentSlip) }
     LaunchedEffect(draft.saved) {
         if (draft.saved) {
             vm.reset(); add.resetReceipt(); editing = false
@@ -98,7 +99,7 @@ fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, o
     fun close() { if (!draft.saving) { reset(); onClose() } }
     BackHandler { if (editing) editing = false else close() }
 
-    if (editing && draft.receipt != null) {
+    if (editing && draft.scanned) {
         AddContent(draft, { editing = false }, add::setType, add::setAmount, add::setCategory, add::setAccount,
             add::setToAccount, add::setDate, add::setMerchant, add::skip, { save(false) }, onRetry = add::retryLoad)
         return
@@ -108,7 +109,7 @@ fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, o
     ScanLayout(s.stage == ScanStage.REVIEW, ::close, camera = {
         if (s.stage == ScanStage.CAPTURING && granted) ReceiptCamera(Modifier.fillMaxSize(), vm::scanned, vm::cameraFailed)
     }) {
-            if (s.stage == ScanStage.REVIEW && draft.receipt != null) {
+            if (s.stage == ScanStage.REVIEW && draft.scanned) {
                 if (draft.loadFailed) {
                     Text(stringResource(R.string.audit_ui_load_failed), color = c.orange)
                     TextButton(onClick = add::retryLoad) { Text(stringResource(R.string.audit_ui_retry)) }

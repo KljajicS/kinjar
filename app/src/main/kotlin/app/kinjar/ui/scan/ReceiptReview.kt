@@ -45,9 +45,23 @@ internal fun ColumnScope.ReceiptReview(
             Text("RSD", style = sans(14), color = c.muted, modifier = Modifier.padding(bottom = 6.dp))
         }
         Text(listOf(date, s.merchant).filter { it.isNotBlank() }.joinToString(" · "), style = sans(14), color = c.muted)
+        if (s.scanned && s.merchant.isBlank()) {
+            Text(stringResource(R.string.scan_merchant_missing), style = sans(13), color = c.orange)
+        }
+        s.paymentSlip?.let { slip ->
+            Text(stringResource(R.string.scan_ips_record), style = sans(13), color = c.muted)
+            Text(stringResource(R.string.scan_ips_recipient, slip.recipient), style = sans(13), color = c.text)
+            Text(stringResource(R.string.scan_ips_account, slip.account), style = sans(13), color = c.muted)
+            Text(stringResource(R.string.scan_ips_code, slip.paymentCode), style = sans(13), color = c.muted)
+            slip.payer?.let { Text(stringResource(R.string.scan_ips_payer, it), style = sans(13), color = c.muted) }
+            if (slip.note.isNotBlank()) Text(slip.note, style = sans(13), color = c.text)
+            slip.reference?.let {
+                Text(stringResource(R.string.scan_ips_reference, "${it.take(2)} ${it.drop(2)}"), style = sans(13), color = c.muted)
+            }
+        }
         Text(stringResource(R.string.scan_category), style = sans(13), color = c.muted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            s.categories.forEach { category ->
+            s.pickableCategories.forEach { category ->
                 val active = category.id == s.categoryId
                 Text(categoryDisplayName(category.id, category.name), style = sans(14, FontWeight.Medium),
                     color = if (active) c.onPrimary else c.text,

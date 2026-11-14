@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -24,6 +25,7 @@ import app.kinjar.data.EventStore
 import app.kinjar.data.FixedClock
 import app.kinjar.data.Projector
 import app.kinjar.data.TransactionAccountStore
+import app.kinjar.data.receipt.NbsIpsParser
 import app.kinjar.data.db.KinjarDb
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import androidx.lifecycle.SavedStateHandle
@@ -263,6 +265,22 @@ class AddViewModelTest {
         assertEquals(TransactionSource.RECEIPT, t.source)
         assertEquals("123.05", t.money.amount.toPlainString())
         assertEquals("123.00", db.receiptQueries.byId(receipt.id).executeAsOne().total)
+    }
+
+    @Test fun `unresolved receipt merchant requires manual entry and preserves that entry`() = runTest(dispatcher) {
+        val vm = seeded()
+        val unresolved = receipt().copy(merchant = "")
+        vm.prefillReceipt(unresolved, null)
+        assertFalse(vm.state.value.canSave)
+        vm.save()
+        assertTrue(repo.transactions.first().isEmpty())
+        vm.setMerchant("My store")
+        vm.prefillReceipt(unresolved, null)
+        assertTrue(vm.state.value.canSave)
+        vm.save()
+        vm.state.first { it.saved }
+        assertEquals("My store", repo.transactions.first().single().merchant)
+        assertEquals("", repo.receiptForTransaction(unresolved.transactionId)?.merchant)
     }
 
     @Test fun `duplicate save shows error and retains receipt review`() = runTest(dispatcher) {
@@ -506,6 +524,125 @@ class AddViewModelTest {
         assertEquals("card", remembered[TransactionType.EXPENSE])
         assertTrue(repo.transactions.first().isEmpty())
         assertFalse(repo.hasReceipt(receipt().id))
+    }
+
+    private fun paymentSlip() = NbsIpsParser.parse(
+        "K:PR|V:01|C:1|R:200000000000000001|N:ЈП Пример\nНови Сад|I:RSD3018,58|SF:221|S:Uplata vode|RO:00000138")
+
+    @Test fun `IPS prefills editable expense and saves once with note and ordinary transaction identity`() = runTest(dispatcher) {
+        val vm = seeded()
+        val slip = paymentSlip()
+        vm.prefillPaymentSlip(slip)
+        assertEquals("ЈП Пример", vm.state.value.merchant)
+        assertEquals("3018.58", vm.state.value.amount.text)
+        assertEquals(clock.today(), vm.state.value.date)
+        assertNull(vm.state.value.categoryId)
+        assertNull(vm.state.value.receipt)
+        assertTrue(vm.state.value.typeLocked)
+        vm.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.EXPENSE, vm.state.value.type)
+        vm.setAccount("eur")
+        assertFalse(vm.state.value.canSave)
+        vm.setAccount("cash")
+        vm.setCategory("cat-household")
+        vm.setMerchant("Water company")
+        vm.setDate(clock.today().minusDays(1))
+        vm.setAmount("3020")
+        vm.prefillPaymentSlip(slip)
+        assertEquals("Water company", vm.state.value.merchant)
+        assertEquals("3020", vm.state.value.amount.text)
+        vm.save()
+        vm.save()
+        vm.state.first { it.saved }
+        val tx = repo.transactions.first().single()
+        assertEquals("Water company", tx.merchant)
+        assertEquals("ЈП Пример - Uplata vode", tx.note)
+        assertEquals("3020.00", tx.money.amount.toPlainString())
+        assertEquals(clock.today().minusDays(1), tx.date)
+        assertEquals("cat-household", tx.categoryId)
+        assertEquals(TransactionSource.MANUAL, tx.source)
+        assertFalse(tx.id.startsWith("receipt:"))
+        assertNull(repo.receiptForTransaction(tx.id))
+    }
+
+    @Test fun `identical IPS can record a later payment and resetting clears all scan data`() = runTest(dispatcher) {
+        val vm = seeded()
+        vm.prefillPaymentSlip(paymentSlip())
+        vm.save()
+        vm.state.first { it.saved }
+        val first = repo.transactions.first().single()
+        vm.resetReceipt()
+        assertNull(vm.state.value.paymentSlip)
+        assertFalse(vm.state.value.scanned)
+        assertEquals("", vm.state.value.merchant)
+        assertFalse(vm.state.value.canSave)
+        vm.prefillPaymentSlip(paymentSlip())
+        vm.setDate(first.date.plusMonths(1))
+        vm.save()
+        vm.state.first { it.saved }
+        val payments = repo.transactions.first()
+        assertEquals(2, payments.size)
+        assertEquals(2, payments.map { it.id }.distinct().size)
+        assertTrue(payments.all { it.note == paymentSlip().note })
+        vm.resetReceipt()
+        vm.prefillReceipt(receipt(), null)
+        assertNull(vm.state.value.paymentSlip)
+    }
+
+    @Test fun `IPS does not persist sensitive or partial drafts even when prefilled before loading`() = runTest(dispatcher) {
+        seeded()
+        val saved = SavedStateHandle(mapOf("draft.amount" to "99", "draft.merchant" to "Old manual draft"))
+        val vm = AddViewModel(repo, clock, saved, accountStore).also { models += it }
+        vm.prefillPaymentSlip(paymentSlip())
+        vm.state.first { !it.loading }
+        runCurrent()
+        assertEquals("3018.58", vm.state.value.amount.text)
+        assertEquals("ЈП Пример", vm.state.value.merchant)
+        assertTrue(saved.keys().none { it.startsWith("draft.") })
+        vm.setMerchant("Edited")
+        runCurrent()
+        assertTrue(saved.keys().none { it.startsWith("draft.") })
+        val restored = AddViewModel(repo, clock, saved, accountStore).also { models += it }
+        restored.state.first { !it.loading }
+        assertNull(restored.state.value.paymentSlip)
+        assertEquals("", restored.state.value.merchant)
+        assertFalse(restored.state.value.canSave)
+    }
+
+    @Test fun `IPS save waits for an RSD account and rejects retired category`() = runTest(dispatcher) {
+        val vm = seeded()
+        repo.archiveAccount("cash")
+        repo.archiveAccount("card")
+        vm.state.first { it.accounts.size == 1 }
+        vm.prefillPaymentSlip(paymentSlip())
+        assertEquals(Currency.RSD, vm.state.value.currency)
+        assertFalse(vm.state.value.canSave)
+        vm.save()
+        assertTrue(repo.transactions.first().isEmpty())
+        repo.addAccount(Account("new", "New", Currency.RSD, AccountKind.SPENDING))
+        vm.state.first { it.accountId == "new" }
+        vm.setCategory("cat-household")
+        repo.archiveCategory("cat-household")
+        vm.state.first { s -> s.categories.none { it.id == "cat-household" } }
+        assertFalse(vm.state.value.canSave)
+        vm.setCategory(null)
+        assertTrue(vm.state.value.canSave)
+        vm.setMerchant(" ")
+        assertFalse(vm.state.value.canSave)
+    }
+
+    @Test fun `failed IPS save retains details and retry records one expense`() = runTest(dispatcher) {
+        val vm = seeded()
+        vm.prefillPaymentSlip(paymentSlip())
+        driver.execute(null, "CREATE TRIGGER fail_tx BEFORE INSERT ON tx BEGIN SELECT RAISE(ABORT, 'disk full'); END", 0)
+        vm.save()
+        vm.state.first { it.saveError != null }
+        assertEquals(paymentSlip(), vm.state.value.paymentSlip)
+        assertTrue(repo.transactions.first().isEmpty())
+        driver.execute(null, "DROP TRIGGER fail_tx", 0)
+        vm.save()
+        vm.state.first { it.saved }
+        assertEquals(paymentSlip().note, repo.transactions.first().single().note)
     }
 
     @Test fun `transfers preserve source flow and never change remembered accounts`() = runTest(dispatcher) {

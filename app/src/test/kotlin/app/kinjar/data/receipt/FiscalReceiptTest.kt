@@ -42,6 +42,31 @@ class FiscalReceiptTest {
         assertNotEquals(receipt.id, receipt.copy(invoiceNumber = "ABCDEFGH-IJKLMNOP-124").id)
     }
 
+    @Test fun `registered shop identifier falls back to business in matching journal header`() {
+        val coded = html.replace("Пример Čair", "1345054-J072")
+        assertEquals("Пример продавница", FiscalReceiptParser.header(coded).merchant)
+        val receipt = FiscalReceiptParser.receipt("test", FiscalReceiptParser.header(coded), items)
+        assertEquals("Пример продавница", receipt.merchant)
+    }
+
+    @Test fun `registered shop prefix is removed but meaningful numeric names survive`() {
+        listOf("1234567-Пример Čair" to "Пример Čair", "1234567-7-Eleven" to "7-Eleven",
+            "7-Eleven" to "7-Eleven", "123 Store" to "123 Store", "1234567-365" to "365").forEach { (shop, expected) ->
+            assertEquals(expected, FiscalReceiptParser.header(html.replace("Пример Čair", shop)).merchant)
+        }
+    }
+
+    @Test fun `unresolved coded shop stays blank for editing instead of borrowing an unrelated name`() {
+        val coded = html.replace("Пример Čair", "1345054-J072")
+        val withoutJournal = coded.substringBefore("<pre>") + "</body></html>"
+        assertEquals("", FiscalReceiptParser.header(withoutJournal).merchant)
+        assertEquals("", FiscalReceiptParser.header(coded.replace("               123456789", "               999999999")).merchant)
+        assertEquals("", FiscalReceiptParser.header(coded.replace("               1345054-J072", "               Another shop")).merchant)
+        val unrelatedHeader = coded.replace("               123456789", "               999999999")
+        val fakeItem = unrelatedHeader.replace("</pre>", "123456789\nNot the merchant\n1345054-J072\n</pre>")
+        assertEquals("", FiscalReceiptParser.header(fakeItem).merchant)
+    }
+
     @Test fun `invalid or unsupported page fails closed`() {
         listOf(
             html.replace("ПП", "ПР"), html.replace("true", "false"),

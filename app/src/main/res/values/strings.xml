@@ -277,7 +277,7 @@
     <string name="scan_original">Original receipt: %1$s RSD · %2$d items</string>
     <string name="add_save_failed">Could not save. Your entries are kept; please try again.</string>
     <string name="scan_title">Scan receipt</string>
-    <string name="scan_hint">Point camera at a Serbian fiscal QR code. Internet required for receipt lookup.</string>
+    <string name="scan_hint">Point camera at a Serbian fiscal receipt or NBS IPS payment slip QR code. Only fiscal receipts require internet.</string>
     <string name="scan_permission">Camera access is needed to scan a receipt.</string>
     <string name="scan_allow_camera">Allow camera</string>
     <string name="scan_open_settings">Open app settings</string>
@@ -286,7 +286,7 @@
     <string name="scan_retry">Retry lookup</string>
     <string name="scan_again">Scan another receipt</string>
     <string name="scan_manual">Enter expense manually</string>
-    <string name="scan_invalid_qr">This is not a supported Serbian fiscal receipt QR code.</string>
+    <string name="scan_invalid_qr">Scan a Serbian fiscal receipt or NBS IPS payment slip QR code.</string>
     <string name="scan_network_error">Could not reach receipt service. Connect to the internet and retry.</string>
     <string name="scan_parse_error">Receipt details are unavailable or incomplete. Retry later or enter expense manually.</string>
     <string name="scan_unsupported">Only ordinary sale receipts are supported. Refunds, advances, copies and training receipts cannot be imported.</string>
