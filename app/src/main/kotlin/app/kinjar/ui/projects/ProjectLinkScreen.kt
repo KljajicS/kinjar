@@ -105,10 +105,15 @@ private fun ExistingExpensesScreen(onBack: () -> Unit, tabs: @Composable (Boolea
     val plan = remember(chosen, project, quotes, manual) { linkPlan(chosen, project, quotes, manual) }
     val total = plan.items.mapNotNull { it.second?.converted }.fold(Money.zero(project.currency), Money::plus)
     val waiting = plan.items.count { it.second == null }
+    val credit = d.book.incomeBalance(project.id)
 
     ProjectPage(title, back, footer = {
         Text(stringResource(R.string.project_link_summary, chosen.size, money(total)), style = sans(14, FontWeight.Medium), color = c.text)
         if (waiting > 0) Hint(stringResource(R.string.project_link_waiting, waiting), c.orange)
+        if (!settling && form.fromCredit) {
+            val used = Money.of(credit.amount.max(java.math.BigDecimal.ZERO).min(total.amount), project.currency)
+            Hint(stringResource(R.string.project_expense_credit_preview, money(used), money(total - used), money(credit - total)), if ((credit - total).isNegative) c.red else c.green)
+        }
         WriteFeedback(vm.writes)
         PrimaryButton(if (settling) stringResource(R.string.project_link_payment) else stringResource(R.string.project_link_save, chosen.size),
             plan.ready && (!settling || chosen.size == 1) && !write.busy, vm::save)
@@ -118,6 +123,16 @@ private fun ExistingExpensesScreen(onBack: () -> Unit, tabs: @Composable (Boolea
             if (unpaid != null) Hint(stringResource(R.string.project_settle_hint, money(unpaid.converted)))
             SourceCategories(project.sourceCategoryIds.mapNotNull(d.householdById::get), names)
             if (!settling) ProjectCategoryField(d.categories(project.id), form.categoryId, !write.busy, vm::setCategory)
+            if (!settling) {
+                Row(Modifier.toggleable(form.fromCredit, enabled = !write.busy, role = Role.Checkbox, onValueChange = vm::setFromCredit), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(form.fromCredit, onCheckedChange = null)
+                    Text(stringResource(R.string.project_use_credit), color = c.text)
+                }
+                if (form.fromCredit) {
+                    Hint(stringResource(R.string.project_balance_before, money(credit)))
+                    Hint(stringResource(R.string.project_expense_credit_hint))
+                }
+            }
             FieldBox(stringResource(R.string.project_search), form.query, vm::setQuery)
             RateInputs(plan.loading, plan.missing, manual, vm::setRate, vm::retryRates)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -131,6 +146,14 @@ private fun ExistingExpensesScreen(onBack: () -> Unit, tabs: @Composable (Boolea
         }
         items(visible, key = { it.id }) { tx ->
             Candidate(tx, tx.id in form.selected, d.householdById[tx.categoryId], names[tx.categoryId], accountNames[tx.accountId]) { vm.toggle(tx.id) }
+            if (form.fromCredit && tx.id in form.selected && plan.ready) {
+                var available = credit.amount.max(java.math.BigDecimal.ZERO)
+                val covered = plan.items.takeWhile { it.first.id != tx.id }.sumOf { requireNotNull(it.second).converted.amount }
+                available = (available - covered).max(java.math.BigDecimal.ZERO)
+                val amount = requireNotNull(plan.items.first { it.first.id == tx.id }.second).converted
+                val used = Money.of(available.min(amount.amount), project.currency)
+                Hint(stringResource(R.string.project_expense_credit_allocation, money(used), money(amount - used)))
+            }
         }
     }
 }

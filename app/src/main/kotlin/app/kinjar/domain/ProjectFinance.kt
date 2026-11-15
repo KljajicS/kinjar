@@ -2,6 +2,8 @@ package app.kinjar.domain
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -59,14 +61,20 @@ data class ProjectRepayment(val id: String, val payment: ProjectPayment, val not
 }
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class ProjectFinance(
     val projectId: String,
     val reimbursement: ProjectReimbursement? = null,
     val settlements: List<ProjectSettlement> = emptyList(),
     val repayments: List<ProjectRepayment> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val openingCredit: Money? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val creditCosts: Map<String, Money> = emptyMap(),
 ) {
     init {
-        require(projectId.isNotBlank() && settlements.size + repayments.size <= 1_000)
+        require(projectId.isNotBlank() && settlements.size + repayments.size + creditCosts.size <= 1_000)
+        require(openingCredit?.isNegative != true)
+        require(creditCosts.keys.none { it.isBlank() })
+        require(creditCosts.values.all { !it.isNegative && !it.isZero })
         require(settlements.map { it.id }.distinct().size == settlements.size)
         require(repayments.map { it.id }.distinct().size == repayments.size)
         val costIds = settlements.flatMap { it.allocations.keys }
@@ -78,6 +86,32 @@ data class ProjectFinance(
     }
 
     fun payments(): List<ProjectPayment> = settlements.map { it.payment } + repayments.map { it.payment }
+
+    val hasCredit: Boolean get() = openingCredit != null || creditCosts.isNotEmpty()
+}
+
+fun projectCreditBalance(finance: ProjectFinance, costs: List<ProjectCost>, transactions: Map<String, Transaction>, currency: Currency): Money {
+    return projectUnallocatedBalance(finance, costs, transactions, currency) - reimbursementOutstanding(finance, costs, transactions, currency)
+}
+
+fun reimbursementOutstanding(finance: ProjectFinance, costs: List<ProjectCost>, transactions: Map<String, Transaction>, currency: Currency): Money =
+    costs.filter { cost -> cost.projectId == finance.projectId && cost.reimbursable && cost.unpaid &&
+        transactions[cost.transactionId]?.type == TransactionType.EXPENSE && finance.settlements.none {
+            cost.id in it.allocations && transactions[it.payment.transactionId]?.type == it.type
+        }
+    }.fold(Money.zero(currency)) { total, cost -> total + cost.converted - (finance.creditCosts[cost.id] ?: Money.zero(currency)) }
+
+fun projectUnallocatedBalance(finance: ProjectFinance, costs: List<ProjectCost>, transactions: Map<String, Transaction>, currency: Currency): Money {
+    val originals = costs.associateBy { it.id }
+    val spent = finance.creditCosts.values.fold(Money.zero(currency), Money::plus)
+    return finance.settlements.filter {
+        it.type == TransactionType.INCOME && transactions[it.payment.transactionId]?.type == TransactionType.INCOME
+    }.fold((finance.openingCredit ?: Money.zero(currency)) - spent) { balance, settlement ->
+        val covered = settlement.allocations.keys.fold(Money.zero(currency)) { total, id ->
+            total + requireNotNull(originals[id]).converted - (finance.creditCosts[id] ?: Money.zero(currency))
+        }
+        balance + settlement.payment.converted - covered
+    }
 }
 
 @Serializable @SerialName("ProjectFinanceSaved")

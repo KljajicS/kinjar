@@ -29,7 +29,7 @@ import javax.inject.Inject
 const val MAX_BATCH = 200
 
 @Serializable
-data class LinkForm(val query: String = "", val selected: Set<String> = emptySet(), val categoryId: String? = null, val limited: Boolean = false)
+data class LinkForm(val query: String = "", val selected: Set<String> = emptySet(), val categoryId: String? = null, val limited: Boolean = false, val fromCredit: Boolean = false)
 
 data class LinkPlan(val items: List<Pair<Transaction, Conversion?>>, val missing: List<RateKey>, val loading: Boolean) {
     val ready: Boolean get() = items.isNotEmpty() && items.size <= MAX_BATCH && items.all { it.second != null }
@@ -94,6 +94,7 @@ class ProjectLinkViewModel @Inject constructor(
 
     fun setQuery(text: String) = edit { it.copy(query = text.take(100)) }
     fun setCategory(id: String?) = edit { it.copy(categoryId = id) }
+    fun setFromCredit(value: Boolean) = edit { it.copy(fromCredit = value) }
 
     fun toggle(txId: String) = edit {
         when {
@@ -134,9 +135,11 @@ class ProjectLinkViewModel @Inject constructor(
         val category = form.value.categoryId?.takeIf { c -> d.categories(id).any { it.id == c && !it.archived } }
         val costs = plan.items.map { (tx, conversion) ->
             val conv = requireNotNull(conversion)
-            ProjectCost(newId(), id, category, tx.money, conv.converted, tx.date, "", tx.id, conv.ratesToRsd, conv.rateDate, conv.source)
+            ProjectCost(newId(), id, category, tx.money, conv.converted, tx.date, if (form.value.fromCredit) tx.merchant.ifBlank { tx.note } else "", tx.id, conv.ratesToRsd, conv.rateDate, conv.source,
+                unpaid = form.value.fromCredit, reimbursable = form.value.fromCredit)
         }
-        writes.run { projects.record(costs) }
+        val fromCredit = form.value.fromCredit
+        writes.run { if (fromCredit) projects.linkFromCredit(costs, d.book.finance(id)) else projects.record(costs) }
     }
 
     private companion object {

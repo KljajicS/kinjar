@@ -55,8 +55,8 @@
     <string name="project_remove_payment_body">Remove this project record? Linked account transactions stay unchanged. Balances and paid status will be recalculated.</string>
     <string name="project_history_empty">No payments recorded yet.</string>
     <string name="project_payment_changed">Linked transaction changed or was deleted. Review the source transaction, or remove this project record and link it again.</string>
-    <string name="project_settlement_locked">Undo the grouped payment in Project payments before editing this cost.</string>
-    <string name="project_finance_currency_locked">Projects with reimbursement or settlement history keep their currency.</string>
+    <string name="project_settlement_locked">Undo the payment in Project payments before editing this cost.</string>
+    <string name="project_finance_currency_locked">Projects with credit or payment history keep their currency.</string>
     <string name="project_payment_stale">Project data changed. Go back and reopen this screen before saving.</string>
     <string name="project_previous_month">Previous month</string>
     <string name="project_next_month">Next month</string>

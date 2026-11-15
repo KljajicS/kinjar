@@ -71,4 +71,28 @@ class ProjectReportTest {
         assertTrue(report(book).contains("Korekcija: -2000 RSD (plaćeno ranije)"))
         assertTrue(report(book).contains("Ukupno za plaćanje: 6000 RSD"))
     }
+
+    @Test fun `partial credit reports only remainder while project totals keep whole bill`() {
+        val cost = electricity.copy(original = rsd("9000"), converted = rsd("9000"))
+        val finance = ProjectFinance("p", openingCredit = rsd("7000"), creditCosts = mapOf(cost.id to rsd("7000")))
+        val book = book().copy(costs = listOf(cost), transactions = emptyList(), finances = listOf(finance))
+        assertTrue(report(book).contains("Struja: 2000 RSD"))
+        assertTrue(report(book).contains("Ukupno za plaćanje: 2000 RSD"))
+        assertFalse(report(book).contains("Korekcija"))
+        assertEquals(rsd("9000"), book.summary(project).total)
+        assertEquals(rsd("2000"), book.summary(project).unpaid)
+    }
+
+    @Test fun `tracked reimbursement debt is not added to unpaid amount twice`() {
+        val tx = Transaction("bill", TransactionType.EXPENSE, rsd("9000"), "bank", null, null, day, "", "", "member", TransactionSource.RECEIPT)
+        val cost = electricity.copy(original = tx.money, converted = tx.money, transactionId = tx.id, reimbursable = true)
+        val base = book().copy(costs = listOf(cost), transactions = listOf(tx), finances = emptyList())
+        assertEquals(rsd("-9000"), base.incomeBalance(project.id))
+        assertTrue(report(base).contains("Ukupno za plaćanje: 9000 RSD"))
+        assertFalse(report(base).contains("Korekcija"))
+        val partial = base.copy(finances = listOf(ProjectFinance(project.id, openingCredit = rsd("7000"), creditCosts = mapOf(cost.id to rsd("7000")))))
+        assertEquals(rsd("-2000"), partial.incomeBalance(project.id))
+        assertTrue(report(partial).contains("Ukupno za plaćanje: 2000 RSD"))
+        assertFalse(report(partial).contains("Korekcija"))
+    }
 }

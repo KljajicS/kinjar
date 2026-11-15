@@ -1,6 +1,8 @@
 package app.kinjar.domain
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import java.time.LocalDate
 
 @Serializable
@@ -35,6 +37,7 @@ data class ProjectCategory(
 }
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class ProjectCost(
     val id: String,
     val projectId: String,
@@ -48,11 +51,13 @@ data class ProjectCost(
     @Serializable(with = LocalDateSerializer::class) val rateDate: LocalDate = date,
     val rateSource: String = "same-currency",
     val unpaid: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val reimbursable: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && projectId.isNotBlank())
         require(transactionId == null || transactionId.isNotBlank())
-        require(!unpaid || transactionId == null) { "An unpaid cost cannot have a payment expense" }
+        require(!unpaid || transactionId == null || reimbursable) { "An unpaid cost cannot have a payment expense" }
+        require(!reimbursable || transactionId != null) { "Reimbursement needs an expense" }
         require(categoryId == null || categoryId.isNotBlank())
         require(!original.isNegative && !original.isZero) { "Project cost must be positive" }
         require(date.year in 1900..2100 && rateDate <= date && rateDate.year >= 1900)

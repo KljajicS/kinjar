@@ -40,6 +40,7 @@ data class PastCostForm(
     val note: String = "",
     val unpaid: Boolean = false,
     val base: ProjectCost? = null,
+    val fromCredit: Boolean = false,
 ) {
     fun original(project: Project): Money? =
         parseMoneyInput(amount, currency ?: project.currency)?.takeIf { !it.isZero && !it.isNegative }
@@ -117,9 +118,12 @@ class PastCostViewModel @Inject constructor(
         val conv = costConversion(original, project.currency, f.date).first ?: return
         val category = f.categoryId?.takeIf { c -> d.categories(id).any { it.id == c && (!it.archived || f.base?.categoryId == c) } }
         // The draft keeps its id, so a retry after an unclear failure cannot add the cost twice.
-        val cost = f.base?.withConversion(original, f.date, conv)?.copy(categoryId = category, note = f.note.trim(), unpaid = f.unpaid)
-            ?: ProjectCost(f.costId, id, category, original, conv.converted, f.date, f.note.trim(), null, conv.ratesToRsd, conv.rateDate, conv.source, unpaid = f.unpaid)
-        writes.run { projects.record(listOf(cost), expected = listOfNotNull(f.base)) }
+        val cost = f.base?.withConversion(original, f.date, conv)?.copy(categoryId = category, note = f.note.trim(), unpaid = f.unpaid || f.fromCredit)
+            ?: ProjectCost(f.costId, id, category, original, conv.converted, f.date, f.note.trim(), null, conv.ratesToRsd, conv.rateDate, conv.source, unpaid = f.unpaid || f.fromCredit)
+        writes.run {
+            if (f.fromCredit) projects.recordFromCredit(cost, f.base, d.book.finance(id))
+            else projects.record(listOf(cost), expected = listOfNotNull(f.base))
+        }
     }
 
     fun costConversion(

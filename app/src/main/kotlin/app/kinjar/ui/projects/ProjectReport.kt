@@ -5,6 +5,7 @@ import app.kinjar.data.ProjectBook
 import app.kinjar.domain.Money
 import app.kinjar.domain.Project
 import app.kinjar.domain.TransactionType
+import app.kinjar.domain.reimbursementOutstanding
 import java.time.LocalDate
 
 fun projectReport(project: Project, book: ProjectBook, today: LocalDate, label: (Int) -> String): String = buildString {
@@ -12,15 +13,15 @@ fun projectReport(project: Project, book: ProjectBook, today: LocalDate, label: 
     val categories = book.categories.filter { it.projectId == project.id }.associateBy { it.id }
     val finance = book.finance(project.id)
     val config = finance.reimbursement
-    val pending = if (config == null) costs.filter { it.unpaid }
+    val pending = if (config == null) costs.filter { it.unpaid }.map { it.copy(converted = book.unpaidAmount(it), original = book.unpaidAmount(it), ratesToRsd = emptyMap(), rateSource = "same-currency", rateDate = it.date) }
         else costs.filter { it.date >= config.start }
-    val correction = if (config == null) -book.incomeBalance(project.id) else {
+    val correction = if (config == null) -book.incomeBalance(project.id) - reimbursementOutstanding(finance, book.costs, book.transactions.associateBy { it.id }, project.currency) else {
         val receipts = book.activeRepayments(project.id).filter { it.payment.date >= config.start }
             .fold(Money.zero(project.currency)) { total, entry -> total + entry.payment.converted }
         val income = finance.settlements.filter { it.type == TransactionType.INCOME && it.payment.date >= config.start &&
             book.transactions.any { tx -> tx.id == it.payment.transactionId && tx.type == TransactionType.INCOME } }
             .fold(Money.zero(project.currency)) { total, entry -> total + entry.payment.converted }
-        config.opening - receipts - income
+        config.opening - receipts - income - (finance.openingCredit ?: Money.zero(project.currency))
     }
     fun amount(value: Money) = "${value.amount.stripTrailingZeros().toPlainString()} ${value.currency}"
     appendLine(label(R.string.project_report_title))

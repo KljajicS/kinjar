@@ -55,8 +55,8 @@
     <string name="project_remove_payment_body">Ukloniti ovu evidenciju projekta? Povezane transakcije računa ostaju nepromenjene. Stanja i status plaćanja biće ponovo izračunati.</string>
     <string name="project_history_empty">Još nema evidentiranih plaćanja.</string>
     <string name="project_payment_changed">Povezana transakcija je promenjena ili obrisana. Proveri izvornu transakciju ili ukloni ovu evidenciju i ponovo je poveži.</string>
-    <string name="project_settlement_locked">Pre izmene troška poništi zajedničku uplatu u Plaćanjima projekta.</string>
-    <string name="project_finance_currency_locked">Projekti sa istorijom nadoknada ili zajedničkih uplata zadržavaju svoju valutu.</string>
+    <string name="project_settlement_locked">Pre izmene troška poništi plaćanje u Plaćanjima projekta.</string>
+    <string name="project_finance_currency_locked">Projekti sa preplatom ili istorijom plaćanja zadržavaju svoju valutu.</string>
     <string name="project_payment_stale">Podaci projekta su promenjeni. Vrati se i ponovo otvori ovaj ekran pre čuvanja.</string>
     <string name="project_previous_month">Prethodni mesec</string>
     <string name="project_next_month">Sledeći mesec</string>

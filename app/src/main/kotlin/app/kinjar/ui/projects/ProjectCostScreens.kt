@@ -55,9 +55,14 @@ fun PastCostScreen(onBack: () -> Unit, tabs: @Composable (Boolean) -> Unit, vm: 
                 val busy = write.busy
                 Hint(stringResource(R.string.project_past_hint))
                 Row(Modifier.toggleable(form.unpaid, enabled = !busy, role = Role.Checkbox,
-                    onValueChange = { value -> vm.edit { it.copy(unpaid = value) } }), verticalAlignment = Alignment.CenterVertically) {
+                    onValueChange = { value -> vm.edit { it.copy(unpaid = value, fromCredit = false) } }), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(form.unpaid, onCheckedChange = null)
                     Text(stringResource(R.string.project_unpaid), color = c.text)
+                }
+                Row(Modifier.toggleable(form.fromCredit, enabled = !busy, role = Role.Checkbox,
+                    onValueChange = { value -> vm.edit { it.copy(fromCredit = value, unpaid = false) } }), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(form.fromCredit, onCheckedChange = null)
+                    Text(stringResource(R.string.project_pay_from_credit), color = c.text)
                 }
                 AmountField(stringResource(R.string.project_amount), form.amount, currency) { text -> vm.edit { it.copy(amount = text) } }
                 Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -74,8 +79,18 @@ fun PastCostScreen(onBack: () -> Unit, tabs: @Composable (Boolean) -> Unit, vm: 
                     ConversionStatus(original, conversion?.converted, conversion == null && original.currency != project.currency && quotes[form.date] == null, missing.isEmpty())
                     RateInputs(false, missing, manual, vm::setRate, vm::retryRates)
                 }
+                val credit = d.book.incomeBalance(project.id)
+                val hasCredit = !credit.isNegative && !credit.isZero
+                if (form.fromCredit) {
+                    Hint(stringResource(R.string.project_credit_available, money(credit)))
+                    if (!hasCredit) Hint(stringResource(R.string.project_credit_none), c.red)
+                    conversion?.let { converted ->
+                        val used = Money.of(credit.amount.max(java.math.BigDecimal.ZERO).min(converted.converted.amount), project.currency)
+                        Hint(stringResource(R.string.project_credit_preview, money(used), money(converted.converted - used), money(credit - used)))
+                    }
+                }
                 WriteFeedback(vm.writes)
-                PrimaryButton(stringResource(R.string.project_cost_save), conversion != null && !future && !busy, vm::save)
+                PrimaryButton(stringResource(if (form.fromCredit) R.string.project_pay_from_credit else R.string.project_cost_save), conversion != null && !future && !busy && (!form.fromCredit || hasCredit), vm::save)
             }
         }
     }
