@@ -47,8 +47,10 @@ data class ProjectSettlement(val id: String, val payment: ProjectPayment, val al
         require(type == TransactionType.EXPENSE || type == TransactionType.INCOME)
         require(allocations.size in 1..200 && allocations.keys.none { it.isBlank() })
         require(allocations.values.all { it.currency == payment.converted.currency && !it.isNegative && !it.isZero })
-        require(allocations.values.fold(Money.zero(payment.converted.currency), Money::plus) == payment.converted)
+        require(type == TransactionType.INCOME || allocated == payment.converted)
     }
+
+    val allocated: Money get() = allocations.values.fold(Money.zero(payment.converted.currency), Money::plus)
 }
 
 @Serializable

@@ -1,12 +1,15 @@
 package app.kinjar.ui.projects
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -99,6 +102,7 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
     var selected by rememberSaveable { mutableStateOf(ArrayList(if (income) emptyList() else vm.selected)) }
     var stage by rememberSaveable { mutableIntStateOf(if (income) 0 else 1) }
     var txId by rememberSaveable { mutableStateOf<String?>(null) }
+    var carryDifference by rememberSaveable { mutableStateOf(true) }
     var inputsJson by rememberSaveable { mutableStateOf("{}") }
     val inputs = EventJson.decodeFromString<Map<String, String>>(inputsJson)
     val settlementId = rememberSaveable { newId() }
@@ -113,18 +117,18 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
     LaunchedEffect(txId) { tx?.let(vm::ratesFor) }
     val plan = linkPlan(listOfNotNull(tx), project, quotes, manual)
     val payment = plan.items.singleOrNull()?.let { (t, conversion) -> conversion?.let { paymentSnapshot(t, it) } }
-    val allocations = chosen.mapNotNull { cost -> parseMoneyInput(inputs[cost.id] ?: cost.converted.inputText(), project.currency)?.takeIf { !it.isNegative && !it.isZero }?.let { cost.id to it } }.toMap()
+    val allocations = if (income) chosen.associate { it.id to it.converted } else chosen.mapNotNull { cost -> parseMoneyInput(inputs[cost.id] ?: cost.converted.inputText(), project.currency)?.takeIf { !it.isNegative && !it.isZero }?.let { cost.id to it } }.toMap()
     val assigned = allocations.values.fold(Money.zero(project.currency), Money::plus)
     val stale = chosen.size != selected.size || base != d.book.finance(project.id) || chosen.any { source -> d.book.costs.find { it.id == source.id } != source }
-    val valid = !stale && !project.archived && chosen.isNotEmpty() && chosen.size <= MAX_BATCH && allocations.size == chosen.size && payment?.converted == assigned
+    val valid = !stale && !project.archived && chosen.isNotEmpty() && chosen.size <= MAX_BATCH && allocations.size == chosen.size && payment != null && (income && carryDifference || payment.converted == assigned)
     val goBack = { if (!write.busy) { if (stage > if (income) 0 else 1) stage-- else back() } }
     val chooseLabel = if (income) R.string.project_choose_income else R.string.project_choose_expense
     key(stage) {
         ProjectPage(stringResource(if (income) R.string.project_link_unpaid_income else if (stage == 1) chooseLabel else R.string.project_adjust_allocations), goBack, footer = {
             if (stale) Hint(stringResource(R.string.project_payment_stale), LocalColors.current.orange)
             WriteFeedback(vm.writes)
-            PrimaryButton(stringResource(if (stage == 2 || stage == 1 && valid) R.string.project_mark_selected_paid else chooseLabel), !write.busy && !stale && !project.archived && when (stage) { 0 -> chosen.size in 1..MAX_BATCH; 1 -> chosen.size in 1..MAX_BATCH && payment != null; else -> valid }) {
-                if (stage == 0 || stage == 1 && !valid) stage++ else vm.save(base.copy(settlements = base.settlements + ProjectSettlement(settlementId, requireNotNull(payment), allocations, if (income) TransactionType.INCOME else TransactionType.EXPENSE)), base, chosen)
+            PrimaryButton(stringResource(if (stage == 1 && income) R.string.project_review_income else if (stage == 2 || stage == 1 && valid) R.string.project_mark_selected_paid else chooseLabel), !write.busy && !stale && !project.archived && when (stage) { 0 -> chosen.size in 1..MAX_BATCH; 1 -> chosen.size in 1..MAX_BATCH && payment != null; else -> valid }) {
+                if (stage == 0 || stage == 1 && (income || !valid)) stage++ else vm.save(base.copy(settlements = base.settlements + ProjectSettlement(settlementId, requireNotNull(payment), allocations, if (income) TransactionType.INCOME else TransactionType.EXPENSE)), base, chosen)
             }
         }) {
             item("tabs") { tabs(write.busy) }
@@ -150,13 +154,40 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
                         RateInputs(plan.loading, plan.missing, manual, vm::setRate, vm::retryRates)
                     }
                     else -> {
-                        payment?.let { Hint(stringResource(R.string.project_selected_payment, money(it.converted))) }
-                        Hint(stringResource(R.string.project_allocation_hint))
-                        chosen.forEach { cost ->
-                            AmountField(cost.note.ifBlank { stringResource(R.string.project_unpaid) }, inputs[cost.id] ?: cost.converted.inputText(), project.currency) { text -> inputsJson = EventJson.encodeToString(inputs + (cost.id to text)) }
-                            Hint(stringResource(R.string.project_estimate, money(cost.converted)))
+                        if (income) {
+                            payment?.let {
+                                Hint(stringResource(R.string.project_income_received, money(it.converted)))
+                                chosen.forEach { cost ->
+                                    Text("${cost.note.ifBlank { stringResource(R.string.project_unpaid) }} · ${money(cost.converted)}", color = LocalColors.current.text)
+                                }
+                                val difference = it.converted - assigned
+                                val balance = d.book.incomeBalance(project.id) + difference
+                                Hint(stringResource(R.string.project_income_keep_costs))
+                                Row(Modifier.fillMaxWidth().toggleable(carryDifference, enabled = !write.busy, role = Role.Checkbox) { checked -> carryDifference = checked }, verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(carryDifference, null, enabled = !write.busy)
+                                    Text(stringResource(R.string.project_carry_difference), color = LocalColors.current.text)
+                                }
+                                if (!carryDifference && !difference.isZero) {
+                                    Hint(stringResource(R.string.project_carry_required), LocalColors.current.red)
+                                } else {
+                                    Hint(stringResource(when { difference.isNegative -> R.string.project_income_shortfall; difference.isZero -> R.string.project_income_exact; else -> R.string.project_income_credit }, money(if (difference.isNegative) -difference else difference)), if (difference.isNegative) LocalColors.current.red else LocalColors.current.green)
+                                    Hint(stringResource(R.string.project_income_resulting_balance, money(balance)), if (balance.isNegative) LocalColors.current.red else LocalColors.current.green)
+                                }
+                                val remaining = sources.filter { cost -> cost.id !in selected }
+                                if (!difference.isNegative && !difference.isZero && remaining.isNotEmpty()) {
+                                    Hint(stringResource(R.string.project_income_other_unpaid, remaining.size, money(sum(remaining, project.currency)), money(difference)), LocalColors.current.orange)
+                                    TextButton(onClick = { stage = 0 }, enabled = !write.busy) { Text(stringResource(R.string.project_change_selection)) }
+                                }
+                            }
+                        } else {
+                            payment?.let { Hint(stringResource(R.string.project_selected_payment, money(it.converted))) }
+                            Hint(stringResource(R.string.project_allocation_hint))
+                            chosen.forEach { cost ->
+                                AmountField(cost.note.ifBlank { stringResource(R.string.project_unpaid) }, inputs[cost.id] ?: cost.converted.inputText(), project.currency) { text -> inputsJson = EventJson.encodeToString(inputs + (cost.id to text)) }
+                                Hint(stringResource(R.string.project_estimate, money(cost.converted)))
+                            }
+                            payment?.let { Hint(stringResource(R.string.project_unassigned, money(it.converted - assigned)), if (valid) LocalColors.current.green else LocalColors.current.red) }
                         }
-                        payment?.let { Hint(stringResource(R.string.project_unassigned, money(it.converted - assigned)), if (valid) LocalColors.current.green else LocalColors.current.red) }
                     }
                 }
             }

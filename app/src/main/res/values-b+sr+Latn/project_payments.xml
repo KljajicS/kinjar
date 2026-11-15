@@ -1,4 +1,15 @@
 <resources>
+    <string name="project_review_income">Pregled uplate</string>
+    <string name="project_income_received">Primljen prihod: %1$s</string>
+    <string name="project_income_keep_costs">Izabrani računi biće označeni kao plaćeni u originalnim iznosima.</string>
+    <string name="project_carry_difference">Prenesi razliku u saldo</string>
+    <string name="project_carry_required">Iznosi se razlikuju. Uključite prenos razlike, izmenite izbor računa ili izaberite drugi prihod pre čuvanja.</string>
+    <string name="project_income_credit">Pretplata za naredni period: %1$s</string>
+    <string name="project_income_shortfall">Dug za naredni period: %1$s</string>
+    <string name="project_income_exact">Uplata odgovara izabranim računima: razlika %1$s</string>
+    <string name="project_income_resulting_balance">Saldo projekta nakon čuvanja: %1$s</string>
+    <string name="project_income_other_unpaid">Još %1$d neplaćenih računa, ukupno %2$s, nije izabrano. Preostalo je %3$s prihoda. Izmenite izbor da pokrijete još računa ili uključite prenos razlike i sačuvajte pretplatu. Neizabrani računi ostaju neplaćeni.</string>
+    <string name="project_change_selection">Izmeni izabrane račune</string>
     <string name="project_payment_balance">Saldo</string>
     <string name="project_unpaid_income_tab">Neplaćeno u prihod</string>
     <string name="project_link_unpaid_income">Poveži neplaćeno sa prihodom</string>

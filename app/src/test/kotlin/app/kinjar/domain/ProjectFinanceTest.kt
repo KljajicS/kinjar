@@ -52,6 +52,19 @@ class ProjectFinanceTest {
         assertThrows(IllegalArgumentException::class.java) { ProjectFinance("dad", config, repayments = receipts) }
     }
 
+    @Test fun `income differences preserve bill amounts and require version seven`() {
+        for (received in listOf("18000", "7000", "8000")) {
+            val settlement = ProjectSettlement("income", ProjectPayment(money(received), money(received), day, "tx"),
+                mapOf("a" to money("5000"), "b" to money("3000")), TransactionType.INCOME)
+            assertEquals(money("8000"), settlement.allocated)
+            val event = ProjectFinanceSaved(ProjectFinance("dad", settlements = listOf(settlement)))
+            val operation = SyncOperation("family", "dataset", "user", "device", 1, emptySet(), mapOf("project:dad" to ResourceAccess.WRITE),
+                listOf(OperationEvent("event", "device", 1, 1, event)))
+            assertEquals(if (received == "8000") 6 else 7, operation.version)
+            assertEquals(operation, OperationCodec.decode(OperationCodec.encode(operation)))
+        }
+    }
+
     @Test fun `new finance events require version six while existing projects stay version five`() {
         val event = ProjectFinanceSaved(ProjectFinance("dad", config))
         val operation = SyncOperation("family", "dataset", "user", "device", 1, emptySet(), mapOf("project:dad" to ResourceAccess.WRITE),

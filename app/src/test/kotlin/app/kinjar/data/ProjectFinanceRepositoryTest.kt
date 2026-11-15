@@ -180,4 +180,38 @@ class ProjectFinanceRepositoryTest {
         store.rebuild()
         assertEquals(base, repo.readBook().finance("house"))
     }
+
+    @Test fun `excess income settles original bills leaves unselected bill unpaid and carries into next settlement`() = runTest {
+        seed(sync = true)
+        val third = a.copy(id = "third", original = eur("200"), converted = eur("200"))
+        repo.record(listOf(third))
+        val income = tx.copy(id = "large-income", type = TransactionType.INCOME, money = eur("1800"), categoryId = null)
+        store.append(TransactionAdded(income))
+        val entry = ProjectSettlement("excess", ProjectPayment(income.money, income.money, income.date, income.id),
+            mapOf(a.id to a.converted, b.id to b.converted), TransactionType.INCOME)
+        val finance = base.copy(settlements = listOf(entry))
+        repo.saveFinance(finance, base, listOf(a, b))
+        store.rebuild()
+        store.validateHistory(store.snapshot())
+        var book = repo.readBook()
+        assertEquals(eur("800"), book.incomeBalance(project.id))
+        assertEquals(a.copy(unpaid = false), book.costsFor(project.id).single { it.id == a.id })
+        assertEquals(b.copy(unpaid = false), book.costsFor(project.id).single { it.id == b.id })
+        assertEquals(third, book.costsFor(project.id).single { it.id == third.id })
+        assertEquals(income, book.transactions.single { it.id == income.id })
+        val nextIncome = income.copy(id = "next-income", money = eur("100"), date = income.date.plusMonths(1))
+        store.append(TransactionAdded(nextIncome))
+        val next = ProjectSettlement("next", ProjectPayment(nextIncome.money, nextIncome.money, nextIncome.date, nextIncome.id),
+            mapOf(third.id to third.converted), TransactionType.INCOME)
+        val combined = finance.copy(settlements = finance.settlements + next)
+        val nextMonthRepo = ProjectRepository(db, store, FixedClock(Instant.parse("2026-12-14T12:00:00Z"), ZoneId.of("UTC")))
+        nextMonthRepo.saveFinance(combined, finance, listOf(third))
+        store.rebuild()
+        book = repo.readBook()
+        assertEquals(eur("700"), book.incomeBalance(project.id))
+        assertFalse(book.costsFor(project.id).single { it.id == third.id }.unpaid)
+        repo.saveFinance(base, combined)
+        assertEquals(eur("0"), repo.readBook().incomeBalance(project.id))
+        assertTrue(repo.readBook().costsFor(project.id).all { it.unpaid })
+    }
 }
