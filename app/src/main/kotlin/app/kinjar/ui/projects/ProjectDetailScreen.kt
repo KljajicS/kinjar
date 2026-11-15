@@ -2,6 +2,8 @@ package app.kinjar.ui.projects
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.LaunchedEffect
@@ -12,6 +14,9 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -62,6 +67,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
     // A removed cost drops out of the book, which closes its dialog; removal ids are never reused.
     var acting by rememberSaveable { mutableStateOf<String?>(null) }
     var selection by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    var reporting by rememberSaveable { mutableStateOf(false) }
     val back = { if (!write.busy) { if (selection.isNotEmpty()) selection = arrayListOf() else actions.onBack() } }
     val d = loaded
     val project = d?.project(vm.id)
@@ -94,7 +100,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
             TextButton(onClick = { selection = arrayListOf() }) { Text(stringResource(R.string.dialog_cancel)) }
         }
     }) {
-        if (!all) overview(project, d, costs, stale, actions, vm.clock.today(), selected)
+        if (!all) overview(project, d, costs, stale, actions, vm.clock.today(), selected, onReport = { reporting = true })
         if (visible.isEmpty()) section("empty") { Hint(stringResource(R.string.project_costs_empty)) }
         if (eligible.isNotEmpty()) item("selection-hint") { Hint(stringResource(R.string.project_long_press_hint)) }
         items(visible, key = { it.id }) { cost ->
@@ -107,6 +113,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
             TextButton(onClick = actions.onAllCosts) { Text(stringResource(R.string.project_see_all, stored.size), color = c.primary) }
         }
     }
+    if (reporting) ProjectReportDialog(project, d, vm.clock.today()) { reporting = false }
     stored.find { it.id == acting }?.let { cost ->
         CostDialog(cost, project, cost.id in stale, write.busy, vm, d.book.settlementFor(cost.id) != null,
             onPayments = { acting = null; actions.onPayments() },
@@ -117,14 +124,14 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
 }
 
 private fun LazyListScope.overview(
-    project: Project, d: ProjectData, costs: List<ProjectCost>, stale: Set<String>, actions: ProjectActions, today: LocalDate, selected: List<String>,
+    project: Project, d: ProjectData, costs: List<ProjectCost>, stale: Set<String>, actions: ProjectActions, today: LocalDate, selected: List<String>, onReport: () -> Unit,
 ) {
     section("overview") {
         val c = LocalColors.current
         val total = sum(costs, project.currency)
         if (project.archived) Hint(stringResource(R.string.project_archived_notice), c.orange)
         val balance = d.book.incomeBalance(project.id)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Hint(stringResource(R.string.project_total))
                 Text(money(total), style = mono(22, FontWeight.SemiBold), color = c.text)
@@ -135,7 +142,14 @@ private fun LazyListScope.overview(
             }
         }
         BudgetLine(total, project.budget, includesUnpaid = costs.any { it.unpaid })
-        if (costs.any { it.unpaid }) PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f, fill = false)) {
+                PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
+            }
+            IconButton(onClick = onReport) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, stringResource(R.string.project_report_export), Modifier.size(20.dp), tint = c.primary)
+            }
+        }
         if (stale.isNotEmpty()) Hint(stringResource(R.string.project_review_needed, stale.size), c.orange)
         ProjectChart(costs, d.categories(project.id), project.currency, YearMonth.from(today))
         if (!project.archived) {
