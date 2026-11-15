@@ -1,0 +1,16 @@
+CREATE TABLE project_finance (
+    project_id TEXT NOT NULL PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+
+save:
+INSERT OR REPLACE INTO project_finance(project_id, payload) VALUES (?, ?);
+
+all:
+SELECT * FROM project_finance ORDER BY project_id;
+
+byId:
+SELECT * FROM project_finance WHERE project_id = ?;
+
+deleteAll:
+DELETE FROM project_finance;

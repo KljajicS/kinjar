@@ -37,7 +37,7 @@ data class LinkPlan(val items: List<Pair<Transaction, Conversion?>>, val missing
 
 /** Expenses from the project's enabled categories that no project, archived ones included, links yet. */
 fun ProjectData.candidates(project: Project, today: LocalDate): List<Transaction> {
-    val linked = book.costs.mapNotNull { it.transactionId }.toSet()
+    val linked = book.linkedTransactionIds()
     return book.transactions.filter {
         it.type == TransactionType.EXPENSE && it.categoryId in project.sourceCategoryIds && it.id !in linked && it.date <= today
     }.sortedWith(compareByDescending<Transaction> { it.date }.thenByDescending { it.id })

@@ -9,6 +9,7 @@ import app.kinjar.ui.Routes
 private val NavBackStackEntry.projectId: String get() = requireNotNull(arguments?.getString("id"))
 
 fun NavGraphBuilder.projectRoutes(nav: NavHostController) {
+    composable(Routes.PROJECT_PAYMENTS) { ProjectPaymentsScreen(onBack = { nav.popBackStack() }) }
     composable(Routes.NEW_PROJECT) {
         NewProjectScreen(onBack = { nav.popBackStack() }, onCreated = { id ->
             nav.navigate(Routes.project(id)) { popUpTo(Routes.NEW_PROJECT) { inclusive = true } }
@@ -32,6 +33,8 @@ fun NavGraphBuilder.projectRoutes(nav: NavHostController) {
 
 private fun actions(nav: NavHostController, id: String) = ProjectActions(
     onBack = { nav.popBackStack() },
+    onBulkSettle = { selected -> nav.navigate(Routes.projectPayments(id, "settle", selected)) },
+    onPayments = { nav.navigate(Routes.projectPayments(id)) },
     onSettings = { nav.navigate(Routes.projectSettings(id)) },
     onLink = { nav.navigate(Routes.projectLink(id)) },
     onSettle = { costId -> nav.navigate(Routes.projectSettle(id, costId)) },

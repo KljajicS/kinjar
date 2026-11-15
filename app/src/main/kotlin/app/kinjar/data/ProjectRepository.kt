@@ -14,15 +14,32 @@ data class ProjectBook(
     val categories: List<ProjectCategory>,
     val costs: List<ProjectCost>,
     val transactions: List<Transaction>,
+    val finances: List<ProjectFinance> = emptyList(),
 ) {
     private val byTransaction by lazy { transactions.associateBy { it.id } }
 
     /** Costs shown for [projectId]; a cost whose linked expense was deleted or is no longer an expense is left out. */
     fun costsFor(projectId: String): List<ProjectCost> = costs.filter {
         it.projectId == projectId && (it.transactionId == null || byTransaction[it.transactionId]?.type == TransactionType.EXPENSE)
+    }.map { cost ->
+        val settlement = settlementFor(cost.id)
+        val allocation = settlement?.allocations?.get(cost.id)
+        if (allocation != null && byTransaction[settlement.payment.transactionId]?.type == settlement.type) {
+            cost.copy(original = allocation, converted = allocation, unpaid = false, ratesToRsd = emptyMap(), rateDate = cost.date, rateSource = "same-currency")
+        } else cost
     }.sortedWith(compareByDescending<ProjectCost> { it.date }.thenBy { it.id })
 
+    fun finance(projectId: String): ProjectFinance = finances.find { it.projectId == projectId } ?: ProjectFinance(projectId)
+    fun settlementFor(costId: String): ProjectSettlement? = finances.asSequence().flatMap { it.settlements }.find { costId in it.allocations }
+    fun paymentNeedsReview(payment: ProjectPayment, type: TransactionType): Boolean =
+        payment.transactionId != null && !payment.matches(byTransaction[payment.transactionId], type)
+    fun activeRepayments(projectId: String): List<ProjectRepayment> = finance(projectId).repayments.filter {
+        it.payment.transactionId == null || byTransaction[it.payment.transactionId]?.type == TransactionType.INCOME
+    }
+    fun linkedTransactionIds(): Set<String> = (costs.mapNotNull { it.transactionId } + finances.flatMap { it.payments().mapNotNull { p -> p.transactionId } }).toSet()
+
     fun needsReview(cost: ProjectCost): Boolean {
+        settlementFor(cost.id)?.let { return paymentNeedsReview(it.payment, it.type) }
         val id = cost.transactionId ?: return false
         val tx = byTransaction[id] ?: return true
         return tx.type != TransactionType.EXPENSE || tx.money != cost.original || tx.date != cost.date
@@ -42,6 +59,7 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
         db.projectCategoryQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectCategory>(it.payload) },
         db.projectCostQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectCost>(requireNotNull(it.payload)) },
         db.txQueries.all().executeAsList().map { it.toDomain() },
+        db.projectFinanceQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectFinance>(it.payload) },
     )
 
     private fun project(id: String): Project? = db.projectQueries.byId(id).executeAsOneOrNull()
@@ -57,6 +75,37 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
         val project = requireNotNull(project(id)) { "Unknown project" }
         require(!project.archived) { "Restore project before editing" }
         return project
+    }
+
+    private fun validateProjectEvents(events: List<Event>) {
+        val book = snapshot()
+        val integrity = ProjectIntegrity()
+        val transactions = book.transactions.associateBy { it.id }
+        integrity.apply(book.projects.map(::ProjectSaved) + book.categories.map(::ProjectCategorySaved) +
+            book.costs.map(::ProjectCostSaved) + book.finances.map(::ProjectFinanceSaved), false, transactions)
+        integrity.apply(events, true, transactions)
+    }
+
+    suspend fun saveFinance(value: ProjectFinance, expected: ProjectFinance, expectedCosts: List<ProjectCost> = emptyList()) {
+        require(value.projectId == expected.projectId)
+        store.append(ProjectFinanceSaved(value)) {
+            val project = activeProject(value.projectId)
+            val current = db.projectFinanceQueries.byId(value.projectId).executeAsOneOrNull()
+                ?.let { EventJson.decodeFromString<ProjectFinance>(it.payload) } ?: ProjectFinance(value.projectId)
+            require(current == expected) { "Project payments changed; reopen this screen" }
+            expectedCosts.forEach { require(cost(it.id) == it) { "Cost changed; select it again" } }
+            val added = value.settlements.filter { next -> current.settlements.none { it.id == next.id } }
+            added.forEach { settlement ->
+                val tx = db.txQueries.byId(requireNotNull(settlement.payment.transactionId)).executeAsOneOrNull()?.toDomain()
+                require(tx?.type == settlement.type) { "Payment changed; select it again" }
+                if (settlement.type == TransactionType.EXPENSE) require(tx?.categoryId in project.sourceCategoryIds) { "Expense category is not enabled" }
+            }
+            require(added.flatMap { it.allocations.keys }.all { id -> expectedCosts.any { it.id == id && it.projectId == value.projectId && it.unpaid } }) { "Select unpaid costs again" }
+            value.payments().forEach { require(it.date <= clock.today()) { "Payment date is in the future" } }
+            value.reimbursement?.let { require(it.start <= clock.today()) { "Tracking starts in the future" } }
+            require(EventJson.encodeToString(ProjectFinance.serializer(), value).toByteArray().size <= 384 * 1024) { "Project payment history too large" }
+            validateProjectEvents(listOf(ProjectFinanceSaved(value)))
+        }
     }
 
     /** Creates a project, or edits one when [expected] is the stored version the edit started from. */
@@ -147,6 +196,7 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
                     require(db.projectCostQueries.linkedTo(id).executeAsList().all { it == value.id }) { "Expense already linked" }
                 }
             }
+            validateProjectEvents(removals + costs.map(::ProjectCostSaved))
         }
     }
 
@@ -156,6 +206,7 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
         store.append(ProjectCostRemoved(id, previous.projectId, previous.transactionId)) {
             activeProject(previous.projectId)
             require(cost(id) == previous) { "Cost changed; reopen it" }
+            validateProjectEvents(listOf(ProjectCostRemoved(id, previous.projectId, previous.transactionId)))
         }
     }
 
@@ -169,6 +220,8 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
         require(costs.map { it.id }.distinct().size == costs.size)
         store.appendAll(listOf(ProjectSaved(project)) + costs.map(::ProjectCostSaved)) {
             val old = activeProject(project.id)
+            val finance = db.projectFinanceQueries.byId(project.id).executeAsOneOrNull()?.let { EventJson.decodeFromString<ProjectFinance>(it.payload) }
+            require(finance == null || (finance.reimbursement == null && finance.settlements.isEmpty() && finance.repayments.isEmpty())) { "Project with payment history keeps its currency" }
             expected?.let { require(old == it) { "Project changed; preview again" } }
             require(old.copy(currency = project.currency, budget = project.budget) == project) { "Project settings changed" }
             val existing = db.projectCostQueries.byProject(project.id).executeAsList()

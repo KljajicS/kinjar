@@ -77,7 +77,7 @@ class FinancialIntegrity private constructor(
                 validateTransactions(if (changedAccounts) transactions.values else changedTransactions.mapNotNull(transactions::get))
                 validateLoans()
             }
-            if (events.any { it is ProjectSaved || it is ProjectCategorySaved || it is ProjectCostSaved || it is ProjectCostRemoved }) {
+            if (events.any { it is ProjectSaved || it is ProjectCategorySaved || it is ProjectCostSaved || it is ProjectCostRemoved || it is ProjectFinanceSaved }) {
                 val updated = projectIntegrity.copy()
                 updated.apply(events, strict, transactions)
                 projectIntegrity = updated

@@ -1,6 +1,15 @@
 package app.kinjar.ui.projects
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -30,6 +39,7 @@ import app.kinjar.ui.theme.SectionStyle
 import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 import java.time.YearMonth
+import java.time.LocalDate
 
 private const val RECENT = 5
 
@@ -41,6 +51,8 @@ class ProjectActions(
     val onReview: (String) -> Unit = {},
     val onSettle: (String) -> Unit = {},
     val onEdit: (ProjectCost) -> Unit = {},
+    val onBulkSettle: (List<String>) -> Unit = {},
+    val onPayments: () -> Unit = {},
 )
 
 @Composable
@@ -50,7 +62,9 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
     val write by vm.writes.state.collectAsStateWithLifecycle()
     // A removed cost drops out of the book, which closes its dialog; removal ids are never reused.
     var acting by rememberSaveable { mutableStateOf<String?>(null) }
-    val back = { if (!write.busy) actions.onBack() }
+    var unpaidOnly by rememberSaveable { mutableStateOf(false) }
+    var selection by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    val back = { if (!write.busy) { if (selection.isNotEmpty()) selection = arrayListOf() else actions.onBack() } }
     val d = loaded
     val project = d?.project(vm.id)
     if (d == null || project == null) {
@@ -66,18 +80,46 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
     val settings: @Composable RowScope.() -> Unit = {
         if (!all) RoundIconButton(Icons.Outlined.Settings, stringResource(R.string.project_settings), actions.onSettings)
     }
-    ProjectPage(if (all) stringResource(R.string.project_all_costs) else project.name, back, settings) {
-        if (!all) overview(project, d, costs, stale, actions, YearMonth.from(vm.clock.today()))
-        if (costs.isEmpty()) section("empty") { Hint(stringResource(R.string.project_costs_empty)) }
-        items(if (all) stored else costs.take(RECENT), key = { it.id }) { cost ->
-            CostRow(cost, d, cost.id in stale) { vm.writes.clearFailure(); acting = cost.id }
+    val eligible = costs.filter { it.unpaid && d.book.settlementFor(it.id) == null && !project.archived }.map { it.id }.toSet()
+    val selected = selection.filter { it in eligible }
+    LaunchedEffect(eligible) { selection = ArrayList(selected) }
+    fun toggle(id: String) {
+        if (id in eligible) selection = ArrayList(if (id in selected) selected - id else (selected + id).take(MAX_BATCH))
+    }
+    val selecting = selected.isNotEmpty()
+    val visible = if (unpaidOnly) costs.filter { it.unpaid }
+        else if (all) stored.map { cost -> costs.find { it.id == cost.id } ?: cost }
+        else costs.take(RECENT)
+    ProjectPage(if (all) stringResource(R.string.project_all_costs) else project.name, back, settings, footer = {
+        if (all && selecting) {
+            Hint(stringResource(R.string.project_selection_count, selected.size))
+            PrimaryButton(stringResource(R.string.project_link_selected_expense)) { actions.onBulkSettle(selected) }
+            TextButton(onClick = { selection = arrayListOf() }) { Text(stringResource(R.string.dialog_cancel)) }
         }
-        if (!all && (stored.size > RECENT || stored.size != costs.size)) item("all") {
+    }) {
+        item("filter") {
+            Row(Modifier.fillMaxWidth().toggleable(unpaidOnly, role = Role.Switch) { unpaidOnly = it },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(stringResource(R.string.project_filter_unpaid), color = c.text)
+                Switch(unpaidOnly, null)
+            }
+        }
+        if (!all) overview(project, d, costs, stale, actions, vm.clock.today(), selected)
+        if (visible.isEmpty()) section("empty") { Hint(stringResource(R.string.project_costs_empty)) }
+        if (eligible.isNotEmpty()) item("selection-hint") { Hint(stringResource(R.string.project_long_press_hint)) }
+        items(visible, key = { it.id }) { cost ->
+            CostRow(cost, d, cost.id in stale, selected = cost.id in selected, selecting = selecting,
+                onLongClick = if (cost.id in eligible) ({ toggle(cost.id) }) else null) {
+                if (selecting) toggle(cost.id) else { vm.writes.clearFailure(); acting = cost.id }
+            }
+        }
+        if (!all && !unpaidOnly && (stored.size > RECENT || stored.size != costs.size)) item("all") {
             TextButton(onClick = actions.onAllCosts) { Text(stringResource(R.string.project_see_all, stored.size), color = c.primary) }
         }
     }
     stored.find { it.id == acting }?.let { cost ->
-        CostDialog(cost, project, cost.id in stale, write.busy, vm,
+        CostDialog(cost, project, cost.id in stale, write.busy, vm, d.book.settlementFor(cost.id) != null,
+            onPayments = { acting = null; actions.onPayments() },
             onEdit = { acting = null; actions.onEdit(cost) },
             onReview = { acting = null; actions.onReview(cost.id) },
             onSettle = { acting = null; actions.onSettle(cost.id) }) { acting = null }
@@ -85,7 +127,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
 }
 
 private fun LazyListScope.overview(
-    project: Project, d: ProjectData, costs: List<ProjectCost>, stale: Set<String>, actions: ProjectActions, month: YearMonth,
+    project: Project, d: ProjectData, costs: List<ProjectCost>, stale: Set<String>, actions: ProjectActions, today: LocalDate, selected: List<String>,
 ) {
     section("overview") {
         val c = LocalColors.current
@@ -96,16 +138,19 @@ private fun LazyListScope.overview(
         BudgetLine(total, project.budget, includesUnpaid = costs.any { it.unpaid })
         if (costs.any { it.unpaid }) PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
         if (stale.isNotEmpty()) Hint(stringResource(R.string.project_review_needed, stale.size), c.orange)
-        ProjectChart(costs, d.categories(project.id), project.currency, month)
+        ProjectChart(costs, d.categories(project.id), project.currency, YearMonth.from(today))
         if (!project.archived) {
-            PrimaryButton(stringResource(R.string.project_link), onClick = actions.onLink)
+            val linkLabel = if (selected.isEmpty()) stringResource(R.string.project_link)
+                else stringResource(R.string.project_link_selected_expense) + " · " + stringResource(R.string.project_selection_count, selected.size)
+            PrimaryButton(linkLabel) { if (selected.isEmpty()) actions.onLink() else actions.onBulkSettle(selected) }
         }
+        if (d.book.finance(project.id).settlements.isNotEmpty()) TextButton(onClick = actions.onPayments) { Text(stringResource(R.string.project_payments), color = c.primary) }
         Text(stringResource(R.string.project_recent), style = SectionStyle, color = c.text)
     }
 }
 
 @Composable
-private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy: Boolean, vm: ProjectViewModel, onEdit: () -> Unit, onReview: () -> Unit, onSettle: () -> Unit, onDismiss: () -> Unit) {
+private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy: Boolean, vm: ProjectViewModel, grouped: Boolean, onPayments: () -> Unit, onEdit: () -> Unit, onReview: () -> Unit, onSettle: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalColors.current
     val linked = cost.transactionId != null
     var confirming by rememberSaveable(cost.id) { mutableStateOf(false) }
@@ -120,7 +165,7 @@ private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy
         if (confirming) {
             Text(stringResource(if (linked) R.string.project_unlink_body else R.string.project_remove_body), style = sans(14), color = c.text)
         } else {
-            if (cost.unpaid) Hint(stringResource(R.string.project_unpaid), c.orange)
+            if (cost.unpaid && !grouped) Hint(stringResource(R.string.project_unpaid), c.orange)
             Text("${date(cost.date)} · ${money(cost.converted)}", style = sans(14, FontWeight.Medium), color = c.text)
             if (cost.original != cost.converted) {
                 Hint(stringResource(R.string.project_original_amount, money(cost.original)))
@@ -128,7 +173,10 @@ private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy
             }
             if (cost.note.isNotBlank() && linked) Hint(cost.note)
             if (stale) Hint(stringResource(R.string.project_cost_changed), c.orange)
-            if (!project.archived) {
+            if (grouped) {
+                Hint(stringResource(R.string.project_settlement_locked))
+                TextButton(onClick = onPayments) { Text(stringResource(R.string.project_payments)) }
+            } else if (!project.archived) {
                 TextButton(onClick = onEdit, enabled = !busy) { Text(stringResource(R.string.transaction_edit), color = c.primary) }
                 if (cost.unpaid) TextButton(onClick = onSettle, enabled = !busy) { Text(stringResource(R.string.project_link_payment), color = c.primary) }
                 if (stale) TextButton(onClick = onReview, enabled = !busy) { Text(stringResource(R.string.project_review), color = c.primary) }
