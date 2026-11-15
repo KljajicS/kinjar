@@ -8,7 +8,7 @@ internal fun operationResources(events: List<Event>, db: KinjarDb): Map<String, 
     fun write(key: String) { put(key, ResourceAccess.WRITE) }
     fun transaction(id: String) {
         write("transaction:$id")
-        db.txQueries.all().executeAsList().find { it.id == id }?.let {
+        db.txQueries.byId(id).executeAsOneOrNull()?.let {
             read("account:${it.account_id}")
             it.to_account_id?.let { account -> read("account:$account") }
         }
@@ -23,6 +23,12 @@ internal fun operationResources(events: List<Event>, db: KinjarDb): Map<String, 
     }
     events.forEach { event ->
         when (event) {
+            is ProjectFinanceSaved -> {
+                write("project:${event.finance.projectId}")
+                val previous = db.projectFinanceQueries.byId(event.finance.projectId).executeAsOneOrNull()
+                    ?.let { EventJson.decodeFromString<ProjectFinance>(it.payload) }
+                (event.finance.payments() + previous?.payments().orEmpty()).mapNotNull { it.transactionId }.distinct().forEach { transaction(it) }
+            }
             is ProjectSaved -> {
                 write("project:${event.project.id}")
                 event.project.sourceCategoryIds.forEach { read("category:$it") }

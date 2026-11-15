@@ -49,13 +49,17 @@ fun ProjectLinkScreen(onBack: () -> Unit) {
     val tabs: @Composable (Boolean) -> Unit = { busy ->
         val c = LocalColors.current
         TabRow(selectedTabIndex = selectedTab, containerColor = c.bg, contentColor = c.primary) {
-            listOf(R.string.project_existing_expenses, R.string.project_manual_cost).forEachIndexed { index, label ->
+            listOf(R.string.project_existing_expenses, R.string.project_manual_cost, R.string.project_unpaid_income_tab).forEachIndexed { index, label ->
                 Tab(selected = selectedTab == index, onClick = { selectedTab = index }, enabled = !busy,
                     text = { Text(stringResource(label)) })
             }
         }
     }
-    if (selectedTab == 0) ExistingExpensesScreen(onBack, tabs) else PastCostScreen(onBack, tabs)
+    when (selectedTab) {
+        0 -> ExistingExpensesScreen(onBack, tabs)
+        1 -> PastCostScreen(onBack, tabs)
+        else -> ProjectPaymentsScreen(onBack, income = true, tabs = tabs)
+    }
 }
 
 @Composable

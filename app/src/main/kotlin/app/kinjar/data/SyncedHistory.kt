@@ -228,6 +228,10 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
         }
         operation.events.forEach { record ->
             when (val e = record.event) {
+                is ProjectFinanceSaved -> {
+                    requireAccess("project:${e.finance.projectId}")
+                    e.finance.payments().mapNotNull { it.transactionId }.forEach { requireAccess("transaction:$it") }
+                }
                 is ProjectSaved -> {
                     requireAccess("project:${e.project.id}")
                     e.project.sourceCategoryIds.forEach { requireAccess("category:$it", false) }

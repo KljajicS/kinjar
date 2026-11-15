@@ -2,6 +2,7 @@ package app.kinjar.ui.projects
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +41,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
@@ -116,7 +121,7 @@ fun ColorBar(totals: List<CategoryTotal>, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, onClick: (() -> Unit)?) {
+fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, selected: Boolean = false, selecting: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = LocalColors.current
     val category = cost.categoryId?.let { id -> data.book.categories.find { it.id == id } }
     val tx = cost.transactionId?.let(data.transactionsById::get)
@@ -129,19 +134,23 @@ fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, onClick: (() -
         else -> stringResource(R.string.project_linked_expense)
     }
     val kind = stringResource(when {
+        data.book.settlementFor(cost.id)?.type == TransactionType.INCOME && !cost.unpaid -> R.string.project_income_linked
+        data.book.settlementFor(cost.id) != null && !cost.unpaid -> R.string.project_settlement_paid
         cost.unpaid -> R.string.project_unpaid
         cost.transactionId == null -> R.string.project_past_cost
         else -> R.string.project_linked_expense
     })
     OutlinedBox(
-        Modifier.fillMaxWidth().then(if (cost.unpaid) Modifier.border(3.dp, Color(0xFFFF8A00), RoundedCornerShape(14.dp)) else Modifier),
-        radius = 14, onClick = onClick,
+        Modifier.fillMaxWidth().semantics { this.selected = selected }
+            .combinedClickable(role = Role.Button, onLongClick = onLongClick, onClick = onClick)
+            .then(if (cost.unpaid && !selected) Modifier.border(3.dp, c.red, RoundedCornerShape(14.dp)) else Modifier),
+        radius = 14, selected = selected,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ColorDot(categoryColor(category), 12.dp)
+            if (selecting && cost.unpaid) Checkbox(selected, null) else ColorDot(categoryColor(category), 12.dp)
             Column(Modifier.weight(1f)) {
                 Text(title, style = sans(15, FontWeight.Medium), color = c.text, maxLines = 2)
-                Hint("${date(cost.date)} · ${categoryName(category)} · $kind")
+                Hint("${date(cost.date)} · ${categoryName(category)} · $kind", if (cost.unpaid) c.red else if (data.book.settlementFor(cost.id) != null) c.green else c.muted)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(money(cost.converted), style = mono(14, FontWeight.SemiBold), color = c.text)
