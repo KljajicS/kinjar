@@ -1,6 +1,8 @@
 package app.kinjar.ui.projects
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -144,7 +147,10 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
                 OutlinedBox(Modifier.fillMaxWidth(), radius = 14, onClick = { vm.categoryWrites.clearFailure(); editing = category.id }) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ColorDot(colorOf(category.color), 12.dp)
-                        Text(category.name, style = sans(15, FontWeight.Medium), color = if (category.archived) c.muted else c.text, modifier = Modifier.weight(1f))
+                        Column(Modifier.weight(1f)) {
+                            Text(category.name, style = sans(15, FontWeight.Medium), color = if (category.archived) c.muted else c.text)
+                            if (category.excludedFromReport) Hint(stringResource(R.string.project_category_report_excluded))
+                        }
                         if (category.archived) Hint(stringResource(R.string.project_category_archived))
                     }
                 }
@@ -205,6 +211,7 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
     val write by vm.categoryWrites.state.collectAsStateWithLifecycle()
     var name by rememberSaveable { mutableStateOf(existing?.name.orEmpty()) }
     var color by rememberSaveable { mutableStateOf(existing?.color ?: unusedPaletteColor(all.filter { !it.archived }.map { it.color })) }
+    var includedInReport by rememberSaveable { mutableStateOf(existing?.excludedFromReport != true) }
     var submitted by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(write.busy) { if (submitted && !write.busy && !write.failed) onDone() }
     val taken = isDuplicateCategoryName(name, all.filter { !it.archived && it.id != existing?.id }.map { it.name })
@@ -215,7 +222,7 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
         containerColor = c.bg,
         title = { Text(stringResource(if (existing == null) R.string.project_category_add else R.string.project_category_edit), style = sans(18, FontWeight.SemiBold), color = c.text) },
         text = {
-            Column(Modifier.heightIn(max = 460.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FieldBox(stringResource(R.string.project_category_name), name, { name = it.take(100) })
                 if (taken) Hint(stringResource(R.string.category_name_taken), c.orange)
                 FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -232,6 +239,14 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
                         )
                     }
                 }
+                Row(
+                    Modifier.fillMaxWidth().toggleable(includedInReport, enabled = !write.busy, role = Role.Switch) { includedInReport = it },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.project_category_report_include), style = sans(14), color = c.text, modifier = Modifier.weight(1f))
+                    Switch(checked = includedInReport, onCheckedChange = null, enabled = !write.busy)
+                }
+                Hint(stringResource(R.string.project_category_report_hint))
                 if (existing != null) DangerLink(
                     stringResource(if (existing.archived) R.string.project_category_restore else R.string.project_category_archive), enabled = !write.busy,
                 ) { submit { vm.saveCategory(requireNotNull(base).copy(archived = !base.archived), base) } }
@@ -240,7 +255,10 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
         },
         confirmButton = {
             TextButton(onClick = {
-                submit { if (base == null) vm.newCategory(name, color) else vm.saveCategory(base.copy(name = name.trim(), color = color), base) }
+                submit {
+                    if (base == null) vm.newCategory(name, color, !includedInReport)
+                    else vm.saveCategory(base.copy(name = name.trim(), color = color, excludedFromReport = !includedInReport), base)
+                }
             }, enabled = canSave) { Text(stringResource(R.string.project_save), color = if (canSave) c.primary else c.muted) }
         },
         dismissButton = { TextButton(onClick = onDone, enabled = !write.busy) { Text(stringResource(R.string.dialog_cancel), color = c.text) } },

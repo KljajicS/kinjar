@@ -23,12 +23,14 @@ data class Project(
 }
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class ProjectCategory(
     val id: String,
     val projectId: String,
     val name: String,
     val color: String,
     val archived: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val excludedFromReport: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && projectId.isNotBlank() && name.isNotBlank() && name.length <= 100)

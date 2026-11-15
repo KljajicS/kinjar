@@ -65,4 +65,23 @@ class ProjectSyncStoreTest {
         assertEquals(listOf(cost), repo.readBook().costs)
         assertEquals(listOf(tx), repo.readBook().transactions)
     }
+
+    @Test fun `category report preference survives sync replay rename archive and restore`() = runTest {
+        enrolled()
+        val category = ProjectCategory("bills", project.id, "Bills", "#123456", excludedFromReport = true)
+        repo.saveCategory(category)
+        val operation = OperationCodec.decode(db.syncOperationQueries.all().executeAsList().single().payload)
+        assertEquals(9, operation.version)
+        store.rebuild()
+        assertEquals(category, repo.readBook().categories.single())
+        val renamed = category.copy(name = "Utilities", archived = true)
+        repo.saveCategory(renamed, category)
+        store.rebuild()
+        assertEquals(renamed, repo.readBook().categories.single())
+        val restored = renamed.copy(archived = false, excludedFromReport = false)
+        repo.saveCategory(restored, renamed)
+        store.rebuild()
+        store.validateHistory(store.snapshot())
+        assertEquals(restored, repo.readBook().categories.single())
+    }
 }

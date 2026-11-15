@@ -95,4 +95,57 @@ class ProjectReportTest {
         assertTrue(report(partial).contains("Ukupno za plaćanje: 2000 RSD"))
         assertFalse(report(partial).contains("Korekcija"))
     }
+
+    @Test fun `excluded category removes its bills and total but preserves project credit and spending`() {
+        val original = book()
+        val filtered = original.copy(categories = original.categories.map { it.copy(excludedFromReport = it.id == "water") })
+        val text = report(filtered)
+        assertFalse(text.contains("Voda"))
+        assertTrue(text.contains("Struja: 5000 RSD"))
+        assertTrue(text.contains("Korekcija: -2000 RSD"))
+        assertTrue(text.contains("Ukupno za plaćanje: 3000 RSD"))
+        assertEquals(original.summary(project).total, filtered.summary(project).total)
+        assertEquals(original.summary(project).unpaid, filtered.summary(project).unpaid)
+        assertEquals(listOf("electric"), filtered.summary(project).byCategory.map { it.category?.id })
+        assertEquals(original.incomeBalance(project.id), filtered.incomeBalance(project.id))
+        assertEquals(report(original), report(filtered.copy(categories = original.categories)))
+    }
+
+    @Test fun `archived exclusions stay excluded while uncategorized costs stay included`() {
+        val original = book("5000")
+        val filtered = original.copy(
+            categories = original.categories.map { it.copy(archived = true, excludedFromReport = true) },
+            costs = original.costs + water.copy(id = "uncategorized", categoryId = null),
+        )
+        val text = report(filtered)
+        assertFalse(text.contains("Struja"))
+        assertFalse(text.contains("Voda"))
+        assertTrue(text.contains("${R.string.project_uncategorized}: 3000 RSD"))
+        assertTrue(text.contains("Ukupno za plaćanje: 3000 RSD"))
+        val empty = report(filtered.copy(costs = original.costs))
+        assertFalse(empty.contains("• "))
+        assertTrue(empty.contains("Ukupno za plaćanje: 0 RSD"))
+    }
+
+    @Test fun `excluded reimbursement bills preserve project wide receipts and opening debt`() {
+        val original = book().copy(costs = listOf(electricity.copy(unpaid = false), water), transactions = emptyList(),
+            finances = listOf(ProjectFinance("p", reimbursement = ProjectReimbursement("Dad", rsd("1000"), day.withDayOfMonth(1)),
+                repayments = listOf(ProjectRepayment("receipt", ProjectPayment(rsd("3000"), rsd("3000"), day))))))
+        val text = report(original.copy(categories = original.categories.map { it.copy(excludedFromReport = it.id == "water") }))
+        assertFalse(text.contains("Voda"))
+        assertTrue(text.contains("Struja: 5000 RSD"))
+        assertTrue(text.contains("Korekcija: -2000 RSD"))
+        assertTrue(text.contains("Ukupno za plaćanje: 3000 RSD"))
+    }
+
+    @Test fun `excluded partially credited reimbursement does not leak back through adjustment`() {
+        val tx = Transaction("bill", TransactionType.EXPENSE, rsd("9000"), "bank", null, null, day, "", "", "member", TransactionSource.RECEIPT)
+        val cost = electricity.copy(original = tx.money, converted = tx.money, transactionId = tx.id, reimbursable = true)
+        val original = book().copy(costs = listOf(cost, water), transactions = listOf(tx),
+            finances = listOf(ProjectFinance("p", openingCredit = rsd("7000"), creditCosts = mapOf(cost.id to rsd("7000")))))
+        val text = report(original.copy(categories = original.categories.map { it.copy(excludedFromReport = it.id == "electric") }))
+        assertFalse(text.contains("Struja"))
+        assertFalse(text.contains("Korekcija"))
+        assertTrue(text.contains("Ukupno za plaćanje: 3000 RSD"))
+    }
 }

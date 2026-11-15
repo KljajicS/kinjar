@@ -33,6 +33,11 @@ data class ProjectSummary(val project: Project, val total: Money, val byCategory
 fun sum(costs: List<ProjectCost>, currency: Currency): Money =
     costs.filter { it.converted.currency == currency }.fold(Money.zero(currency)) { total, cost -> total + cost.converted }
 
+fun includedCosts(costs: List<ProjectCost>, categories: List<ProjectCategory>): List<ProjectCost> {
+    val excluded = categories.filter { it.excludedFromReport }.map { it.id }.toSet()
+    return costs.filter { it.categoryId !in excluded }
+}
+
 /** Largest first; a cost whose category is gone counts as uncategorized. */
 fun categoryTotals(costs: List<ProjectCost>, categories: List<ProjectCategory>, currency: Currency): List<CategoryTotal> {
     val byId = categories.associateBy { it.id }
@@ -51,7 +56,8 @@ fun monthTotals(costs: List<ProjectCost>, currency: Currency, today: YearMonth):
 
 fun ProjectBook.summary(project: Project): ProjectSummary {
     val costs = costsFor(project.id)
-    return ProjectSummary(project, sum(costs, project.currency), categoryTotals(costs, categories.filter { it.projectId == project.id }, project.currency),
+    val projectCategories = categories.filter { it.projectId == project.id }
+    return ProjectSummary(project, sum(costs, project.currency), categoryTotals(includedCosts(costs, projectCategories), projectCategories, project.currency),
         unpaidTotal(project.id))
 }
 

@@ -44,14 +44,17 @@ import java.time.format.TextStyle
 @Composable
 fun ProjectChart(costs: List<ProjectCost>, categories: List<ProjectCategory>, currency: Currency, today: YearMonth) {
     var monthly by rememberSaveable { mutableStateOf(false) }
+    val included = includedCosts(costs, categories)
     OutlinedBox(Modifier.fillMaxWidth(), radius = 16) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SelectPill(stringResource(R.string.project_chart_category), !monthly, { monthly = false })
                 SelectPill(stringResource(R.string.project_chart_month), monthly, { monthly = true })
             }
-            if (monthly) MonthBars(monthTotals(costs, currency, today), currency)
-            else CategoryDonut(categoryTotals(costs, categories, currency), sum(costs, currency))
+            if (categories.any { it.excludedFromReport }) Hint(stringResource(R.string.project_report_selected_categories))
+            if (included.isEmpty()) Hint(stringResource(R.string.project_chart_empty))
+            else if (monthly) MonthBars(monthTotals(included, currency, today), currency)
+            else CategoryDonut(categoryTotals(included, categories, currency), sum(included, currency))
         }
     }
 }
