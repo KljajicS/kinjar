@@ -39,6 +39,7 @@ import app.kinjar.domain.ProjectSaved
 import app.kinjar.domain.ProjectCategorySaved
 import app.kinjar.domain.ProjectCostSaved
 import app.kinjar.domain.ProjectCostRemoved
+import app.kinjar.domain.ProjectFinanceSaved
 
 // Replay in log order so older edits cannot overwrite newer changes.
 class Projector(private val db: KinjarDb) {
@@ -46,6 +47,7 @@ class Projector(private val db: KinjarDb) {
     fun apply(record: EventRecord) {
         val at = record.occurredAt.toEpochMilli()
         when (val e = record.event) {
+            is ProjectFinanceSaved -> db.projectFinanceQueries.save(e.finance.projectId, EventJson.encodeToString(e.finance))
             is ProjectSaved -> db.projectQueries.save(e.project.id, EventJson.encodeToString(e.project))
             is ProjectCategorySaved -> with(e.category) {
                 db.projectCategoryQueries.save(id, projectId, EventJson.encodeToString(this))
@@ -156,6 +158,7 @@ class Projector(private val db: KinjarDb) {
     }
 
     fun clear() {
+        db.projectFinanceQueries.deleteAll()
         db.projectCostQueries.deleteAll()
         db.projectCategoryQueries.deleteAll()
         db.projectQueries.deleteAll()
@@ -179,7 +182,7 @@ class Projector(private val db: KinjarDb) {
 
     companion object {
         /** Bump when a projector change must reach existing installs; the app rebuilds once on mismatch. */
-        const val VERSION = 9
+        const val VERSION = 10
     }
 }
 

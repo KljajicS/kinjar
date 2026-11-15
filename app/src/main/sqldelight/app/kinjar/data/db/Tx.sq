@@ -43,5 +43,8 @@ SELECT * FROM tx WHERE date >= ? AND date < ?;
 all:
 SELECT * FROM tx;
 
+byId:
+SELECT * FROM tx WHERE id = ?;
+
 deleteAll:
 DELETE FROM tx;

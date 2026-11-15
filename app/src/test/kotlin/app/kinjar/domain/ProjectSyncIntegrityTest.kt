@@ -17,7 +17,7 @@ class ProjectSyncIntegrityTest {
             listOf(OperationEvent("event", "device", 1, 1, ProjectSaved(project))))
         assertEquals(5, operation.version)
         assertEquals(operation, OperationCodec.decode(OperationCodec.encode(operation)))
-        val future = String(OperationCodec.encode(operation)).replace("\"version\":5", "\"version\":6")
+        val future = String(OperationCodec.encode(operation)).replace("\"version\":5", "\"version\":${OperationCodec.MAX_VERSION + 1}")
         assertThrows(UnsupportedSyncVersion::class.java) { OperationCodec.decode(future.toByteArray()) }
     }
 

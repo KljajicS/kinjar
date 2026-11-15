@@ -105,8 +105,11 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
             if (!budgetValid) Hint(stringResource(R.string.project_budget_invalid), c.orange)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.project_currency_value, project.currency.name), style = sans(15, FontWeight.Medium), color = c.text, modifier = Modifier.weight(1f))
-                TextButton(onClick = onCurrency, enabled = !write.busy) { Text(stringResource(R.string.project_change_currency), color = c.primary) }
+                val finance = d.book.finance(project.id)
+                val locked = finance.reimbursement != null || finance.settlements.isNotEmpty() || finance.repayments.isNotEmpty()
+                TextButton(onClick = onCurrency, enabled = !write.busy && !locked) { Text(stringResource(R.string.project_change_currency), color = c.primary) }
             }
+            if (d.book.finances.any { it.projectId == project.id && (it.reimbursement != null || it.settlements.isNotEmpty() || it.repayments.isNotEmpty()) }) Hint(stringResource(R.string.project_finance_currency_locked))
         }
         section("sources") {
             Text(stringResource(R.string.project_sources), style = SectionStyle, color = c.text)

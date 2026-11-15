@@ -68,6 +68,9 @@ object Routes {
     fun projectEditCost(id: String, costId: String) = "projects/$id/costs/$costId/edit"
     fun projectReview(id: String, costId: String) = "projects/$id/review/$costId"
     const val PROJECT_SETTINGS = "projects/{id}/settings"
+    const val PROJECT_PAYMENTS = "projects/{id}/payments/{mode}?selected={selected}"
+    fun projectPayments(id: String, mode: String = "history", selected: List<String> = emptyList()) =
+        "projects/$id/payments/$mode?selected=${android.net.Uri.encode(org.json.JSONArray(selected).toString())}"
     fun projectSettings(id: String) = "projects/$id/settings"
     const val PROJECT_CURRENCY = "projects/{id}/currency"
     fun projectCurrency(id: String) = "projects/$id/currency"

@@ -14,7 +14,7 @@ SELECT * FROM project WHERE id = ?;
 
 observe:
 SELECT (SELECT count(*) FROM project) + (SELECT count(*) FROM project_category) +
-       (SELECT count(*) FROM project_cost) + (SELECT count(*) FROM tx);
+       (SELECT count(*) FROM project_cost) + (SELECT count(*) FROM tx) + (SELECT count(*) FROM project_finance);
 
 deleteAll:
 DELETE FROM project;
