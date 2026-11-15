@@ -14,6 +14,7 @@
     <string name="project_unpaid_income_tab">Unpaid to income</string>
     <string name="project_link_unpaid_income">Link unpaid to income</string>
     <string name="project_choose_income">Select income</string>
+    <string name="project_received_incomes">Received income</string>
     <string name="project_income_linked">Paid through linked income</string>
     <string name="project_income_settle_hint">Select unpaid costs covered by money you received. Link one existing income to mark them paid, without adding another account transaction.</string>
     <string name="project_income_none">No available income. Add an income transaction first, or unlink one already used by a project.</string>
@@ -64,6 +65,6 @@
     <string name="project_tracking_inactive">Reimbursement tracking is disabled. History is retained.</string>
     <string name="project_filter_unpaid">Unpaid</string>
     <string name="project_selection_count">%1$d selected</string>
-    <string name="project_link_selected_expense">Link expense</string>
+    <string name="project_link_selected_expense">Link unpaid costs</string>
     <string name="project_long_press_hint">Long press an unpaid cost to select it.</string>
 </resources>

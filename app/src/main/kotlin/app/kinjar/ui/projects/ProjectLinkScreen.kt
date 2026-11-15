@@ -44,8 +44,8 @@ import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 
 @Composable
-fun ProjectLinkScreen(onBack: () -> Unit) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+fun ProjectLinkScreen(onBack: () -> Unit, initialTab: Int = 0) {
+    var selectedTab by rememberSaveable { mutableIntStateOf(initialTab) }
     val tabs: @Composable (Boolean) -> Unit = { busy ->
         val c = LocalColors.current
         TabRow(selectedTabIndex = selectedTab, containerColor = c.bg, contentColor = c.primary) {

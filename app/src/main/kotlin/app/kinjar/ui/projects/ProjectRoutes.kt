@@ -9,7 +9,11 @@ import app.kinjar.ui.Routes
 private val NavBackStackEntry.projectId: String get() = requireNotNull(arguments?.getString("id"))
 
 fun NavGraphBuilder.projectRoutes(nav: NavHostController) {
-    composable(Routes.PROJECT_PAYMENTS) { ProjectPaymentsScreen(onBack = { nav.popBackStack() }) }
+    composable(Routes.PROJECT_PAYMENTS) { entry ->
+        if (entry.arguments?.getString("mode") == "settle") {
+            ProjectLinkScreen(onBack = { nav.popBackStack() }, initialTab = 2)
+        } else ProjectPaymentsScreen(onBack = { nav.popBackStack() })
+    }
     composable(Routes.NEW_PROJECT) {
         NewProjectScreen(onBack = { nav.popBackStack() }, onCreated = { id ->
             nav.navigate(Routes.project(id)) { popUpTo(Routes.NEW_PROJECT) { inclusive = true } }

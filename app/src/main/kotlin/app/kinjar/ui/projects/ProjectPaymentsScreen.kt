@@ -99,8 +99,8 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
     val base = financeBase(d, project.id)
     val sourceJson = rememberSaveable { EventJson.encodeToString(d.book.costs.filter { it.projectId == project.id && it.unpaid && d.book.settlementFor(it.id) == null }) }
     val sources = remember(sourceJson) { EventJson.decodeFromString<List<ProjectCost>>(sourceJson) }
-    var selected by rememberSaveable { mutableStateOf(ArrayList(if (income) emptyList() else vm.selected)) }
-    var stage by rememberSaveable { mutableIntStateOf(if (income) 0 else 1) }
+    var selected by rememberSaveable { mutableStateOf(ArrayList(vm.selected)) }
+    var stage by rememberSaveable { mutableIntStateOf(if (income && vm.selected.isEmpty()) 0 else 1) }
     var txId by rememberSaveable { mutableStateOf<String?>(null) }
     var carryDifference by rememberSaveable { mutableStateOf(true) }
     var inputsJson by rememberSaveable { mutableStateOf("{}") }
@@ -121,17 +121,17 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
     val assigned = allocations.values.fold(Money.zero(project.currency), Money::plus)
     val stale = chosen.size != selected.size || base != d.book.finance(project.id) || chosen.any { source -> d.book.costs.find { it.id == source.id } != source }
     val valid = !stale && !project.archived && chosen.isNotEmpty() && chosen.size <= MAX_BATCH && allocations.size == chosen.size && payment != null && (income && carryDifference || payment.converted == assigned)
-    val goBack = { if (!write.busy) { if (stage > if (income) 0 else 1) stage-- else back() } }
+    val goBack = { if (!write.busy) { if (stage > if (income && vm.selected.isEmpty()) 0 else 1) stage-- else back() } }
     val chooseLabel = if (income) R.string.project_choose_income else R.string.project_choose_expense
     key(stage) {
-        ProjectPage(stringResource(if (income) R.string.project_link_unpaid_income else if (stage == 1) chooseLabel else R.string.project_adjust_allocations), goBack, footer = {
+        ProjectPage(stringResource(if (income && stage == 1) R.string.project_received_incomes else if (income && stage == 2) R.string.project_review_income else if (income) R.string.project_link_unpaid_income else if (stage == 1) chooseLabel else R.string.project_adjust_allocations), goBack, footer = {
             if (stale) Hint(stringResource(R.string.project_payment_stale), LocalColors.current.orange)
             WriteFeedback(vm.writes)
             PrimaryButton(stringResource(if (stage == 1 && income) R.string.project_review_income else if (stage == 2 || stage == 1 && valid) R.string.project_mark_selected_paid else chooseLabel), !write.busy && !stale && !project.archived && when (stage) { 0 -> chosen.size in 1..MAX_BATCH; 1 -> chosen.size in 1..MAX_BATCH && payment != null; else -> valid }) {
                 if (stage == 0 || stage == 1 && (income || !valid)) stage++ else vm.save(base.copy(settlements = base.settlements + ProjectSettlement(settlementId, requireNotNull(payment), allocations, if (income) TransactionType.INCOME else TransactionType.EXPENSE)), base, chosen)
             }
         }) {
-            item("tabs") { tabs(write.busy) }
+            if (stage == 0) item("tabs") { tabs(write.busy) }
             section {
                 Hint(stringResource(R.string.project_selected_total, chosen.size, money(sum(chosen, project.currency))))
                 when (stage) {

@@ -157,7 +157,6 @@ private fun LazyListScope.overview(
                 else stringResource(R.string.project_link_selected_expense) + " · " + stringResource(R.string.project_selection_count, selected.size)
             PrimaryButton(linkLabel) { if (selected.isEmpty()) actions.onLink() else actions.onBulkSettle(selected) }
         }
-        if (d.book.finance(project.id).settlements.isNotEmpty()) TextButton(onClick = actions.onPayments) { Text(stringResource(R.string.project_payments), color = c.primary) }
         Text(stringResource(R.string.project_recent), style = SectionStyle, color = c.text)
     }
 }
