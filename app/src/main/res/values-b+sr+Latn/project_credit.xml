@@ -1,0 +1,20 @@
+<resources>
+    <string name="project_use_credit">Prati nadoknadu</string>
+    <string name="project_balance_before">Stanje projekta: %1$s</string>
+    <string name="project_expense_credit_hint">Prvo koristi dostupnu preplatu, redom sa liste. Ostatak je novac koji ti se duguje. Trošak dobavljaču ostaje evidentiran samo jednom.</string>
+    <string name="project_expense_credit_preview">Pokriveno preplatom: %1$s\nPreostala nadoknada: %2$s\nStanje nakon povezivanja: %3$s</string>
+    <string name="project_expense_credit_allocation">Preplata: %1$s · Preostala nadoknada: %2$s</string>
+    <string name="project_reimbursement_due">Čeka nadoknadu</string>
+    <string name="project_pay_from_credit">Plati iz preplate</string>
+    <string name="project_credit_available">Dostupna preplata: %1$s</string>
+    <string name="project_credit_none">Nema dostupne preplate. Ostavite račun neplaćen ili unesite početnu preplatu u podešavanjima projekta.</string>
+    <string name="project_credit_preview">Pokriveno: %1$s\nOstaje neplaćeno: %2$s\nPreplata nakon čuvanja: %3$s</string>
+    <string name="project_paid_from_credit">Plaćeno iz preplate</string>
+    <string name="project_credit_cost_status">Plaćeno iz preplate: %1$s · Neplaćeno: %2$s</string>
+    <string name="project_credit_paid_amount">Plaćeno iz preplate: %1$s</string>
+    <string name="project_opening_credit">Početna preplata</string>
+    <string name="project_opening_credit_value">Početna preplata: %1$s</string>
+    <string name="project_opening_credit_hint">Unesite novac koji već dugujete ovoj osobi, na primer 7.000 RSD. Ovo postavlja početnu preplatu bez novog prihoda. Računi koriste preplatu samo kada izaberete Plati iz preplate.</string>
+    <string name="project_credit_undo_link_first">Prvo poništite povezano plaćanje, pa plaćanje iz preplate.</string>
+    <string name="project_undo_credit">Poništi plaćanje iz preplate</string>
+</resources>

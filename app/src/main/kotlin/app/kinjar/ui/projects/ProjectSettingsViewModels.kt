@@ -13,6 +13,7 @@ import app.kinjar.domain.Money
 import app.kinjar.domain.Project
 import app.kinjar.domain.ProjectCategory
 import app.kinjar.domain.ProjectCost
+import app.kinjar.domain.ProjectFinance
 import app.kinjar.domain.newId
 import app.kinjar.ui.WriteOperation
 import app.kinjar.ui.parseMoneyInput
@@ -85,6 +86,7 @@ class ProjectSettingsViewModel @Inject constructor(
     val id: String = requireNotNull(saved["id"])
     val writes = WriteOperation(viewModelScope)
     val categoryWrites = WriteOperation(viewModelScope)
+    val creditWrites = WriteOperation(viewModelScope)
     private val load = Loadable(viewModelScope, combine(projects.book, repo.allCategories, repo.allAccounts, ::ProjectData))
     val data: StateFlow<ProjectData?> = load.state
     val loadFailed: StateFlow<Boolean> = load.failed
@@ -123,6 +125,10 @@ class ProjectSettingsViewModel @Inject constructor(
     }
 
     fun archive(archived: Boolean) = writes.run { projects.archive(id, archived) }
+
+    fun saveOpeningCredit(amount: Money, expected: ProjectFinance) = creditWrites.run(finish = false) {
+        projects.saveFinance(expected.copy(openingCredit = amount), expected)
+    }
 
     fun saveCategory(category: ProjectCategory, expected: ProjectCategory? = null) =
         categoryWrites.run(finish = false) { projects.saveCategory(category, expected) }

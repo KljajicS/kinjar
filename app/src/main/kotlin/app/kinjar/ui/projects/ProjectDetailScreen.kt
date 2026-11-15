@@ -115,11 +115,11 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
     }
     if (reporting) ProjectReportDialog(project, d, vm.clock.today()) { reporting = false }
     stored.find { it.id == acting }?.let { cost ->
-        CostDialog(cost, project, cost.id in stale, write.busy, vm, d.book.settlementFor(cost.id) != null,
+        CostDialog(cost, project, cost.id in stale, write.busy, vm, d.book.settlementFor(cost.id) != null || !d.book.creditPaid(cost).isZero,
             onPayments = { acting = null; actions.onPayments() },
             onEdit = { acting = null; actions.onEdit(cost) },
             onReview = { acting = null; actions.onReview(cost.id) },
-            onSettle = { acting = null; actions.onSettle(cost.id) }) { acting = null }
+            onSettle = { acting = null; if (cost.reimbursable) actions.onBulkSettle(listOf(cost.id)) else actions.onSettle(cost.id) }) { acting = null }
     }
 }
 
@@ -144,7 +144,8 @@ private fun LazyListScope.overview(
         BudgetLine(total, project.budget, includesUnpaid = costs.any { it.unpaid })
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f, fill = false)) {
-                PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
+                val unpaid = d.book.unpaidTotal(project.id)
+                PaymentTotals(total - unpaid, unpaid)
             }
             IconButton(onClick = onReport) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowForward, stringResource(R.string.project_report_export), Modifier.size(20.dp), tint = c.primary)
@@ -157,7 +158,6 @@ private fun LazyListScope.overview(
                 else stringResource(R.string.project_link_selected_expense) + " · " + stringResource(R.string.project_selection_count, selected.size)
             PrimaryButton(linkLabel) { if (selected.isEmpty()) actions.onLink() else actions.onBulkSettle(selected) }
         }
-        if (d.book.finance(project.id).settlements.isNotEmpty()) TextButton(onClick = actions.onPayments) { Text(stringResource(R.string.project_payments), color = c.primary) }
         Text(stringResource(R.string.project_recent), style = SectionStyle, color = c.text)
     }
 }
@@ -191,7 +191,7 @@ private fun CostDialog(cost: ProjectCost, project: Project, stale: Boolean, busy
                 TextButton(onClick = onPayments) { Text(stringResource(R.string.project_payments)) }
             } else if (!project.archived) {
                 TextButton(onClick = onEdit, enabled = !busy) { Text(stringResource(R.string.transaction_edit), color = c.primary) }
-                if (cost.unpaid) TextButton(onClick = onSettle, enabled = !busy) { Text(stringResource(R.string.project_link_payment), color = c.primary) }
+                if (cost.unpaid) TextButton(onClick = onSettle, enabled = !busy) { Text(stringResource(if (cost.reimbursable) R.string.project_unpaid_income_tab else R.string.project_link_payment), color = c.primary) }
                 if (stale) TextButton(onClick = onReview, enabled = !busy) { Text(stringResource(R.string.project_review), color = c.primary) }
                 TextButton(onClick = { confirming = true }, enabled = !busy) {
                     Text(stringResource(if (linked) R.string.project_unlink else R.string.project_remove), color = c.orange)

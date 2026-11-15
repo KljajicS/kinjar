@@ -43,6 +43,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
 import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.ProjectCategory
+import app.kinjar.domain.ProjectFinance
+import app.kinjar.domain.EventJson
+import app.kinjar.ui.parseMoneyInput
 import app.kinjar.ui.CategoryPalette
 import app.kinjar.ui.WriteFeedback
 import app.kinjar.ui.categoryDisplayName
@@ -68,6 +71,7 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
     val write by vm.writes.state.collectAsStateWithLifecycle()
     var archiving by rememberSaveable { mutableStateOf(false) }
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
+    var creditBase by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(write.finished) { if (write.finished) onBack() }
     val back = { if (!write.busy) onBack() }
     val title = stringResource(R.string.project_settings)
@@ -106,10 +110,15 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.project_currency_value, project.currency.name), style = sans(15, FontWeight.Medium), color = c.text, modifier = Modifier.weight(1f))
                 val finance = d.book.finance(project.id)
-                val locked = finance.reimbursement != null || finance.settlements.isNotEmpty() || finance.repayments.isNotEmpty()
+                val locked = finance.reimbursement != null || finance.settlements.isNotEmpty() || finance.repayments.isNotEmpty() || finance.hasCredit
                 TextButton(onClick = onCurrency, enabled = !write.busy && !locked) { Text(stringResource(R.string.project_change_currency), color = c.primary) }
             }
-            if (d.book.finances.any { it.projectId == project.id && (it.reimbursement != null || it.settlements.isNotEmpty() || it.repayments.isNotEmpty()) }) Hint(stringResource(R.string.project_finance_currency_locked))
+            if (d.book.finances.any { it.projectId == project.id && (it.reimbursement != null || it.settlements.isNotEmpty() || it.repayments.isNotEmpty() || it.hasCredit) }) Hint(stringResource(R.string.project_finance_currency_locked))
+            TextButton(onClick = {
+                vm.creditWrites.clearFailure()
+                creditBase = EventJson.encodeToString(ProjectFinance.serializer(), d.book.finance(project.id))
+            }, enabled = !write.busy) { Text(stringResource(R.string.project_opening_credit), color = c.primary) }
+            Hint(stringResource(R.string.project_credit_available, money(d.book.incomeBalance(project.id))))
         }
         section("sources") {
             Text(stringResource(R.string.project_sources), style = SectionStyle, color = c.text)
@@ -157,6 +166,34 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
         val existing = categories.find { it.id == key }
         if (key == NEW || existing != null) CategoryEditor(existing, categories, vm) { editing = null }
     }
+    creditBase?.let { json ->
+        val base = remember(json) { EventJson.decodeFromString(ProjectFinance.serializer(), json) }
+        OpeningCreditEditor(base, project.currency, vm) { creditBase = null }
+    }
+}
+
+@Composable
+private fun OpeningCreditEditor(base: ProjectFinance, currency: app.kinjar.domain.Currency, vm: ProjectSettingsViewModel, onDone: () -> Unit) {
+    val write by vm.creditWrites.state.collectAsStateWithLifecycle()
+    var amount by rememberSaveable { mutableStateOf(base.openingCredit?.inputText().orEmpty()) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    val parsed = parseMoneyInput(amount, currency)?.takeUnless { it.isNegative }
+    LaunchedEffect(write.busy) { if (submitted && !write.busy && !write.failed) onDone() }
+    AlertDialog(
+        onDismissRequest = { if (!write.busy) onDone() },
+        title = { Text(stringResource(R.string.project_opening_credit)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Hint(stringResource(R.string.project_opening_credit_hint))
+                AmountField(stringResource(R.string.project_opening_credit), amount, currency) { amount = it }
+                WriteFeedback(vm.creditWrites)
+            }
+        },
+        confirmButton = { TextButton(onClick = {
+            parsed?.let { submitted = true; vm.saveOpeningCredit(it, base) }
+        }, enabled = parsed != null && !write.busy) { Text(stringResource(R.string.project_save)) } },
+        dismissButton = { TextButton(onClick = onDone, enabled = !write.busy) { Text(stringResource(R.string.dialog_cancel)) } },
+    )
 }
 
 private const val NEW = "new"

@@ -49,10 +49,20 @@ private fun PaymentHistory(project: Project, d: ProjectData, vm: ProjectPayments
     val finance = d.book.finance(project.id)
     val write by vm.writes.state.collectAsStateWithLifecycle()
     var removal by rememberSaveable { mutableStateOf<String?>(null) }
+    var removingCredit by rememberSaveable { mutableStateOf(false) }
     var expectedJson by rememberSaveable { mutableStateOf("") }
     ProjectPage(stringResource(R.string.project_payments), back) {
         section {
-            if (finance.settlements.isEmpty()) Hint(stringResource(R.string.project_history_empty))
+            finance.openingCredit?.let { Hint(stringResource(R.string.project_opening_credit_value, money(it))) }
+            if (finance.settlements.isEmpty() && finance.creditCosts.isEmpty()) Hint(stringResource(R.string.project_history_empty))
+            finance.creditCosts.forEach { (costId, amount) ->
+                val cost = d.book.costs.find { it.id == costId }
+                Text("${cost?.note.orEmpty()} · ${money(amount)}", color = LocalColors.current.text)
+                Hint(stringResource(R.string.project_paid_from_credit))
+                val linked = d.book.settlementFor(costId) != null
+                if (linked) Hint(stringResource(R.string.project_credit_undo_link_first))
+                if (!project.archived) TextButton(onClick = { removingCredit = true; removal = costId; expectedJson = EventJson.encodeToString(finance) }, enabled = !write.busy && !linked) { Text(stringResource(R.string.project_undo_credit)) }
+            }
             finance.settlements.forEach { settlement ->
                 OutlinedBox(Modifier.fillMaxWidth(), radius = 14) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -64,7 +74,7 @@ private fun PaymentHistory(project: Project, d: ProjectData, vm: ProjectPayments
                             cost?.let { Hint(stringResource(R.string.project_estimate, money(it.converted))) }
                         }
                         if (d.book.paymentNeedsReview(settlement.payment, settlement.type)) Hint(stringResource(R.string.project_payment_changed), LocalColors.current.orange)
-                        if (!project.archived) TextButton(onClick = { removal = settlement.id; expectedJson = EventJson.encodeToString(finance) }, enabled = !write.busy) { Text(stringResource(R.string.project_undo_settlement)) }
+                        if (!project.archived) TextButton(onClick = { removingCredit = false; removal = settlement.id; expectedJson = EventJson.encodeToString(finance) }, enabled = !write.busy) { Text(stringResource(R.string.project_undo_settlement)) }
                     }
                 }
             }
@@ -72,10 +82,10 @@ private fun PaymentHistory(project: Project, d: ProjectData, vm: ProjectPayments
         }
     }
     removal?.let { id ->
-        ConfirmDialog(stringResource(R.string.project_undo_settlement), stringResource(R.string.dialog_ok), write.busy,
+        ConfirmDialog(stringResource(if (removingCredit) R.string.project_undo_credit else R.string.project_undo_settlement), stringResource(R.string.dialog_ok), write.busy,
             onConfirm = {
                 val expected = EventJson.decodeFromString<ProjectFinance>(expectedJson)
-                vm.save(expected.copy(settlements = expected.settlements.filterNot { it.id == id }), expected, finish = false)
+                vm.save(if (removingCredit) expected.copy(creditCosts = expected.creditCosts - id) else expected.copy(settlements = expected.settlements.filterNot { it.id == id }), expected, finish = false)
                 removal = null
             }, onDismiss = { if (!write.busy) removal = null }) { Hint(stringResource(R.string.project_remove_payment_body)) }
     }
@@ -97,10 +107,10 @@ private fun PaymentChoice(tx: Transaction, checked: Boolean, select: () -> Unit)
 @Composable
 private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPaymentsViewModel, back: () -> Unit, income: Boolean, tabs: @Composable (Boolean) -> Unit) {
     val base = financeBase(d, project.id)
-    val sourceJson = rememberSaveable { EventJson.encodeToString(d.book.costs.filter { it.projectId == project.id && it.unpaid && d.book.settlementFor(it.id) == null }) }
+    val sourceJson = rememberSaveable { EventJson.encodeToString(d.book.costs.filter { it.projectId == project.id && it.unpaid && (income || !it.reimbursable) && !d.book.unpaidAmount(it).isZero && d.book.settlementFor(it.id) == null }) }
     val sources = remember(sourceJson) { EventJson.decodeFromString<List<ProjectCost>>(sourceJson) }
-    var selected by rememberSaveable { mutableStateOf(ArrayList(if (income) emptyList() else vm.selected)) }
-    var stage by rememberSaveable { mutableIntStateOf(if (income) 0 else 1) }
+    var selected by rememberSaveable { mutableStateOf(ArrayList(vm.selected)) }
+    var stage by rememberSaveable { mutableIntStateOf(if (income && vm.selected.isEmpty()) 0 else 1) }
     var txId by rememberSaveable { mutableStateOf<String?>(null) }
     var carryDifference by rememberSaveable { mutableStateOf(true) }
     var inputsJson by rememberSaveable { mutableStateOf("{}") }
@@ -117,23 +127,23 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
     LaunchedEffect(txId) { tx?.let(vm::ratesFor) }
     val plan = linkPlan(listOfNotNull(tx), project, quotes, manual)
     val payment = plan.items.singleOrNull()?.let { (t, conversion) -> conversion?.let { paymentSnapshot(t, it) } }
-    val allocations = if (income) chosen.associate { it.id to it.converted } else chosen.mapNotNull { cost -> parseMoneyInput(inputs[cost.id] ?: cost.converted.inputText(), project.currency)?.takeIf { !it.isNegative && !it.isZero }?.let { cost.id to it } }.toMap()
+    val allocations = if (income) chosen.associate { it.id to d.book.unpaidAmount(it) } else chosen.mapNotNull { cost -> parseMoneyInput(inputs[cost.id] ?: d.book.unpaidAmount(cost).inputText(), project.currency)?.takeIf { !it.isNegative && !it.isZero }?.let { cost.id to it } }.toMap()
     val assigned = allocations.values.fold(Money.zero(project.currency), Money::plus)
     val stale = chosen.size != selected.size || base != d.book.finance(project.id) || chosen.any { source -> d.book.costs.find { it.id == source.id } != source }
     val valid = !stale && !project.archived && chosen.isNotEmpty() && chosen.size <= MAX_BATCH && allocations.size == chosen.size && payment != null && (income && carryDifference || payment.converted == assigned)
-    val goBack = { if (!write.busy) { if (stage > if (income) 0 else 1) stage-- else back() } }
+    val goBack = { if (!write.busy) { if (stage > if (income && vm.selected.isEmpty()) 0 else 1) stage-- else back() } }
     val chooseLabel = if (income) R.string.project_choose_income else R.string.project_choose_expense
     key(stage) {
-        ProjectPage(stringResource(if (income) R.string.project_link_unpaid_income else if (stage == 1) chooseLabel else R.string.project_adjust_allocations), goBack, footer = {
+        ProjectPage(stringResource(if (income && stage == 1) R.string.project_received_incomes else if (income && stage == 2) R.string.project_review_income else if (income) R.string.project_link_unpaid_income else if (stage == 1) chooseLabel else R.string.project_adjust_allocations), goBack, footer = {
             if (stale) Hint(stringResource(R.string.project_payment_stale), LocalColors.current.orange)
             WriteFeedback(vm.writes)
             PrimaryButton(stringResource(if (stage == 1 && income) R.string.project_review_income else if (stage == 2 || stage == 1 && valid) R.string.project_mark_selected_paid else chooseLabel), !write.busy && !stale && !project.archived && when (stage) { 0 -> chosen.size in 1..MAX_BATCH; 1 -> chosen.size in 1..MAX_BATCH && payment != null; else -> valid }) {
                 if (stage == 0 || stage == 1 && (income || !valid)) stage++ else vm.save(base.copy(settlements = base.settlements + ProjectSettlement(settlementId, requireNotNull(payment), allocations, if (income) TransactionType.INCOME else TransactionType.EXPENSE)), base, chosen)
             }
         }) {
-            item("tabs") { tabs(write.busy) }
+            if (stage == 0) item("tabs") { tabs(write.busy) }
             section {
-                Hint(stringResource(R.string.project_selected_total, chosen.size, money(sum(chosen, project.currency))))
+                Hint(stringResource(R.string.project_selected_total, chosen.size, money(chosen.fold(Money.zero(project.currency)) { total, cost -> total + d.book.unpaidAmount(cost) })))
                 when (stage) {
                     0 -> {
                         Hint(stringResource(R.string.project_income_settle_hint))
@@ -143,7 +153,7 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
                                 onClick = { selected = ArrayList(if (cost.id in selected) selected - cost.id else (selected + cost.id).take(MAX_BATCH)) }) {
                                 Row {
                                     Checkbox(cost.id in selected, null)
-                                    Column { Text(cost.note.ifBlank { stringResource(R.string.project_unpaid) }, color = LocalColors.current.text); Hint(money(cost.converted)) }
+                                    Column { Text(cost.note.ifBlank { stringResource(R.string.project_unpaid) }, color = LocalColors.current.text); Hint(money(d.book.unpaidAmount(cost))) }
                                 }
                             }
                         }
@@ -158,7 +168,7 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
                             payment?.let {
                                 Hint(stringResource(R.string.project_income_received, money(it.converted)))
                                 chosen.forEach { cost ->
-                                    Text("${cost.note.ifBlank { stringResource(R.string.project_unpaid) }} · ${money(cost.converted)}", color = LocalColors.current.text)
+                                    Text("${cost.note.ifBlank { stringResource(R.string.project_unpaid) }} · ${money(d.book.unpaidAmount(cost))}", color = LocalColors.current.text)
                                 }
                                 val difference = it.converted - assigned
                                 val balance = d.book.incomeBalance(project.id) + difference
@@ -175,7 +185,7 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
                                 }
                                 val remaining = sources.filter { cost -> cost.id !in selected }
                                 if (!difference.isNegative && !difference.isZero && remaining.isNotEmpty()) {
-                                    Hint(stringResource(R.string.project_income_other_unpaid, remaining.size, money(sum(remaining, project.currency)), money(difference)), LocalColors.current.orange)
+                                    Hint(stringResource(R.string.project_income_other_unpaid, remaining.size, money(remaining.fold(Money.zero(project.currency)) { total, cost -> total + d.book.unpaidAmount(cost) }), money(difference)), LocalColors.current.orange)
                                     TextButton(onClick = { stage = 0 }, enabled = !write.busy) { Text(stringResource(R.string.project_change_selection)) }
                                 }
                             }
@@ -183,7 +193,7 @@ private fun BulkSettlementScreen(project: Project, d: ProjectData, vm: ProjectPa
                             payment?.let { Hint(stringResource(R.string.project_selected_payment, money(it.converted))) }
                             Hint(stringResource(R.string.project_allocation_hint))
                             chosen.forEach { cost ->
-                                AmountField(cost.note.ifBlank { stringResource(R.string.project_unpaid) }, inputs[cost.id] ?: cost.converted.inputText(), project.currency) { text -> inputsJson = EventJson.encodeToString(inputs + (cost.id to text)) }
+                                AmountField(cost.note.ifBlank { stringResource(R.string.project_unpaid) }, inputs[cost.id] ?: d.book.unpaidAmount(cost).inputText(), project.currency) { text -> inputsJson = EventJson.encodeToString(inputs + (cost.id to text)) }
                                 Hint(stringResource(R.string.project_estimate, money(cost.converted)))
                             }
                             payment?.let { Hint(stringResource(R.string.project_unassigned, money(it.converted - assigned)), if (valid) LocalColors.current.green else LocalColors.current.red) }

@@ -134,8 +134,10 @@ fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, selected: Bool
         else -> stringResource(R.string.project_linked_expense)
     }
     val kind = stringResource(when {
+        !data.book.creditPaid(cost).isZero && data.book.settlementFor(cost.id) == null && !cost.unpaid -> R.string.project_paid_from_credit
         data.book.settlementFor(cost.id)?.type == TransactionType.INCOME && !cost.unpaid -> R.string.project_income_linked
         data.book.settlementFor(cost.id) != null && !cost.unpaid -> R.string.project_settlement_paid
+        cost.unpaid && cost.reimbursable -> R.string.project_reimbursement_due
         cost.unpaid -> R.string.project_unpaid
         cost.transactionId == null -> R.string.project_past_cost
         else -> R.string.project_linked_expense
@@ -151,6 +153,12 @@ fun CostRow(cost: ProjectCost, data: ProjectData, stale: Boolean, selected: Bool
             Column(Modifier.weight(1f)) {
                 Text(title, style = sans(15, FontWeight.Medium), color = c.text, maxLines = 2)
                 Hint("${date(cost.date)} · ${categoryName(category)} · $kind", if (cost.unpaid) c.red else if (data.book.settlementFor(cost.id) != null) c.green else c.muted)
+                if (!data.book.creditPaid(cost).isZero) {
+                    val unpaid = data.book.unpaidAmount(cost)
+                    val status = if (unpaid.isZero) stringResource(R.string.project_credit_paid_amount, money(data.book.creditPaid(cost)))
+                        else stringResource(R.string.project_credit_cost_status, money(data.book.creditPaid(cost)), money(unpaid))
+                    Hint(status, if (cost.unpaid) c.red else c.green)
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(money(cost.converted), style = mono(14, FontWeight.SemiBold), color = c.text)

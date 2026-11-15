@@ -1,0 +1,20 @@
+<resources>
+    <string name="project_use_credit">Track reimbursement</string>
+    <string name="project_balance_before">Project balance: %1$s</string>
+    <string name="project_expense_credit_hint">Use available credit first, in list order. Anything left becomes money owed to you. The supplier expense stays recorded once.</string>
+    <string name="project_expense_credit_preview">Covered by credit: %1$s\nReimbursement due: %2$s\nBalance after linking: %3$s</string>
+    <string name="project_expense_credit_allocation">Credit: %1$s · Reimbursement due: %2$s</string>
+    <string name="project_reimbursement_due">Reimbursement due</string>
+    <string name="project_pay_from_credit">Pay from credit</string>
+    <string name="project_credit_available">Available credit: %1$s</string>
+    <string name="project_credit_none">No credit available. Leave this bill unpaid or add opening credit in project settings.</string>
+    <string name="project_credit_preview">Covered: %1$s\nStill unpaid: %2$s\nCredit after saving: %3$s</string>
+    <string name="project_paid_from_credit">Paid from credit</string>
+    <string name="project_credit_cost_status">Paid from credit: %1$s · Unpaid: %2$s</string>
+    <string name="project_credit_paid_amount">Paid from credit: %1$s</string>
+    <string name="project_opening_credit">Opening credit</string>
+    <string name="project_opening_credit_value">Opening credit: %1$s</string>
+    <string name="project_opening_credit_hint">Enter money you already owe this person, for example 7,000 RSD. This sets the starting credit, without creating income. Bills use credit only when you choose Pay from credit.</string>
+    <string name="project_credit_undo_link_first">Undo the linked payment before undoing credit.</string>
+    <string name="project_undo_credit">Undo credit payment</string>
+</resources>

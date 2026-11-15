@@ -34,15 +34,16 @@ class HistoryStreamTest {
     @Test fun `latest version differs from version 2 only in its header and keeps the version 2 digest`() {
         val (v2, v2Summary) = encode(version = 2)
         val (v3, v3Summary) = encode()
-        assertEquals(6, HistoryStream.VERSION)
+        assertEquals(7, HistoryStream.VERSION)
         assertTrue(v2.toString(Charsets.UTF_8).startsWith("{\"version\":2}\n"))
-        assertEquals(v2.toString(Charsets.UTF_8).replaceFirst("{\"version\":2}", "{\"version\":6}"), v3.toString(Charsets.UTF_8))
+        assertEquals(v2.toString(Charsets.UTF_8).replaceFirst("{\"version\":2}", "{\"version\":7}"), v3.toString(Charsets.UTF_8))
         assertEquals(v2Summary, v3Summary)
         assertEquals(records, read(v3))
         assertThrows(IllegalArgumentException::class.java) { encode(version = 1) }
         assertEquals(records, read(encode(version = 3).first))
         assertEquals(records, read(encode(version = 4).first))
         assertEquals(records, read(encode(version = 5).first))
+        assertEquals(records, read(encode(version = 6).first))
         assertThrows(IllegalArgumentException::class.java) { encode(version = HistoryStream.VERSION + 1) }
     }
 
@@ -71,11 +72,11 @@ class HistoryStreamTest {
         assertThrows(IllegalArgumentException::class.java) { read(swapped.joinToString("\n", postfix = "\n").toByteArray()) }
         val spaced = lines.joinToString("\n", postfix = "\n").replace("{\"type\":\"operation\",", "{\"type\": \"operation\",")
         assertThrows(IllegalArgumentException::class.java) { read(spaced.toByteArray()) }
-        val newer = lines.joinToString("\n", postfix = "\n").replaceFirst("{\"version\":6}", "{\"version\":7}")
+        val newer = lines.joinToString("\n", postfix = "\n").replaceFirst("{\"version\":7}", "{\"version\":8}")
         assertThrows(UnsupportedSyncVersion::class.java) { read(newer.toByteArray()) }
-        val spacedHeader = lines.joinToString("\n", postfix = "\n").replaceFirst("{\"version\":6}", "{\"version\": 6}")
+        val spacedHeader = lines.joinToString("\n", postfix = "\n").replaceFirst("{\"version\":7}", "{\"version\": 7}")
         assertThrows(IllegalArgumentException::class.java) { read(spacedHeader.toByteArray()) }
-        val older = lines.joinToString("\n", postfix = "\n").replaceFirst("{\"version\":6}", "{\"version\":1}")
+        val older = lines.joinToString("\n", postfix = "\n").replaceFirst("{\"version\":7}", "{\"version\":1}")
         assertThrows(IllegalArgumentException::class.java) { read(older.toByteArray()) }
     }
 
