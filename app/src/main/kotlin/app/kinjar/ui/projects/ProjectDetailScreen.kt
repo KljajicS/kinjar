@@ -2,6 +2,8 @@ package app.kinjar.ui.projects
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.LaunchedEffect
@@ -12,7 +14,9 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -136,10 +140,16 @@ private fun LazyListScope.overview(
                 Hint(stringResource(R.string.project_payment_balance))
                 Text((if (balance.isNegative) "" else "+") + money(balance), style = mono(22, FontWeight.SemiBold), color = if (balance.isNegative) c.red else c.green)
             }
-            RoundIconButton(Icons.Outlined.Share, stringResource(R.string.project_report_export), onReport)
         }
         BudgetLine(total, project.budget, includesUnpaid = costs.any { it.unpaid })
-        if (costs.any { it.unpaid }) PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f, fill = false)) {
+                PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
+            }
+            IconButton(onClick = onReport) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, stringResource(R.string.project_report_export), Modifier.size(20.dp), tint = c.primary)
+            }
+        }
         if (stale.isNotEmpty()) Hint(stringResource(R.string.project_review_needed, stale.size), c.orange)
         ProjectChart(costs, d.categories(project.id), project.currency, YearMonth.from(today))
         if (!project.archived) {

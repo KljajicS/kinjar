@@ -1,6 +1,6 @@
 <resources>
     <string name="project_report_title">Report</string>
-    <string name="project_report_export">Export report</string>
+    <string name="project_report_export">Unpaid report</string>
     <string name="project_report_share">Share image</string>
     <string name="project_report_adjustment">Adjustment</string>
     <string name="project_report_prepaid">already paid earlier</string>
