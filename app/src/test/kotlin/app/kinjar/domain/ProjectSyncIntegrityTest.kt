@@ -30,6 +30,21 @@ class ProjectSyncIntegrityTest {
         integrity.validate()
     }
 
+    @Test fun `report exclusions require version nine while default categories keep their encoding`() {
+        val category = ProjectCategory("bills", project.id, "Bills", "#123456")
+        val legacy = "{\"id\":\"bills\",\"projectId\":\"house\",\"name\":\"Bills\",\"color\":\"#123456\",\"archived\":false}"
+        assertEquals(legacy, EventJson.encodeToString(ProjectCategory.serializer(), category))
+        assertEquals(category, EventJson.decodeFromString<ProjectCategory>(legacy))
+        fun operation(value: ProjectCategory) = SyncOperation("family", "dataset", "user", "device", 1, emptySet(),
+            mapOf("project:house" to ResourceAccess.WRITE), listOf(OperationEvent("event", "device", 1, 1, ProjectCategorySaved(value))))
+        assertEquals(5, operation(category).version)
+        val excluded = operation(category.copy(excludedFromReport = true))
+        assertEquals(9, excluded.version)
+        assertEquals(excluded, OperationCodec.decode(OperationCodec.encode(excluded)))
+        val downgraded = String(OperationCodec.encode(excluded)).replace("\"version\":9", "\"version\":5")
+        assertThrows(IllegalArgumentException::class.java) { OperationCodec.decode(downgraded.toByteArray()) }
+    }
+
     @Test fun `duplicate project link and forged removal are rejected without losing prior link`() {
         val other = project.copy(id = "garden", name = "Garden")
         val integrity = FinancialIntegrity().applying(baseline + ProjectSaved(other) + ProjectCostSaved(cost), true)
