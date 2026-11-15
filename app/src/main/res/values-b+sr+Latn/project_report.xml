@@ -1,0 +1,12 @@
+<resources>
+    <string name="project_report_title">Izveštaj</string>
+    <string name="project_report_export">Izvezi izveštaj</string>
+    <string name="project_report_share">Podeli sliku</string>
+    <string name="project_report_adjustment">Korekcija</string>
+    <string name="project_report_prepaid">plaćeno ranije</string>
+    <string name="project_report_previous_debt">dug od ranije</string>
+    <string name="project_report_to_send">Ukupno za plaćanje</string>
+    <string name="project_report_credit_remaining">Preplata za sledeći put</string>
+    <string name="project_report_review">Proverite iznose: povezane uplate su izmenjene ili obrisane.</string>
+    <string name="project_report_error">Deljenje izveštaja nije uspelo. Pokušajte ponovo.</string>
+</resources>
