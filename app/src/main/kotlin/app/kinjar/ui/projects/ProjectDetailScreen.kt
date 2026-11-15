@@ -1,14 +1,12 @@
 package app.kinjar.ui.projects
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.Switch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -24,6 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
@@ -62,7 +61,6 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
     val write by vm.writes.state.collectAsStateWithLifecycle()
     // A removed cost drops out of the book, which closes its dialog; removal ids are never reused.
     var acting by rememberSaveable { mutableStateOf<String?>(null) }
-    var unpaidOnly by rememberSaveable { mutableStateOf(false) }
     var selection by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     val back = { if (!write.busy) { if (selection.isNotEmpty()) selection = arrayListOf() else actions.onBack() } }
     val d = loaded
@@ -87,8 +85,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
         if (id in eligible) selection = ArrayList(if (id in selected) selected - id else (selected + id).take(MAX_BATCH))
     }
     val selecting = selected.isNotEmpty()
-    val visible = if (unpaidOnly) costs.filter { it.unpaid }
-        else if (all) stored.map { cost -> costs.find { it.id == cost.id } ?: cost }
+    val visible = if (all) stored.map { cost -> costs.find { it.id == cost.id } ?: cost }
         else costs.take(RECENT)
     ProjectPage(if (all) stringResource(R.string.project_all_costs) else project.name, back, settings, footer = {
         if (all && selecting) {
@@ -97,13 +94,6 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
             TextButton(onClick = { selection = arrayListOf() }) { Text(stringResource(R.string.dialog_cancel)) }
         }
     }) {
-        item("filter") {
-            Row(Modifier.fillMaxWidth().toggleable(unpaidOnly, role = Role.Switch) { unpaidOnly = it },
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(stringResource(R.string.project_filter_unpaid), color = c.text)
-                Switch(unpaidOnly, null)
-            }
-        }
         if (!all) overview(project, d, costs, stale, actions, vm.clock.today(), selected)
         if (visible.isEmpty()) section("empty") { Hint(stringResource(R.string.project_costs_empty)) }
         if (eligible.isNotEmpty()) item("selection-hint") { Hint(stringResource(R.string.project_long_press_hint)) }
@@ -113,7 +103,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
                 if (selecting) toggle(cost.id) else { vm.writes.clearFailure(); acting = cost.id }
             }
         }
-        if (!all && !unpaidOnly && (stored.size > RECENT || stored.size != costs.size)) item("all") {
+        if (!all && (stored.size > RECENT || stored.size != costs.size)) item("all") {
             TextButton(onClick = actions.onAllCosts) { Text(stringResource(R.string.project_see_all, stored.size), color = c.primary) }
         }
     }
@@ -133,8 +123,17 @@ private fun LazyListScope.overview(
         val c = LocalColors.current
         val total = sum(costs, project.currency)
         if (project.archived) Hint(stringResource(R.string.project_archived_notice), c.orange)
-        Hint(stringResource(R.string.project_total))
-        Text(money(total), style = mono(32, FontWeight.SemiBold), color = c.text)
+        val balance = d.book.incomeBalance(project.id)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Hint(stringResource(R.string.project_total))
+                Text(money(total), style = mono(22, FontWeight.SemiBold), color = c.text)
+            }
+            if (!balance.isZero) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.End) {
+                Hint(stringResource(R.string.project_payment_balance))
+                Text((if (balance.isNegative) "" else "+") + money(balance), style = mono(22, FontWeight.SemiBold), color = if (balance.isNegative) c.red else c.green)
+            }
+        }
         BudgetLine(total, project.budget, includesUnpaid = costs.any { it.unpaid })
         if (costs.any { it.unpaid }) PaymentTotals(sum(costs.filterNot { it.unpaid }, project.currency), sum(costs.filter { it.unpaid }, project.currency))
         if (stale.isNotEmpty()) Hint(stringResource(R.string.project_review_needed, stale.size), c.orange)

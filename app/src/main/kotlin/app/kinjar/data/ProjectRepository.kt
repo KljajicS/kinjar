@@ -30,6 +30,16 @@ data class ProjectBook(
     }.sortedWith(compareByDescending<ProjectCost> { it.date }.thenBy { it.id })
 
     fun finance(projectId: String): ProjectFinance = finances.find { it.projectId == projectId } ?: ProjectFinance(projectId)
+    fun incomeBalance(projectId: String): Money {
+        val currency = requireNotNull(projects.find { it.id == projectId }).currency
+        val originals = costs.filter { it.projectId == projectId }.associateBy { it.id }
+        return finance(projectId).settlements.filter {
+            it.type == TransactionType.INCOME && byTransaction[it.payment.transactionId]?.type == TransactionType.INCOME
+        }.fold(Money.zero(currency)) { balance, settlement ->
+            val covered = settlement.allocations.keys.fold(Money.zero(currency)) { total, id -> total + requireNotNull(originals[id]).converted }
+            balance + settlement.payment.converted - covered
+        }
+    }
     fun settlementFor(costId: String): ProjectSettlement? = finances.asSequence().flatMap { it.settlements }.find { costId in it.allocations }
     fun paymentNeedsReview(payment: ProjectPayment, type: TransactionType): Boolean =
         payment.transactionId != null && !payment.matches(byTransaction[payment.transactionId], type)

@@ -1,7 +1,8 @@
 <resources>
+    <string name="project_payment_balance">Saldo</string>
     <string name="project_unpaid_income_tab">Neplaćeno u prihod</string>
     <string name="project_link_unpaid_income">Poveži neplaćeno sa prihodom</string>
-    <string name="project_choose_income">Izaberi jedan prihod</string>
+    <string name="project_choose_income">Izaberi prihod</string>
     <string name="project_income_linked">Plaćeno povezanim prihodom</string>
     <string name="project_income_settle_hint">Izaberi neplaćene troškove pokrivene primljenim novcem. Poveži jedan postojeći prihod da ih označiš kao plaćene, bez dodavanja nove transakcije.</string>
     <string name="project_income_none">Nema dostupnih prihoda. Prvo dodaj prihod ili ukloni postojeću vezu sa projektom.</string>
@@ -28,7 +29,7 @@
     <string name="project_payment_date">Datum plaćanja</string>
     <string name="project_payment_note">Beleška (opciono)</string>
     <string name="project_confirm_repayment">Potvrdi prijem</string>
-    <string name="project_choose_expense">Izaberi jedan rashod</string>
+    <string name="project_choose_expense">Izaberi rashod</string>
     <string name="project_adjust_allocations">Podesi plaćene iznose</string>
     <string name="project_allocation_hint">Unesi stvarni plaćeni iznos za svaki trošak. Zbir mora odgovarati uplati. Prvobitne procene ostaju u istoriji.</string>
     <string name="project_unassigned">Neraspoređeno: %1$s</string>

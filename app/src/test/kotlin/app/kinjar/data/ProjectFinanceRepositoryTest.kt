@@ -116,7 +116,9 @@ class ProjectFinanceRepositoryTest {
         assertFalse(book.needsReview(a))
         assertEquals(income, book.transactions.single { it.id == income.id })
         assertEquals(2, book.transactions.size)
+        assertEquals(eur("-100"), book.incomeBalance("house"))
         repo.saveFinance(base, finance)
+        assertEquals(eur("0"), repo.readBook().incomeBalance("house"))
         assertEquals(listOf(a, b), repo.readBook().costsFor("house"))
         assertEquals(income, repo.readBook().transactions.single { it.id == income.id })
     }
@@ -134,9 +136,34 @@ class ProjectFinanceRepositoryTest {
         assertTrue(runCatching { repo.saveFinance(finance.copy(reimbursement = config, repayments = listOf(duplicate)), finance) }.isFailure)
         store.append(TransactionEdited(income.copy(money = eur("850"))))
         assertTrue(repo.readBook().needsReview(a))
+        assertEquals(eur("-100"), repo.readBook().incomeBalance("house"))
         store.append(TransactionDeleted(income.id))
         assertTrue(repo.readBook().costsFor("house").all { it.unpaid })
+        assertEquals(eur("0"), repo.readBook().incomeBalance("house"))
         repo.saveFinance(base, finance)
+    }
+
+    @Test fun `income balance nets credit and debit using original costs and ignores expenses and unpaid bills`() = runTest {
+        seed()
+        repo.saveFinance(paid, base, listOf(a, b))
+        assertEquals(eur("0"), repo.readBook().incomeBalance("house"))
+        repo.saveFinance(base, paid)
+        val credit = tx.copy(id = "credit", type = TransactionType.INCOME, money = eur("1100"), categoryId = null)
+        store.append(TransactionAdded(credit))
+        val creditSettlement = settlement.copy(type = TransactionType.INCOME,
+            payment = ProjectPayment(credit.money, credit.money, credit.date, credit.id),
+            allocations = mapOf("a" to eur("600"), "b" to eur("500")))
+        val credited = base.copy(settlements = listOf(creditSettlement))
+        repo.saveFinance(credited, base, listOf(a, b))
+        val next = a.copy(id = "next", original = eur("200"), converted = eur("200"))
+        repo.record(listOf(next))
+        assertEquals(eur("100"), repo.readBook().incomeBalance("house"))
+        val receipt = credit.copy(id = "next-income", money = eur("100"))
+        store.append(TransactionAdded(receipt))
+        val debit = ProjectSettlement("next-settlement", ProjectPayment(receipt.money, receipt.money, receipt.date, receipt.id), mapOf(next.id to eur("100")), TransactionType.INCOME)
+        repo.saveFinance(credited.copy(settlements = credited.settlements + debit), credited, listOf(next))
+        store.rebuild()
+        assertEquals(eur("0"), repo.readBook().incomeBalance("house"))
     }
 
     @Test fun `finance operations announce dependencies survive sync replay and undo`() = runTest {

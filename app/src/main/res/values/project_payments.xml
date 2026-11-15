@@ -1,7 +1,8 @@
 <resources>
+    <string name="project_payment_balance">Balance</string>
     <string name="project_unpaid_income_tab">Unpaid to income</string>
     <string name="project_link_unpaid_income">Link unpaid to income</string>
-    <string name="project_choose_income">Select one income</string>
+    <string name="project_choose_income">Select income</string>
     <string name="project_income_linked">Paid through linked income</string>
     <string name="project_income_settle_hint">Select unpaid costs covered by money you received. Link one existing income to mark them paid, without adding another account transaction.</string>
     <string name="project_income_none">No available income. Add an income transaction first, or unlink one already used by a project.</string>
@@ -28,7 +29,7 @@
     <string name="project_payment_date">Payment date</string>
     <string name="project_payment_note">Note (optional)</string>
     <string name="project_confirm_repayment">Confirm receipt</string>
-    <string name="project_choose_expense">Select one expense</string>
+    <string name="project_choose_expense">Select expense</string>
     <string name="project_adjust_allocations">Adjust paid amounts</string>
     <string name="project_allocation_hint">Enter the actual paid amount per cost. The total must match the payment. Original estimates remain in history.</string>
     <string name="project_unassigned">Unassigned: %1$s</string>
