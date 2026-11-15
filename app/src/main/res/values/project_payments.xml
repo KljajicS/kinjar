@@ -1,4 +1,15 @@
 <resources>
+    <string name="project_review_income">Review payment</string>
+    <string name="project_income_received">Income received: %1$s</string>
+    <string name="project_income_keep_costs">Selected bills will be marked paid at their original amounts.</string>
+    <string name="project_carry_difference">Carry difference into balance</string>
+    <string name="project_carry_required">Amounts differ. Enable carry forward, change the selected bills, or choose another income before saving.</string>
+    <string name="project_income_credit">Credit carried forward: %1$s</string>
+    <string name="project_income_shortfall">Debt carried forward: %1$s</string>
+    <string name="project_income_exact">Payment matches selected bills: %1$s difference</string>
+    <string name="project_income_resulting_balance">Project balance after saving: %1$s</string>
+    <string name="project_income_other_unpaid">%1$d other unpaid bill(s), totaling %2$s, are not selected. You have %3$s extra income. Change selection to cover more bills, or enable carry forward and save the credit. Unselected bills stay unpaid.</string>
+    <string name="project_change_selection">Change selected bills</string>
     <string name="project_payment_balance">Balance</string>
     <string name="project_unpaid_income_tab">Unpaid to income</string>
     <string name="project_link_unpaid_income">Link unpaid to income</string>
