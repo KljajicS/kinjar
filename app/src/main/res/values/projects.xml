@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="project_category_monthly_expect">Expect an expense each month</string>
+    <string name="project_category_monthly_enabled">Monthly expense expected</string>
+    <string name="project_category_monthly_hint">Show when this category has no recorded project cost this month. Unpaid costs count too.</string>
+    <string name="project_monthly_expenses">Monthly expenses</string>
+    <string name="project_monthly_complete">All monthly expenses recorded</string>
+    <string name="project_monthly_missing">Missing: %1$s</string>
     <string name="tab_projects">Projects</string>
     <string name="projects_title">Projects</string>
     <string name="projects_goals_title">Savings goals</string>

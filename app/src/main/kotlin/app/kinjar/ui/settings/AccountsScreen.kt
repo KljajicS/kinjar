@@ -56,6 +56,7 @@ import app.kinjar.ui.theme.BodyStyle
 import app.kinjar.ui.theme.ConfirmDialog
 import app.kinjar.ui.theme.DangerLink
 import app.kinjar.ui.theme.FieldBox
+import app.kinjar.ui.theme.InfoButton
 import app.kinjar.ui.theme.LabelStyle
 import app.kinjar.ui.theme.LoadingOrError
 import app.kinjar.ui.theme.LocalColors
@@ -151,10 +152,8 @@ fun EditAccountScreen(onClose: () -> Unit, vm: EditAccountViewModel = hiltViewMo
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.account_exclude_goals), style = BodyStyle, color = c.text)
-                    Text(stringResource(R.string.account_exclude_goals_hint), style = LabelStyle, color = c.muted)
-                }
+                Text(stringResource(R.string.account_exclude_goals), style = BodyStyle, color = c.text, modifier = Modifier.weight(1f))
+                InfoButton(stringResource(R.string.account_exclude_goals), stringResource(R.string.account_exclude_goals_hint))
                 Switch(checked = s.excludedFromGoals, onCheckedChange = null)
             }
             if (s.editing) {

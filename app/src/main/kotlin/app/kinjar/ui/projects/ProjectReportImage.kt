@@ -28,7 +28,10 @@ internal fun reportPageLines(bottoms: List<Int>, pageHeight: Int): List<IntRange
     return pages
 }
 
-internal fun writeProjectReportImages(report: String, directory: File, correctionLabel: String): List<File> {
+internal fun reportLineEmphasized(line: String, monthlyLabel: String): Boolean =
+    line.isNotBlank() && !line.startsWith("• ") && !line.startsWith("$monthlyLabel · ")
+
+internal fun writeProjectReportImages(report: String, directory: File, correctionLabel: String, monthlyLabel: String): List<File> {
     check(directory.isDirectory || directory.mkdirs())
     val accent = Color.rgb(64, 70, 180)
     val correctionInk = Color.rgb(139, 78, 20)
@@ -40,7 +43,7 @@ internal fun writeProjectReportImages(report: String, directory: File, correctio
     val panels = mutableListOf<Pair<IntRange, Int>>()
     var offset = 0
     body.lines().forEach { line ->
-        if (line.isNotBlank() && !line.startsWith("• ")) {
+        if (reportLineEmphasized(line, monthlyLabel)) {
             val correction = line.startsWith("$correctionLabel:")
             text.setSpan(StyleSpan(Typeface.BOLD), offset, offset + line.length, 0)
             text.setSpan(ForegroundColorSpan(if (correction) correctionInk else accent), offset, offset + line.length, 0)

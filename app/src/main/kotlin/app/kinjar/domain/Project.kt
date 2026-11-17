@@ -31,6 +31,7 @@ data class ProjectCategory(
     val color: String,
     val archived: Boolean = false,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val excludedFromReport: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val monthlyExpenseExpected: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && projectId.isNotBlank() && name.isNotBlank() && name.length <= 100)

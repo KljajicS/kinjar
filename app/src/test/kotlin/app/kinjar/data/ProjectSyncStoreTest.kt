@@ -66,6 +66,31 @@ class ProjectSyncStoreTest {
         assertEquals(listOf(tx), repo.readBook().transactions)
     }
 
+    @Test fun `monthly expectation survives replay rename archive restore and disabling`() = runTest {
+        enrolled()
+        val category = ProjectCategory("bills", project.id, "Bills", "#123456")
+        repo.saveCategory(category)
+        val enabled = category.copy(monthlyExpenseExpected = true)
+        repo.saveCategory(enabled, category)
+        assertEquals(listOf(5, 10), db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload).version }.sorted())
+        store.rebuild()
+        assertEquals(enabled, repo.readBook().categories.single())
+        assertTrue(runCatching { repo.saveCategory(category.copy(name = "Stale"), category) }.exceptionOrNull() is IllegalArgumentException)
+        val archived = enabled.copy(name = "Utilities", archived = true)
+        repo.saveCategory(archived, enabled)
+        store.rebuild()
+        assertEquals(archived, repo.readBook().categories.single())
+        val restored = archived.copy(archived = false)
+        repo.saveCategory(restored, archived)
+        store.rebuild()
+        assertEquals(restored, repo.readBook().categories.single())
+        val disabled = restored.copy(monthlyExpenseExpected = false)
+        repo.saveCategory(disabled, restored)
+        store.rebuild()
+        store.validateHistory(store.snapshot())
+        assertEquals(disabled, repo.readBook().categories.single())
+    }
+
     @Test fun `category report preference survives sync replay rename archive and restore`() = runTest {
         enrolled()
         val category = ProjectCategory("bills", project.id, "Bills", "#123456", excludedFromReport = true)

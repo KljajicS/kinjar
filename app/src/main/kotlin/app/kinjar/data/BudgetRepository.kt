@@ -110,7 +110,7 @@ class BudgetRepository(
         db.txQueries.recent(limit.toLong()).asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toRecent() } }.flowOn(Dispatchers.Default)
 
     /** Re-reads the date once a minute so a screen left open over midnight on the 1st moves to the new month. */
-    private val today: Flow<LocalDate> = flow {
+    val today: Flow<LocalDate> = flow {
         while (true) {
             emit(clock.today())
             delay(60_000)

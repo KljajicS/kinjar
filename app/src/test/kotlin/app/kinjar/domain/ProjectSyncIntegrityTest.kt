@@ -45,6 +45,19 @@ class ProjectSyncIntegrityTest {
         assertThrows(IllegalArgumentException::class.java) { OperationCodec.decode(downgraded.toByteArray()) }
     }
 
+    @Test fun `monthly expectation requires version ten even with report exclusion`() {
+        val category = ProjectCategory("bills", project.id, "Bills", "#123456", monthlyExpenseExpected = true)
+        listOf(category, category.copy(excludedFromReport = true)).forEach { value ->
+            val operation = SyncOperation("family", "dataset", "user", "device", 1, emptySet(),
+                mapOf("project:house" to ResourceAccess.WRITE), listOf(OperationEvent("event", "device", 1, 1, ProjectCategorySaved(value))))
+            assertEquals(10, operation.version)
+            val bytes = OperationCodec.encode(operation)
+            assertEquals(operation, OperationCodec.decode(bytes))
+            val downgraded = String(bytes).replace("\"version\":10", "\"version\":9")
+            assertThrows(IllegalArgumentException::class.java) { OperationCodec.decode(downgraded.toByteArray()) }
+        }
+    }
+
     @Test fun `duplicate project link and forged removal are rejected without losing prior link`() {
         val other = project.copy(id = "garden", name = "Garden")
         val integrity = FinancialIntegrity().applying(baseline + ProjectSaved(other) + ProjectCostSaved(cost), true)

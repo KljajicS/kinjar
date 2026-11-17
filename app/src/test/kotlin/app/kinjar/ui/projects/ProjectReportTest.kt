@@ -6,6 +6,7 @@ import app.kinjar.domain.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.time.LocalDate
+import java.util.Locale
 
 class ProjectReportTest {
     private val day = LocalDate.of(2026, 11, 15)
@@ -20,15 +21,38 @@ class ProjectReportTest {
         return ProjectBook(listOf(project), listOf(ProjectCategory("electric", "p", "Struja", "#123456"), ProjectCategory("water", "p", "Voda", "#123456")),
             listOf(old, electricity, water), listOf(tx), listOf(ProjectFinance("p", settlements = listOf(settlement))))
     }
-    private fun report(book: ProjectBook) = projectReport(project, book, day) {
+    private fun report(book: ProjectBook) = projectReport(project, book, day, Locale.ENGLISH) {
         when (it) {
             R.string.project_report_title -> "Izveštaj"
             R.string.project_report_adjustment -> "Korekcija"
             R.string.project_report_prepaid -> "plaćeno ranije"
             R.string.project_report_previous_debt -> "dug od ranije"
             R.string.project_report_to_send -> "Ukupno za plaćanje"
+            R.string.project_monthly_expenses -> "Monthly expenses"
+            R.string.project_monthly_complete -> "All monthly expenses recorded"
+            R.string.project_monthly_missing -> "Missing: %1\$s"
             else -> it.toString()
         }
+    }
+
+    @Test fun `checklist uses all recorded costs without changing payable amounts`() {
+        val original = book().copy(costs = listOf(old, water.copy(unpaid = false)))
+        val enabled = original.copy(categories = original.categories.map { it.copy(monthlyExpenseExpected = true) })
+        assertEquals(report(original) + "\nMonthly expenses · November 2026: Missing: Struja\n", report(enabled))
+        val complete = enabled.copy(costs = enabled.costs + electricity)
+        assertTrue(report(complete).endsWith("Monthly expenses · November 2026: All monthly expenses recorded\n"))
+    }
+
+    @Test fun `report checklist excludes hidden and archived categories`() {
+        val original = book().copy(costs = emptyList(), finances = emptyList())
+        val enabled = original.copy(categories = original.categories.map { it.copy(monthlyExpenseExpected = true, excludedFromReport = it.id == "water") })
+        val text = report(enabled)
+        assertTrue(text.endsWith("Monthly expenses · November 2026: Missing: Struja\n"))
+        assertFalse(text.contains("Voda"))
+        assertFalse(report(enabled.copy(categories = enabled.categories.map { it.copy(archived = true) })).contains("Monthly expenses"))
+        assertFalse(report(enabled.copy(categories = enabled.categories.map { it.copy(excludedFromReport = true) })).contains("Monthly expenses"))
+        val archived = projectReport(project.copy(archived = true), enabled, day, Locale.ENGLISH) { "label-$it" }
+        assertFalse(archived.contains("label-${R.string.project_monthly_expenses}"))
     }
 
     @Test fun `category report deducts previous overpayment exactly once`() {

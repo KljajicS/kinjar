@@ -26,6 +26,10 @@ class WriteOperation(private val scope: CoroutineScope, private val diagnosticOp
         if (!mutableState.value.busy) mutableState.value = mutableState.value.copy(failed = false)
     }
 
+    fun reset() {
+        if (!mutableState.value.busy) mutableState.value = WriteState()
+    }
+
     fun run(finish: Boolean = true, action: suspend () -> Unit) {
         val current = mutableState.value
         if (current.busy || current.finished) return

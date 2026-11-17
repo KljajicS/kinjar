@@ -118,6 +118,7 @@
     <string name="add_to_account">To account</string>
     <string name="add_date">Date</string>
     <string name="dialog_ok">OK</string>
+    <string name="help_about">About %1$s</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="add_merchant">Merchant or note</string>
     <string name="add_save_expense">Save expense</string>

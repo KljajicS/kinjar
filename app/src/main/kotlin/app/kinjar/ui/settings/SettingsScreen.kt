@@ -36,6 +36,7 @@ import app.kinjar.ui.security.message
 import app.kinjar.R
 import app.kinjar.ui.theme.CaptionStyle
 import app.kinjar.ui.theme.LocalColors
+import app.kinjar.ui.theme.InfoButton
 import app.kinjar.ui.theme.OutlinedBox
 import app.kinjar.ui.theme.RoundIconButton
 import app.kinjar.ui.theme.TitleStyle
@@ -85,10 +86,8 @@ private fun AppLockRow(vm: AppLockViewModel) {
         padding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_app_lock), style = sans(15, FontWeight.Medium), color = c.text)
-                Text(stringResource(R.string.settings_app_lock_hint), style = CaptionStyle, color = c.muted)
-            }
+            Text(stringResource(R.string.settings_app_lock), style = sans(15, FontWeight.Medium), color = c.text, modifier = Modifier.weight(1f))
+            InfoButton(stringResource(R.string.settings_app_lock), stringResource(R.string.settings_app_lock_hint))
             Switch(
                 checked = s.enabled,
                 onCheckedChange = null,

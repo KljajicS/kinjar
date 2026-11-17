@@ -3,6 +3,7 @@ package app.kinjar.ui.projects
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.kinjar.R
 import app.kinjar.data.BudgetRepository
 import app.kinjar.data.Clock
 import app.kinjar.data.ProjectBook
@@ -16,14 +17,18 @@ import app.kinjar.domain.ProjectCategory
 import app.kinjar.domain.ProjectCost
 import app.kinjar.domain.Transaction
 import app.kinjar.ui.WriteOperation
+import app.kinjar.ui.monthName
 import app.kinjar.ui.settings.Loadable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.time.YearMonth
+import java.util.Locale
 import javax.inject.Inject
 
 data class CategoryTotal(val category: ProjectCategory?, val total: Money)
@@ -36,6 +41,20 @@ fun sum(costs: List<ProjectCost>, currency: Currency): Money =
 fun includedCosts(costs: List<ProjectCost>, categories: List<ProjectCategory>): List<ProjectCost> {
     val excluded = categories.filter { it.excludedFromReport }.map { it.id }.toSet()
     return costs.filter { it.categoryId !in excluded }
+}
+
+fun missingMonthlyCategories(project: Project, categories: List<ProjectCategory>, costs: List<ProjectCost>, month: YearMonth): List<ProjectCategory>? {
+    if (project.archived) return null
+    val expected = categories.filter { it.projectId == project.id && !it.archived && it.monthlyExpenseExpected }
+    if (expected.isEmpty()) return null
+    val recorded = costs.filter { it.projectId == project.id && YearMonth.from(it.date) == month }.map { it.categoryId }.toSet()
+    return expected.filter { it.id !in recorded }.sortedWith(compareBy({ it.name.lowercase(Locale.ROOT) }, { it.id }))
+}
+
+fun monthlyExpenseStatus(month: YearMonth, missing: List<ProjectCategory>, locale: Locale, label: (Int) -> String): String {
+    val status = if (missing.isEmpty()) label(R.string.project_monthly_complete)
+        else String.format(locale, label(R.string.project_monthly_missing), missing.joinToString(", ") { it.name })
+    return "${label(R.string.project_monthly_expenses)} · ${monthName(month, locale)} ${month.year}: $status"
 }
 
 /** Largest first; a cost whose category is gone counts as uncategorized. */
@@ -84,6 +103,7 @@ class ProjectViewModel @Inject constructor(
     private val projects: ProjectRepository, repo: BudgetRepository, val clock: Clock, saved: SavedStateHandle,
 ) : ViewModel() {
     val id: String = requireNotNull(saved["id"])
+    val today = repo.today.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), clock.today())
     val writes = WriteOperation(viewModelScope)
     private val load = Loadable(viewModelScope, combine(projects.book, repo.allCategories, repo.allAccounts, ::ProjectData))
     val data: StateFlow<ProjectData?> = load.state

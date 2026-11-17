@@ -40,6 +40,19 @@ class BackupCodecTest {
         assertEquals(HistoryStream.summarize(large.source().records()).digest, HistoryStream.summarize(records.asSequence()).digest)
     }
 
+    @Test fun `monthly category preference survives encrypted backup restore`() {
+        val project = Project("p", "Bills")
+        val category = ProjectCategory("water", project.id, "Water", "#123456", monthlyExpenseExpected = true)
+        val source = FamilyHistory(baseline = listOf(
+            OperationEvent("project", "old", 1, 0, ProjectSaved(project)),
+            OperationEvent("category", "old", 2, 0, ProjectCategorySaved(category)),
+        ), operations = emptyList())
+        val (_, records) = openStream(sealStream(source))
+        assertEquals(source.source().records().toList(), records)
+        val restored = (records.last() as HistoryRecord.Baseline).event.event as ProjectCategorySaved
+        assertTrue(restored.category.monthlyExpenseExpected)
+    }
+
     @Test fun `version 1 backups open through the streaming reader`() {
         val at = Instant.parse("2026-11-04T10:00:00Z")
         val (createdAt, records) = openStream(BackupCodec.seal(history, password, at))
