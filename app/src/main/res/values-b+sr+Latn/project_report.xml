@@ -2,7 +2,8 @@
     <string name="project_category_report_include">Uključi u izveštaje i grafikone</string>
     <string name="project_category_report_excluded">Isključeno iz izveštaja i grafikona</string>
     <string name="project_category_report_hint">Kada je isključeno, postojeći i budući troškovi ove kategorije ne ulaze u stavke i zbir izveštaja ni u grafikone projekta. Troškovi i stanje projekta ostaju nepromenjeni.</string>
-    <string name="project_report_excluded_notice">Broj isključenih kategorija: %1$d. Podesite ih u podešavanjima projekta. Provera mesečnih troškova takođe izostavlja ove kategorije. Preplata i prethodni dug i dalje važe za ceo projekat.</string>
+    <string name="project_report_excluded_notice">Broj isključenih kategorija: %1$d. Podesite ih u podešavanjima projekta. Preplata i prethodni dug i dalje važe za ceo projekat.</string>
+    <string name="project_report_monthly_excluded_notice">Provera mesečnih troškova takođe izostavlja ove kategorije.</string>
     <string name="project_report_selected_categories">Samo izabrane kategorije</string>
     <string name="project_report_title">Izveštaj</string>
     <string name="project_report_export">Neplaćeni računi</string>

@@ -2,7 +2,8 @@
     <string name="project_category_report_include">Include in reports and charts</string>
     <string name="project_category_report_excluded">Excluded from reports and charts</string>
     <string name="project_category_report_hint">When off, existing and future costs in this category are excluded from report rows, report totals and project charts. Project spending and balances stay unchanged.</string>
-    <string name="project_report_excluded_notice">Excluded categories: %1$d. Manage in project settings. Monthly expense checks also exclude these categories. Credit and previous debt still apply to the whole project.</string>
+    <string name="project_report_excluded_notice">Excluded categories: %1$d. Manage in project settings. Credit and previous debt still apply to the whole project.</string>
+    <string name="project_report_monthly_excluded_notice">Monthly expense checks also exclude these categories.</string>
     <string name="project_report_selected_categories">Selected categories only</string>
     <string name="project_report_title">Report</string>
     <string name="project_report_export">Unpaid report</string>

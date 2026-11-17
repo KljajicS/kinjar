@@ -35,6 +35,9 @@ fun ProjectReportDialog(project: Project, data: ProjectData, today: LocalDate, o
     val resources = LocalResources.current
     val report = projectReport(project, data.book, today, LocalLocale.current.platformLocale) { resources.getString(it) }
     val excludedCount = data.book.categories.count { it.projectId == project.id && it.excludedFromReport }
+    val monthlyExcluded = !project.archived && data.book.categories.any {
+        it.projectId == project.id && !it.archived && it.excludedFromReport && it.monthlyExpenseExpected
+    }
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
@@ -56,6 +59,7 @@ fun ProjectReportDialog(project: Project, data: ProjectData, today: LocalDate, o
         text = {
             LazyColumn(Modifier.heightIn(max = 480.dp)) {
                 if (excludedCount > 0) item { Hint(stringResource(R.string.project_report_excluded_notice, excludedCount)) }
+                if (monthlyExcluded) item { Hint(stringResource(R.string.project_report_monthly_excluded_notice)) }
                 if (failed) item { Text(stringResource(R.string.project_report_error)) }
                 if (files == null && !failed) item { CircularProgressIndicator() }
                 items(files.orEmpty(), key = { it.path }) { file ->
