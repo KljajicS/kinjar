@@ -15,7 +15,8 @@ import app.kinjar.domain.ProjectCategory
 import app.kinjar.domain.ProjectFinance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -45,7 +46,7 @@ class ProjectSettingsSaveTest {
     }
 
     @After fun tearDown() {
-        vm.viewModelScope.cancel()
+        runTest(dispatcher) { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
         Dispatchers.resetMain()
     }
 
