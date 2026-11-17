@@ -23,6 +23,42 @@ class ProjectSyncStoreTest {
         store.activate("user", "family", "dataset", "member", 1, history, HistoryCodec.digest(HistoryCodec.encode(history)), true)
     }
 
+    @Test fun `category deletion syncs to another phone and survives replay`() = runTest {
+        enrolled()
+        val category = ProjectCategory("test", project.id, "Test", "#123456")
+        repo.saveCategory(category)
+        val before = store.snapshot()
+        val peerDb = testDb()
+        val peer = EventStore(peerDb, "peer", clock, Projector(peerDb))
+        peer.activate("user", "family", "dataset", "member", 1, before, peer.currentDigest(), true)
+        repo.removeCategory(category)
+        val operation = db.syncOperationQueries.all().executeAsList().map { OperationCodec.decode(it.payload) }.single { it.version == 11 }
+        assertEquals(ResourceAccess.WRITE, operation.resources["project:house"])
+        assertEquals(ResourceAccess.WRITE, operation.resources["project-category:test"])
+        peer.receive(listOf(OperationCodec.encode(operation)), "user", "family", "dataset", 100, 0, operation.id)
+        peer.rebuild()
+        peer.validateHistory(peer.snapshot())
+        assertTrue(ProjectRepository(peerDb, peer, clock).readBook().categories.isEmpty())
+        assertTrue(peerDb.syncQuarantineQueries.all().executeAsList().isEmpty())
+    }
+
+    @Test fun `concurrent expense and category deletion conflict without losing category`() = runTest {
+        enrolled()
+        val category = ProjectCategory("test", project.id, "Test", "#123456")
+        repo.saveCategory(category)
+        val parent = db.syncOperationQueries.all().executeAsList().single().id
+        repo.removeCategory(category)
+        val bill = cost.copy(categoryId = category.id, transactionId = null)
+        val operation = SyncOperation("family", "dataset", "peer", "peer", 1, setOf(parent),
+            mapOf("project:house" to ResourceAccess.WRITE, "project-category:test" to ResourceAccess.READ),
+            listOf(OperationEvent("peer-cost", "peer", 1, clock.now().toEpochMilli(), ProjectCostSaved(bill))))
+        store.receive(listOf(OperationCodec.encode(operation)), "user", "family", "dataset", 100, 0, operation.id)
+        assertEquals(listOf(category), repo.readBook().categories)
+        assertTrue(repo.readBook().costs.isEmpty())
+        assertEquals(2, db.syncConflictQueries.all().executeAsList().size)
+        assertTrue(db.syncQuarantineQueries.all().executeAsList().isEmpty())
+    }
+
     @Test fun `project link announces dependencies and survives synced replay`() = runTest {
         enrolled()
         repo.record(listOf(cost))

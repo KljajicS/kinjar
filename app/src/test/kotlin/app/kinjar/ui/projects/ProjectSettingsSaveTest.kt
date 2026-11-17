@@ -76,6 +76,19 @@ class ProjectSettingsSaveTest {
         assertTrue(vm.categoryWrites.state.value.finished)
     }
 
+    @Test fun `category deletion finishes editor and stale deletion leaves it open`() = runTest(dispatcher) {
+        seed()
+        val renamed = category.copy(name = "Water bill")
+        projects.saveCategory(renamed, category)
+        vm.removeCategory(category)
+        assertTrue(vm.categoryWrites.state.first { !it.busy }.failed)
+        assertFalse(vm.categoryWrites.state.value.finished)
+        vm.categoryWrites.reset()
+        vm.removeCategory(renamed)
+        assertTrue(vm.categoryWrites.state.first { !it.busy }.finished)
+        assertTrue(projects.readBook().categories.isEmpty())
+    }
+
     @Test fun `stale category save keeps editor open and preserves stored version`() = runTest(dispatcher) {
         seed()
         val changedElsewhere = category.copy(name = "Water bill")

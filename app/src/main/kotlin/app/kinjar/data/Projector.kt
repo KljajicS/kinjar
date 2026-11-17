@@ -37,6 +37,7 @@ import app.kinjar.domain.LoanPrincipalAdjusted
 import app.kinjar.domain.LoanReceiptLinked
 import app.kinjar.domain.ProjectSaved
 import app.kinjar.domain.ProjectCategorySaved
+import app.kinjar.domain.ProjectCategory
 import app.kinjar.domain.ProjectCostSaved
 import app.kinjar.domain.ProjectCostRemoved
 import app.kinjar.domain.ProjectFinanceSaved
@@ -50,6 +51,9 @@ class Projector(private val db: KinjarDb) {
             is ProjectFinanceSaved -> db.projectFinanceQueries.save(e.finance.projectId, EventJson.encodeToString(e.finance))
             is ProjectSaved -> db.projectQueries.save(e.project.id, EventJson.encodeToString(e.project))
             is ProjectCategorySaved -> with(e.category) {
+                val previous = db.projectCategoryQueries.byId(id).executeAsOneOrNull()
+                    ?.let { EventJson.decodeFromString<ProjectCategory>(it.payload) }
+                if (previous?.removed == true) return
                 db.projectCategoryQueries.save(id, projectId, EventJson.encodeToString(this))
             }
             is ProjectCostSaved -> with(e.cost) {

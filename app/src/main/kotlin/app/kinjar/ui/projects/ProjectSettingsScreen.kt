@@ -172,7 +172,7 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
     editing?.let { key ->
         val categories = d.categories(project.id)
         val existing = categories.find { it.id == key }
-        if (key == NEW || existing != null) CategoryEditor(existing, categories, vm) { editing = null }
+        if (key == NEW || existing != null) CategoryEditor(existing, categories, d.book.costs.any { it.categoryId == key }, vm) { editing = null }
     }
     creditBase?.let { json ->
         val base = remember(json) { EventJson.decodeFromString(ProjectFinance.serializer(), json) }
@@ -206,7 +206,7 @@ private fun OpeningCreditEditor(base: ProjectFinance, currency: app.kinjar.domai
 private const val NEW = "new"
 
 @Composable
-private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory>, vm: ProjectSettingsViewModel, onDone: () -> Unit) {
+private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory>, hasCosts: Boolean, vm: ProjectSettingsViewModel, onDone: () -> Unit) {
     val base = remember(existing?.id) { existing }
     val c = LocalColors.current
     val write by vm.categoryWrites.state.collectAsStateWithLifecycle()
@@ -214,7 +214,16 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
     var color by rememberSaveable { mutableStateOf(existing?.color ?: unusedPaletteColor(all.filter { !it.archived }.map { it.color })) }
     var includedInReport by rememberSaveable { mutableStateOf(existing?.excludedFromReport != true) }
     var monthlyExpenseExpected by rememberSaveable { mutableStateOf(existing?.monthlyExpenseExpected == true) }
+    var deleting by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(write.finished) { if (write.finished) onDone() }
+    if (deleting && base != null) {
+        ConfirmDialog(stringResource(R.string.project_category_delete_title, base.name), stringResource(R.string.project_category_delete), write.busy,
+            { vm.removeCategory(base) }, { deleting = false }) {
+            Text(stringResource(R.string.project_category_delete_hint), style = sans(14), color = c.text)
+            WriteFeedback(vm.categoryWrites)
+        }
+        return
+    }
     val taken = isDuplicateCategoryName(name, all.filter { !it.archived && it.id != existing?.id }.map { it.name })
     val canSave = name.isNotBlank() && name.length <= 100 && !taken && !write.busy
     AlertDialog(
@@ -255,9 +264,13 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
                     InfoButton(stringResource(R.string.project_category_monthly_expect), stringResource(R.string.project_category_monthly_hint))
                     Switch(checked = monthlyExpenseExpected, onCheckedChange = null, enabled = !write.busy)
                 }
-                if (existing != null) DangerLink(
+                if (existing != null && (hasCosts || existing.archived)) DangerLink(
                     stringResource(if (existing.archived) R.string.project_category_restore else R.string.project_category_archive), enabled = !write.busy,
                 ) { vm.saveCategory(requireNotNull(base).copy(archived = !base.archived), base) }
+                if (existing != null && !hasCosts) DangerLink(stringResource(R.string.project_category_delete), enabled = !write.busy) {
+                    vm.categoryWrites.clearFailure()
+                    deleting = true
+                }
                 WriteFeedback(vm.categoryWrites)
             }
         },
