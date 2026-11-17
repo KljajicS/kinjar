@@ -662,11 +662,11 @@ test('version 2 manifests keep technical bounds, accept wide chunk ids and refus
   activate.update(doc(d, 'families/family'), { status: 'ACTIVE', action: 'activate' });
   await assertFails(activate.commit());
 });
-test('bootstraps accept history versions 2 through 8 only', async () => {
+test('bootstraps accept history versions 2 through 9 only', async () => {
   await seed(undefined, { status: 'INITIALIZING' });
   await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
   const stateRef = doc(db('owner'), 'families/family/datasets/current');
-  await assertFails(setDoc(stateRef, { ...initialState(), historyVersion: 9 }));
+  await assertFails(setDoc(stateRef, { ...initialState(), historyVersion: 10 }));
   await assertFails(setDoc(stateRef, { ...initialState(), historyVersion: '3' }));
   await assertSucceeds(setDoc(stateRef, { ...initialState(), historyVersion: 3 }));
   await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
@@ -680,7 +680,19 @@ test('bootstraps accept history versions 2 through 8 only', async () => {
   await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
   await assertSucceeds(setDoc(stateRef, { ...initialState(), historyVersion: 8 }));
   await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
+  await assertSucceeds(setDoc(stateRef, { ...initialState(), historyVersion: 9 }));
+  await env.withSecurityRulesDisabled(async c => deleteDoc(doc(c.firestore(), 'families/family/datasets/current')));
   await assertSucceeds(setDoc(stateRef, initialState()));
+});
+test('restore accepts history version 9 and rejects unsupported versions', async () => {
+  await seed();
+  const d = db('owner');
+  await assertSucceeds(startRestore(d));
+  const stateRef = doc(d, 'families/family/datasets/replacement');
+  const manifest = { ...initialState(), restoreToken: 'restore-token' };
+  await assertFails(setDoc(stateRef, { ...manifest, historyVersion: 10 }));
+  await assertFails(setDoc(stateRef, { ...manifest, historyVersion: '9' }));
+  await assertSucceeds(setDoc(stateRef, { ...manifest, historyVersion: 9 }));
 });
 test('a version 1 bootstrap started before the update can finish without changing its manifest', async () => {
   await seed(undefined, { status: 'INITIALIZING' });
