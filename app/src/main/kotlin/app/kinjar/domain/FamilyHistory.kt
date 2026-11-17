@@ -126,7 +126,7 @@ data class HistorySummary(val digest: String, val bytes: Long, val baselineCount
  * digests stored or confirmed before version 3 still compare equal.
  */
 object HistoryStream {
-    const val VERSION = 8
+    const val VERSION = 9
     const val DIGEST_PREFIX = "2:"
     private const val DIGEST_VERSION = 2
     const val MAX_LINE_BYTES = 1024 * 1024
