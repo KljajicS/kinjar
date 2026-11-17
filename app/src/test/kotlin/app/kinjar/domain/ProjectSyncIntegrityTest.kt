@@ -58,6 +58,32 @@ class ProjectSyncIntegrityTest {
         }
     }
 
+    @Test fun `category deletion requires version eleven before other preferences`() {
+        val category = ProjectCategory("test", project.id, "Test", "#123456", excludedFromReport = true, monthlyExpenseExpected = true, removed = true)
+        val operation = SyncOperation("family", "dataset", "user", "device", 1, emptySet(),
+            mapOf("project:house" to ResourceAccess.WRITE, "project-category:test" to ResourceAccess.WRITE),
+            listOf(OperationEvent("event", "device", 1, 1, ProjectCategorySaved(category))))
+        assertEquals(11, operation.version)
+        val bytes = OperationCodec.encode(operation)
+        assertEquals(operation, OperationCodec.decode(bytes))
+        assertThrows(IllegalArgumentException::class.java) {
+            OperationCodec.decode(String(bytes).replace("\"version\":11", "\"version\":10").toByteArray())
+        }
+    }
+
+    @Test fun `integrity rejects used category deletion and prevents resurrection`() {
+        val category = ProjectCategory("test", project.id, "Test", "#123456")
+        val bill = cost.copy(categoryId = category.id)
+        val integrity = FinancialIntegrity().applying(baseline + ProjectCategorySaved(category) + ProjectCostSaved(bill), true)
+        assertThrows(IllegalArgumentException::class.java) { integrity.applyAtomically(listOf(ProjectCategorySaved(category.copy(removed = true))), true) }
+        integrity.applyAtomically(listOf(ProjectCategorySaved(category.copy(archived = true))), true)
+        integrity.applyAtomically(listOf(ProjectCostRemoved(bill.id, project.id, tx.id)), true)
+        integrity.applyAtomically(listOf(ProjectCategorySaved(category.copy(archived = true, removed = true))), true)
+        assertThrows(IllegalArgumentException::class.java) { integrity.applyAtomically(listOf(ProjectCategorySaved(category)), true) }
+        assertThrows(IllegalArgumentException::class.java) { integrity.applyAtomically(listOf(ProjectCostSaved(bill.copy(id = "new"))), true) }
+        integrity.validate()
+    }
+
     @Test fun `duplicate project link and forged removal are rejected without losing prior link`() {
         val other = project.copy(id = "garden", name = "Garden")
         val integrity = FinancialIntegrity().applying(baseline + ProjectSaved(other) + ProjectCostSaved(cost), true)

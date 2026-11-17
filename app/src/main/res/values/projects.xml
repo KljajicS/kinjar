@@ -100,6 +100,9 @@
     <string name="project_category_edit">Edit category</string>
     <string name="project_category_name">Category name</string>
     <string name="project_category_archive">Archive category</string>
+    <string name="project_category_delete">Delete category</string>
+    <string name="project_category_delete_title">Delete “%1$s”?</string>
+    <string name="project_category_delete_hint">This empty category will be permanently removed from the project.</string>
     <string name="project_category_restore">Restore category</string>
     <string name="project_category_archived">Archived</string>
     <string name="project_archive">Archive project</string>

@@ -73,7 +73,7 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
 
     private fun snapshot() = ProjectBook(
         db.projectQueries.all().executeAsList().map { EventJson.decodeFromString<Project>(it.payload) },
-        db.projectCategoryQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectCategory>(it.payload) },
+        db.projectCategoryQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectCategory>(it.payload) }.filterNot { it.removed },
         db.projectCostQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectCost>(requireNotNull(it.payload)) },
         db.txQueries.all().executeAsList().map { it.toDomain() },
         db.projectFinanceQueries.all().executeAsList().map { EventJson.decodeFromString<ProjectFinance>(it.payload) },
@@ -152,12 +152,23 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
             activeProject(category.projectId)
             val old = category(category.id)
             require(old == expected) { "Category changed; reopen it" }
+            require(!category.removed && old?.removed != true) { "Category was deleted" }
             require(old == null || old.projectId == category.projectId) { "Category belongs to another project" }
             require(old != null || !category.archived) { "New categories start active" }
             require(category.archived || db.projectCategoryQueries.byProject(category.projectId).executeAsList()
                 .map { EventJson.decodeFromString<ProjectCategory>(it.payload) }
-                .none { it.id != category.id && !it.archived && it.name.trim().equals(category.name.trim(), ignoreCase = true) }
+                .none { it.id != category.id && !it.archived && !it.removed && it.name.trim().equals(category.name.trim(), ignoreCase = true) }
             ) { "Category name already used in this project" }
+        }
+    }
+
+    suspend fun removeCategory(expected: ProjectCategory) {
+        val removed = expected.copy(removed = true)
+        store.append(ProjectCategorySaved(removed)) {
+            activeProject(expected.projectId)
+            require(category(expected.id) == expected) { "Category changed; reopen it" }
+            require(!expected.removed) { "Category was deleted" }
+            validateProjectEvents(listOf(ProjectCategorySaved(removed)))
         }
     }
 
@@ -232,7 +243,7 @@ class ProjectRepository(private val db: KinjarDb, private val store: EventStore,
                 }
                 value.categoryId?.let { id ->
                     val category = category(id)
-                    require(category != null && category.projectId == target.id && (!category.archived || previous?.categoryId == id || unpaid?.categoryId == id)) {
+                    require(category != null && !category.removed && category.projectId == target.id && (!category.archived || previous?.categoryId == id || unpaid?.categoryId == id)) {
                         "Choose an active category of this project"
                     }
                 }

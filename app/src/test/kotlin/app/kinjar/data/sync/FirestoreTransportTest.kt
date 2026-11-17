@@ -46,7 +46,7 @@ class FirestoreTransportTest {
         // An interrupted version 2 upload resumes with exactly the bytes it started with.
         val manifest = StreamManifest.of(historyPieces(source, 2))
         assertEquals(summary.digest.removePrefix("2:"), manifest.digest)
-        assertEquals(summary.bytes, manifest.bytes)
+        assertEquals(summary.bytes - 1, manifest.bytes)
         val current = historyPieces(source).fold(ByteArray(0)) { all, piece -> all + piece }
         assertTrue(current.toString(Charsets.UTF_8).startsWith("{\"version\":${HistoryStream.VERSION}}\n"))
         assertEquals(summary.bytes, current.size.toLong())

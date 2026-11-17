@@ -54,8 +54,14 @@ internal class ProjectIntegrity(
                     if (strict) {
                         require(projects[value.projectId]?.archived == false) { "Unknown or archived project" }
                         require(categories[value.id]?.projectId?.let { it == value.projectId } != false) { "Category moved between projects" }
+                        val previous = categories[value.id]
+                        require(previous?.removed != true) { "Category was deleted" }
+                        if (value.removed) {
+                            require(previous != null && value == previous.copy(removed = true)) { "Category deletion changed its identity" }
+                            require(costs.values.none { it.categoryId == value.id }) { "Category has expenses; archive it instead" }
+                        }
                     }
-                    categories[value.id] = value
+                    if (categories[value.id]?.removed != true) categories[value.id] = value
                 }
                 is ProjectCostSaved -> {
                     val value = event.cost
@@ -97,7 +103,7 @@ internal class ProjectIntegrity(
         categories.values.forEach { require(it.projectId in projects) { "Unknown project category owner" } }
         costs.values.forEach { cost ->
             require(projects[cost.projectId]?.currency == cost.converted.currency) { "Project currency conversion incomplete" }
-            cost.categoryId?.let { require(categories[it]?.projectId == cost.projectId) { "Wrong project category" } }
+            cost.categoryId?.let { require(categories[it]?.let { category -> category.projectId == cost.projectId && !category.removed } == true) { "Wrong project category" } }
         }
         finances.values.forEach { finance ->
             val project = requireNotNull(projects[finance.projectId]) { "Unknown project" }

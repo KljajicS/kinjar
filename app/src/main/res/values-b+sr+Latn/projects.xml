@@ -101,6 +101,9 @@
     <string name="project_category_edit">Izmeni kategoriju</string>
     <string name="project_category_name">Naziv kategorije</string>
     <string name="project_category_archive">Arhiviraj kategoriju</string>
+    <string name="project_category_delete">Obriši kategoriju</string>
+    <string name="project_category_delete_title">Obrisati „%1$s“?</string>
+    <string name="project_category_delete_hint">Ova prazna kategorija će biti trajno uklonjena iz projekta.</string>
     <string name="project_category_restore">Vrati kategoriju</string>
     <string name="project_category_archived">Arhivirana</string>
     <string name="project_archive">Arhiviraj projekat</string>

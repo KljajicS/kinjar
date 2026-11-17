@@ -133,6 +133,8 @@ class ProjectSettingsViewModel @Inject constructor(
     fun saveCategory(category: ProjectCategory, expected: ProjectCategory? = null) =
         categoryWrites.run { projects.saveCategory(category, expected) }
 
+    fun removeCategory(category: ProjectCategory) = categoryWrites.run { projects.removeCategory(category) }
+
     fun newCategory(name: String, color: String, excludedFromReport: Boolean = false, monthlyExpenseExpected: Boolean = false) =
         saveCategory(ProjectCategory(newId(), id, name.trim(), color, excludedFromReport = excludedFromReport, monthlyExpenseExpected = monthlyExpenseExpected))
 
