@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -32,7 +33,7 @@ import kotlinx.coroutines.withContext
 fun ProjectReportDialog(project: Project, data: ProjectData, today: LocalDate, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
-    val report = projectReport(project, data.book, today) { resources.getString(it) }
+    val report = projectReport(project, data.book, today, LocalLocale.current.platformLocale) { resources.getString(it) }
     val excludedCount = data.book.categories.count { it.projectId == project.id && it.excludedFromReport }
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -42,7 +43,7 @@ fun ProjectReportDialog(project: Project, data: ProjectData, today: LocalDate, o
         failed = false
         try {
             value = withContext(Dispatchers.IO) {
-                writeProjectReportImages(report, File(context.cacheDir, "reports"), resources.getString(R.string.project_report_adjustment))
+                writeProjectReportImages(report, File(context.cacheDir, "reports"), resources.getString(R.string.project_report_adjustment), resources.getString(R.string.project_monthly_expenses))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

@@ -150,6 +150,7 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
                         Column(Modifier.weight(1f)) {
                             Text(category.name, style = sans(15, FontWeight.Medium), color = if (category.archived) c.muted else c.text)
                             if (category.excludedFromReport) Hint(stringResource(R.string.project_category_report_excluded))
+                            if (category.monthlyExpenseExpected) Hint(stringResource(R.string.project_category_monthly_enabled))
                         }
                         if (category.archived) Hint(stringResource(R.string.project_category_archived))
                     }
@@ -212,6 +213,7 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
     var name by rememberSaveable { mutableStateOf(existing?.name.orEmpty()) }
     var color by rememberSaveable { mutableStateOf(existing?.color ?: unusedPaletteColor(all.filter { !it.archived }.map { it.color })) }
     var includedInReport by rememberSaveable { mutableStateOf(existing?.excludedFromReport != true) }
+    var monthlyExpenseExpected by rememberSaveable { mutableStateOf(existing?.monthlyExpenseExpected == true) }
     var submitted by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(write.busy) { if (submitted && !write.busy && !write.failed) onDone() }
     val taken = isDuplicateCategoryName(name, all.filter { !it.archived && it.id != existing?.id }.map { it.name })
@@ -247,6 +249,14 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
                     Switch(checked = includedInReport, onCheckedChange = null, enabled = !write.busy)
                 }
                 Hint(stringResource(R.string.project_category_report_hint))
+                Row(
+                    Modifier.fillMaxWidth().toggleable(monthlyExpenseExpected, enabled = !write.busy, role = Role.Switch) { monthlyExpenseExpected = it },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.project_category_monthly_expect), style = sans(14), color = c.text, modifier = Modifier.weight(1f))
+                    Switch(checked = monthlyExpenseExpected, onCheckedChange = null, enabled = !write.busy)
+                }
+                Hint(stringResource(R.string.project_category_monthly_hint))
                 if (existing != null) DangerLink(
                     stringResource(if (existing.archived) R.string.project_category_restore else R.string.project_category_archive), enabled = !write.busy,
                 ) { submit { vm.saveCategory(requireNotNull(base).copy(archived = !base.archived), base) } }
@@ -256,8 +266,8 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
         confirmButton = {
             TextButton(onClick = {
                 submit {
-                    if (base == null) vm.newCategory(name, color, !includedInReport)
-                    else vm.saveCategory(base.copy(name = name.trim(), color = color, excludedFromReport = !includedInReport), base)
+                    if (base == null) vm.newCategory(name, color, !includedInReport, monthlyExpenseExpected)
+                    else vm.saveCategory(base.copy(name = name.trim(), color = color, excludedFromReport = !includedInReport, monthlyExpenseExpected = monthlyExpenseExpected), base)
                 }
             }, enabled = canSave) { Text(stringResource(R.string.project_save), color = if (canSave) c.primary else c.muted) }
         },

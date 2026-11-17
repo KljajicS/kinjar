@@ -133,8 +133,8 @@ class ProjectSettingsViewModel @Inject constructor(
     fun saveCategory(category: ProjectCategory, expected: ProjectCategory? = null) =
         categoryWrites.run(finish = false) { projects.saveCategory(category, expected) }
 
-    fun newCategory(name: String, color: String, excludedFromReport: Boolean = false) =
-        saveCategory(ProjectCategory(newId(), id, name.trim(), color, excludedFromReport = excludedFromReport))
+    fun newCategory(name: String, color: String, excludedFromReport: Boolean = false, monthlyExpenseExpected: Boolean = false) =
+        saveCategory(ProjectCategory(newId(), id, name.trim(), color, excludedFromReport = excludedFromReport, monthlyExpenseExpected = monthlyExpenseExpected))
 
     private companion object {
         const val FORM = "project.settings"

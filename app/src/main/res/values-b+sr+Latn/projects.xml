@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="project_category_monthly_expect">Očekuj trošak svakog meseca</string>
+    <string name="project_category_monthly_enabled">Očekuje se mesečni trošak</string>
+    <string name="project_category_monthly_hint">Prikaži kada ova kategorija nema evidentiran trošak projekta ovog meseca. Računaju se i neplaćeni troškovi.</string>
+    <string name="project_monthly_expenses">Mesečni troškovi</string>
+    <string name="project_monthly_complete">Svi mesečni troškovi su evidentirani</string>
+    <string name="project_monthly_missing">Nedostaje: %1$s</string>
     <string name="project_currency_too_large">Projekat je prevelik za promenu valute u jednom koraku. Valuta i troškovi nisu promenjeni.</string>
     <string name="project_cost_excluded">Trošak je obrisan ili mu je promenjen tip. Ne ulazi u zbir; možete ukloniti vezu.</string>
     <string name="tab_projects">Projekti</string>

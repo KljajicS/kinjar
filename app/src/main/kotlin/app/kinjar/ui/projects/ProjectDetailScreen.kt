@@ -26,6 +26,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -62,6 +64,7 @@ class ProjectActions(
 @Composable
 fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: ProjectViewModel = hiltViewModel()) {
     val loaded by vm.data.collectAsStateWithLifecycle()
+    val today by vm.today.collectAsStateWithLifecycle()
     val failed by vm.loadFailed.collectAsStateWithLifecycle()
     val write by vm.writes.state.collectAsStateWithLifecycle()
     // A removed cost drops out of the book, which closes its dialog; removal ids are never reused.
@@ -100,7 +103,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
             TextButton(onClick = { selection = arrayListOf() }) { Text(stringResource(R.string.dialog_cancel)) }
         }
     }) {
-        if (!all) overview(project, d, costs, stale, actions, vm.clock.today(), selected, onReport = { reporting = true })
+        if (!all) overview(project, d, costs, stale, actions, today, selected, onReport = { reporting = true })
         if (visible.isEmpty()) section("empty") { Hint(stringResource(R.string.project_costs_empty)) }
         if (eligible.isNotEmpty()) item("selection-hint") { Hint(stringResource(R.string.project_long_press_hint)) }
         items(visible, key = { it.id }) { cost ->
@@ -113,7 +116,7 @@ fun ProjectDetailScreen(actions: ProjectActions, all: Boolean = false, vm: Proje
             TextButton(onClick = actions.onAllCosts) { Text(stringResource(R.string.project_see_all, stored.size), color = c.primary) }
         }
     }
-    if (reporting) ProjectReportDialog(project, d, vm.clock.today()) { reporting = false }
+    if (reporting) ProjectReportDialog(project, d, today) { reporting = false }
     stored.find { it.id == acting }?.let { cost ->
         CostDialog(cost, project, cost.id in stale, write.busy, vm, d.book.settlementFor(cost.id) != null || !d.book.creditPaid(cost).isZero,
             onPayments = { acting = null; actions.onPayments() },
@@ -150,6 +153,12 @@ private fun LazyListScope.overview(
             IconButton(onClick = onReport) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowForward, stringResource(R.string.project_report_export), Modifier.size(20.dp), tint = c.primary)
             }
+        }
+        val month = YearMonth.from(today)
+        val resources = LocalResources.current
+        val locale = LocalLocale.current.platformLocale
+        missingMonthlyCategories(project, d.categories(project.id), costs, month)?.let { missing ->
+            Hint(monthlyExpenseStatus(month, missing, locale) { resources.getString(it) }, if (missing.isEmpty()) c.green else c.orange)
         }
         if (stale.isNotEmpty()) Hint(stringResource(R.string.project_review_needed, stale.size), c.orange)
         ProjectChart(costs, d.categories(project.id), project.currency, YearMonth.from(today))

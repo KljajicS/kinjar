@@ -7,8 +7,10 @@ import app.kinjar.domain.Project
 import app.kinjar.domain.TransactionType
 import app.kinjar.domain.reimbursementOutstanding
 import java.time.LocalDate
+import java.time.YearMonth
+import java.util.Locale
 
-fun projectReport(project: Project, book: ProjectBook, today: LocalDate, label: (Int) -> String): String = buildString {
+fun projectReport(project: Project, book: ProjectBook, today: LocalDate, locale: Locale = Locale.getDefault(), label: (Int) -> String): String = buildString {
     val categories = book.categories.filter { it.projectId == project.id }.associateBy { it.id }
     val costs = includedCosts(book.costsFor(project.id), categories.values.toList())
     val finance = book.finance(project.id)
@@ -47,5 +49,10 @@ fun projectReport(project: Project, book: ProjectBook, today: LocalDate, label: 
         finance.repayments.any { book.paymentNeedsReview(it.payment, TransactionType.INCOME) }) {
         appendLine()
         appendLine(label(R.string.project_report_review))
+    }
+    val month = YearMonth.from(today)
+    missingMonthlyCategories(project, categories.values.filter { !it.excludedFromReport }, costs, month)?.let { missing ->
+        appendLine()
+        appendLine(monthlyExpenseStatus(month, missing, locale, label))
     }
 }
