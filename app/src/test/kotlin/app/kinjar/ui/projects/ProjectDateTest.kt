@@ -6,7 +6,8 @@ import app.kinjar.data.*
 import app.kinjar.domain.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.*
 import org.junit.After
@@ -32,7 +33,7 @@ class ProjectDateTest {
     }
 
     @After fun tearDown() {
-        vm.viewModelScope.cancel()
+        runTest(dispatcher) { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
         Dispatchers.resetMain()
     }
 
