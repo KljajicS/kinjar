@@ -58,6 +58,7 @@ import app.kinjar.ui.unusedPaletteColor
 import app.kinjar.ui.theme.ConfirmDialog
 import app.kinjar.ui.theme.DangerLink
 import app.kinjar.ui.theme.FieldBox
+import app.kinjar.ui.theme.InfoButton
 import app.kinjar.ui.theme.LoadingOrError
 import app.kinjar.ui.theme.LocalColors
 import app.kinjar.ui.theme.OutlinedBox
@@ -118,7 +119,7 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
             }
             if (d.book.finances.any { it.projectId == project.id && (it.reimbursement != null || it.settlements.isNotEmpty() || it.repayments.isNotEmpty() || it.hasCredit) }) Hint(stringResource(R.string.project_finance_currency_locked))
             TextButton(onClick = {
-                vm.creditWrites.clearFailure()
+                vm.creditWrites.reset()
                 creditBase = EventJson.encodeToString(ProjectFinance.serializer(), d.book.finance(project.id))
             }, enabled = !write.busy) { Text(stringResource(R.string.project_opening_credit), color = c.primary) }
             Hint(stringResource(R.string.project_credit_available, money(d.book.incomeBalance(project.id))))
@@ -144,7 +145,7 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
             Text(stringResource(R.string.project_categories), style = SectionStyle, color = c.text)
             Hint(stringResource(R.string.project_categories_hint))
             d.categories(project.id).sortedBy { it.archived }.forEach { category ->
-                OutlinedBox(Modifier.fillMaxWidth(), radius = 14, onClick = { vm.categoryWrites.clearFailure(); editing = category.id }) {
+                OutlinedBox(Modifier.fillMaxWidth(), radius = 14, onClick = { vm.categoryWrites.reset(); editing = category.id }) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ColorDot(colorOf(category.color), 12.dp)
                         Column(Modifier.weight(1f)) {
@@ -156,7 +157,7 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
                     }
                 }
             }
-            TextButton(onClick = { vm.categoryWrites.clearFailure(); editing = NEW }) { Text(stringResource(R.string.project_category_add), color = c.primary) }
+            TextButton(onClick = { vm.categoryWrites.reset(); editing = NEW }) { Text(stringResource(R.string.project_category_add), color = c.primary) }
         }
         section("archive") {
             Hint(stringResource(R.string.project_archive_hint))
@@ -183,9 +184,8 @@ fun ProjectSettingsScreen(onBack: () -> Unit, onCurrency: () -> Unit, vm: Projec
 private fun OpeningCreditEditor(base: ProjectFinance, currency: app.kinjar.domain.Currency, vm: ProjectSettingsViewModel, onDone: () -> Unit) {
     val write by vm.creditWrites.state.collectAsStateWithLifecycle()
     var amount by rememberSaveable { mutableStateOf(base.openingCredit?.inputText().orEmpty()) }
-    var submitted by rememberSaveable { mutableStateOf(false) }
     val parsed = parseMoneyInput(amount, currency)?.takeUnless { it.isNegative }
-    LaunchedEffect(write.busy) { if (submitted && !write.busy && !write.failed) onDone() }
+    LaunchedEffect(write.finished) { if (write.finished) onDone() }
     AlertDialog(
         onDismissRequest = { if (!write.busy) onDone() },
         title = { Text(stringResource(R.string.project_opening_credit)) },
@@ -197,7 +197,7 @@ private fun OpeningCreditEditor(base: ProjectFinance, currency: app.kinjar.domai
             }
         },
         confirmButton = { TextButton(onClick = {
-            parsed?.let { submitted = true; vm.saveOpeningCredit(it, base) }
+            parsed?.let { vm.saveOpeningCredit(it, base) }
         }, enabled = parsed != null && !write.busy) { Text(stringResource(R.string.project_save)) } },
         dismissButton = { TextButton(onClick = onDone, enabled = !write.busy) { Text(stringResource(R.string.dialog_cancel)) } },
     )
@@ -214,11 +214,9 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
     var color by rememberSaveable { mutableStateOf(existing?.color ?: unusedPaletteColor(all.filter { !it.archived }.map { it.color })) }
     var includedInReport by rememberSaveable { mutableStateOf(existing?.excludedFromReport != true) }
     var monthlyExpenseExpected by rememberSaveable { mutableStateOf(existing?.monthlyExpenseExpected == true) }
-    var submitted by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(write.busy) { if (submitted && !write.busy && !write.failed) onDone() }
+    LaunchedEffect(write.finished) { if (write.finished) onDone() }
     val taken = isDuplicateCategoryName(name, all.filter { !it.archived && it.id != existing?.id }.map { it.name })
     val canSave = name.isNotBlank() && name.length <= 100 && !taken && !write.busy
-    fun submit(action: () -> Unit) { submitted = true; action() }
     AlertDialog(
         onDismissRequest = { if (!write.busy) onDone() },
         containerColor = c.bg,
@@ -246,29 +244,27 @@ private fun CategoryEditor(existing: ProjectCategory?, all: List<ProjectCategory
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(stringResource(R.string.project_category_report_include), style = sans(14), color = c.text, modifier = Modifier.weight(1f))
+                    InfoButton(stringResource(R.string.project_category_report_include), stringResource(R.string.project_category_report_hint))
                     Switch(checked = includedInReport, onCheckedChange = null, enabled = !write.busy)
                 }
-                Hint(stringResource(R.string.project_category_report_hint))
                 Row(
                     Modifier.fillMaxWidth().toggleable(monthlyExpenseExpected, enabled = !write.busy, role = Role.Switch) { monthlyExpenseExpected = it },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(stringResource(R.string.project_category_monthly_expect), style = sans(14), color = c.text, modifier = Modifier.weight(1f))
+                    InfoButton(stringResource(R.string.project_category_monthly_expect), stringResource(R.string.project_category_monthly_hint))
                     Switch(checked = monthlyExpenseExpected, onCheckedChange = null, enabled = !write.busy)
                 }
-                Hint(stringResource(R.string.project_category_monthly_hint))
                 if (existing != null) DangerLink(
                     stringResource(if (existing.archived) R.string.project_category_restore else R.string.project_category_archive), enabled = !write.busy,
-                ) { submit { vm.saveCategory(requireNotNull(base).copy(archived = !base.archived), base) } }
+                ) { vm.saveCategory(requireNotNull(base).copy(archived = !base.archived), base) }
                 WriteFeedback(vm.categoryWrites)
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                submit {
-                    if (base == null) vm.newCategory(name, color, !includedInReport, monthlyExpenseExpected)
-                    else vm.saveCategory(base.copy(name = name.trim(), color = color, excludedFromReport = !includedInReport, monthlyExpenseExpected = monthlyExpenseExpected), base)
-                }
+                if (base == null) vm.newCategory(name, color, !includedInReport, monthlyExpenseExpected)
+                else vm.saveCategory(base.copy(name = name.trim(), color = color, excludedFromReport = !includedInReport, monthlyExpenseExpected = monthlyExpenseExpected), base)
             }, enabled = canSave) { Text(stringResource(R.string.project_save), color = if (canSave) c.primary else c.muted) }
         },
         dismissButton = { TextButton(onClick = onDone, enabled = !write.busy) { Text(stringResource(R.string.dialog_cancel), color = c.text) } },

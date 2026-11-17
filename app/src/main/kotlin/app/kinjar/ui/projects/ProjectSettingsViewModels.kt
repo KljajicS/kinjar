@@ -126,12 +126,12 @@ class ProjectSettingsViewModel @Inject constructor(
 
     fun archive(archived: Boolean) = writes.run { projects.archive(id, archived) }
 
-    fun saveOpeningCredit(amount: Money, expected: ProjectFinance) = creditWrites.run(finish = false) {
+    fun saveOpeningCredit(amount: Money, expected: ProjectFinance) = creditWrites.run {
         projects.saveFinance(expected.copy(openingCredit = amount), expected)
     }
 
     fun saveCategory(category: ProjectCategory, expected: ProjectCategory? = null) =
-        categoryWrites.run(finish = false) { projects.saveCategory(category, expected) }
+        categoryWrites.run { projects.saveCategory(category, expected) }
 
     fun newCategory(name: String, color: String, excludedFromReport: Boolean = false, monthlyExpenseExpected: Boolean = false) =
         saveCategory(ProjectCategory(newId(), id, name.trim(), color, excludedFromReport = excludedFromReport, monthlyExpenseExpected = monthlyExpenseExpected))

@@ -3,6 +3,8 @@ package app.kinjar.ui.theme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,10 +28,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +68,27 @@ fun RoundIconButton(icon: ImageVector, contentDescription: String, onClick: () -
         Modifier.size(48.dp).clip(CircleShape).background(c.surface2).clickable(onClick = onClick, role = Role.Button),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, contentDescription, tint = c.text, modifier = Modifier.size(22.dp)) }
+}
+
+@Composable
+fun InfoButton(title: String, explanation: String) {
+    val c = LocalColors.current
+    val description = stringResource(R.string.help_about, title)
+    var open by rememberSaveable { mutableStateOf(false) }
+    IconButton(onClick = { open = true }, modifier = Modifier.size(48.dp).semantics { contentDescription = description }) {
+        Icon(Icons.Outlined.Info, contentDescription = null, tint = c.muted, modifier = Modifier.size(20.dp))
+    }
+    if (open) AlertDialog(
+        onDismissRequest = { open = false },
+        containerColor = c.surface2,
+        title = { Text(title, style = sans(18, FontWeight.SemiBold), color = c.text) },
+        text = {
+            Text(explanation, style = BodyStyle, color = c.text, modifier = Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()))
+        },
+        confirmButton = {
+            TextButton(onClick = { open = false }) { Text(stringResource(R.string.add_close), color = c.primary) }
+        },
+    )
 }
 
 @Composable
