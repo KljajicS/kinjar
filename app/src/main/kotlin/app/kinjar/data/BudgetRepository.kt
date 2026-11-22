@@ -63,6 +63,9 @@ import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.domain.newId
 import java.time.LocalDate
+import app.kinjar.domain.WeeklyBudget
+import app.kinjar.domain.WeeklyBudgetSet
+import app.kinjar.domain.weekStart
 
 data class RecentTx(val transaction: Transaction, val categoryName: String?, val paidByName: String?, val categoryIcon: String? = null)
 /** Another active category of the same kind already has this name, ignoring case and surrounding spaces. */
@@ -91,6 +94,25 @@ class BudgetRepository(
         db.categoryQueries.active().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
     val expenseCategories: Flow<List<Category>> = categories.map { all -> all.filter { it.kind == CategoryKind.EXPENSE } }
     val incomeCategories: Flow<List<Category>> = categories.map { all -> all.filter { it.kind == CategoryKind.INCOME } }
+
+    val weeklyBudgets: Flow<List<WeeklyBudget>> = db.weeklyBudgetQueries.all().asFlow().mapToList(Dispatchers.IO)
+        .map { rows -> rows.map { WeeklyBudget(it.category_id, LocalDate.parse(it.effective_from), it.amount?.let { amount -> Money.of(amount, Currency.RSD) }) } }
+
+    suspend fun setWeeklyBudget(budget: WeeklyBudget, expected: List<WeeklyBudget>) {
+        store.append(WeeklyBudgetSet(budget)) {
+            val category = db.categoryQueries.byId(budget.categoryId).executeAsOneOrNull()
+            require(category != null && category.archived == 0L && category.kind == CategoryKind.EXPENSE.name)
+            requireWeeklyBudgetUnchanged(budget, expected)
+        }
+    }
+
+    private fun requireWeeklyBudgetUnchanged(budget: WeeklyBudget, expected: List<WeeklyBudget>) {
+        val week = weekStart(clock.today())
+        require(budget.effectiveFrom == week || budget.effectiveFrom == week.plusWeeks(1))
+        val current = db.weeklyBudgetQueries.all().executeAsList().filter { it.category_id == budget.categoryId }
+            .map { WeeklyBudget(it.category_id, LocalDate.parse(it.effective_from), it.amount?.let { amount -> Money.of(amount, Currency.RSD) }) }
+        check(current == expected.filter { it.categoryId == budget.categoryId }) { "Budget changed; reopen the editor" }
+    }
 
     /** Archived rows included: history screens need the names and balances of things that no longer exist. */
     val allAccounts: Flow<List<Account>> =
@@ -197,12 +219,29 @@ class BudgetRepository(
     /** The kind is fixed at creation; an update without an icon keeps the stored one. */
     suspend fun updateCategory(category: Category) {
         val trimmed = category.copy(name = category.name.trim())
-        store.append(CategoryUpdated(trimmed)) {
-            val stored = requireNotNull(db.categoryQueries.byId(trimmed.id).executeAsOneOrNull()) { "Category no longer available" }
-            require(stored.kind == trimmed.kind.name) { "Category type cannot change" }
-            // Duplicates from before this check stay editable as long as the name does not change.
-            if (stored.name.normalizedName() != trimmed.name.normalizedName()) requireUniqueName(trimmed)
+        store.append(CategoryUpdated(trimmed)) { requireCategoryUpdate(trimmed) }
+    }
+
+    suspend fun saveCategoryWithBudget(category: Category, creating: Boolean, budget: WeeklyBudget?, expected: List<WeeklyBudget>) {
+        val trimmed = category.copy(name = category.name.trim())
+        val event = if (creating) CategoryCreated(trimmed) else CategoryUpdated(trimmed)
+        store.appendAll(listOfNotNull(event, budget?.let(::WeeklyBudgetSet))) {
+            if (creating) {
+                check(db.categoryQueries.byId(trimmed.id).executeAsOneOrNull() == null)
+                requireUniqueName(trimmed)
+            } else requireCategoryUpdate(trimmed)
+            if (budget != null) {
+                require(budget.categoryId == trimmed.id && !trimmed.archived && trimmed.kind == CategoryKind.EXPENSE)
+                requireWeeklyBudgetUnchanged(budget, expected)
+            }
         }
+    }
+
+    private fun requireCategoryUpdate(category: Category) {
+        val stored = requireNotNull(db.categoryQueries.byId(category.id).executeAsOneOrNull()) { "Category no longer available" }
+        require(stored.archived == 0L && stored.kind == category.kind.name) { "Category type cannot change" }
+        // Duplicates from before this check stay editable as long as the name does not change.
+        if (stored.name.normalizedName() != category.name.normalizedName()) requireUniqueName(category)
     }
 
     private fun requireUniqueName(category: Category) {

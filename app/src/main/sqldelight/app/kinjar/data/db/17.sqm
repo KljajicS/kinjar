@@ -1,0 +1,6 @@
+CREATE TABLE weekly_budget (
+    category_id TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    amount TEXT,
+    PRIMARY KEY (category_id, effective_from)
+);

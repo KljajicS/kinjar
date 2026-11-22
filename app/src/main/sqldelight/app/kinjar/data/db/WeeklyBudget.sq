@@ -1,0 +1,18 @@
+CREATE TABLE weekly_budget (
+    category_id TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    amount TEXT,
+    PRIMARY KEY (category_id, effective_from)
+);
+
+all:
+SELECT * FROM weekly_budget ORDER BY category_id, effective_from;
+
+fromWeek:
+DELETE FROM weekly_budget WHERE category_id = ? AND effective_from >= ?;
+
+upsert:
+INSERT OR REPLACE INTO weekly_budget(category_id, effective_from, amount) VALUES (?, ?, ?);
+
+deleteAll:
+DELETE FROM weekly_budget;

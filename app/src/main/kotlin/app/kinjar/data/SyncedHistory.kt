@@ -278,6 +278,10 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
                 is GoalAllocated -> { requireAccess("goal:${e.allocation.goalId}", false); requireAccess("allocation:${e.allocation.id}") }
                 is GoalAllocationDeleted -> requireAccess("allocation:${e.allocationId}")
                 is BudgetSet -> requireAccess("budget:${e.budget.categoryId}:${e.budget.month}")
+                is WeeklyBudgetSet -> {
+                    requireAccess("weekly-budget:${e.budget.categoryId}")
+                    requireAccess("category:${e.budget.categoryId}", false)
+                }
                 is BudgetRemoved -> requireAccess("budget:${e.categoryId}:${e.month}")
                 is ExchangeRateOverrideSet -> requireAccess("rate:${e.currency}")
             }

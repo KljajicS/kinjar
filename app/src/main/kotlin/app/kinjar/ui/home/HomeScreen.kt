@@ -83,7 +83,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onAdd: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
-    onGoal: (String) -> Unit,
+    onCategories: () -> Unit,
     onEditTransaction: (String) -> Unit = {}, vm: HomeViewModel = hiltViewModel(),
     conflicts: TransactionConflictViewModel = hiltViewModel(),
 ) {
@@ -126,7 +126,7 @@ fun HomeScreen(
         if (held.failed) item { ConflictCheckFailed(R.string.audit_conflict_list_failed, conflicts::retry) }
         item { SavingsCard(s, locale) }
         item { MonthSection(s, locale) }
-        s.topGoal?.let { goal -> item { HomeGoal(goal) { onGoal(goal.goal.id) } } }
+        if (s.budgets.isNotEmpty() || s.upcomingBudgets.isNotEmpty()) item { WeeklyBudgetsCard(s, onCategories) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -263,27 +263,6 @@ private fun MonthStat(title: String, value: Money, sign: Boolean, color: Color, 
     }
 }
 
-
-@Composable
-private fun HomeGoal(p: app.kinjar.domain.GoalProgress, onClick: () -> Unit) {
-    val c = LocalColors.current
-    val locale = LocalLocale.current.platformLocale
-    val ratio = p.ratio?.toFloat()?.coerceIn(0f, 1f)
-    OutlinedBox(Modifier.fillMaxWidth(), radius = 18, padding = PaddingValues(16.dp), onClick = onClick) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(p.goal.name, style = SectionStyle, color = c.text, modifier = Modifier.weight(1f))
-            Text(ratio?.let { "${(it * 100).toInt()}%" } ?: "-", style = mono(16), color = c.primary)
-        }
-        Spacer(Modifier.size(12.dp))
-        androidx.compose.material3.LinearProgressIndicator(
-            progress = { ratio ?: 0f }, modifier = Modifier.fillMaxWidth(),
-            color = if (p.reached) c.green else c.primary, trackColor = c.track,
-        )
-        Spacer(Modifier.size(8.dp))
-        Text("${p.funded?.let { formatAmount(it, locale = locale) } ?: "?"} / ${formatAmount(p.goal.target, locale = locale)} ${p.goal.target.currency}", style = LabelStyle, color = c.muted)
-        if (ratio == null) Text(stringResource(R.string.goals_unknown), style = CaptionStyle, color = c.orange)
-    }
-}
 
 @Composable
 internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: String?, today: LocalDate, onEdit: (String) -> Unit, held: Boolean = false) {

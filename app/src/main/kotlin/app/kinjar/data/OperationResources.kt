@@ -76,6 +76,10 @@ internal fun operationResources(events: List<Event>, db: KinjarDb): Map<String, 
             is GoalAllocated -> { read("goal:${event.allocation.goalId}"); write("allocation:${event.allocation.id}") }
             is GoalAllocationDeleted -> write("allocation:${event.allocationId}")
             is BudgetSet -> write("budget:${event.budget.categoryId}:${event.budget.month}")
+            is WeeklyBudgetSet -> {
+                write("weekly-budget:${event.budget.categoryId}")
+                read("category:${event.budget.categoryId}")
+            }
             is BudgetRemoved -> write("budget:${event.categoryId}:${event.month}")
             is ExchangeRateOverrideSet -> write("rate:${event.currency}")
             is LoanCreated -> write("loan:${event.loan.id}")

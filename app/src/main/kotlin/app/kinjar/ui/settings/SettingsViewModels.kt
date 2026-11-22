@@ -31,6 +31,8 @@ import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Currency
 import app.kinjar.domain.Money
 import app.kinjar.domain.RecurringRule
+import app.kinjar.domain.WeeklyBudget
+import app.kinjar.domain.weekStart
 import app.kinjar.domain.newId
 import java.time.LocalDate
 import app.kinjar.ui.CategoryPalette
@@ -123,10 +125,19 @@ data class EditCategoryState(
     val loaded: Boolean = true,
     val loadFailed: Boolean = false,
     val done: Boolean = false,
+    val budgetEnabled: Boolean = false,
+    val budgetAmount: String = "",
+    val budgetCurrent: Boolean = false,
+    val budgetEdited: Boolean = false,
+    val budgetWeek: LocalDate? = null,
+    val budgetStarts: LocalDate? = null,
 ) {
     val sameKind: List<Category> get() = others.filter { it.kind == kind }
     val nameTaken: Boolean get() = duplicate || isDuplicateCategoryName(name, sameKind.map { it.name })
-    val canSave: Boolean get() = name.isNotBlank() && loaded && !nameTaken && !done
+    val budgetLimit: Money? get() = parseMoneyInput(budgetAmount, Currency.RSD)?.takeIf { !it.isZero && !it.isNegative }
+    val effectiveFrom: LocalDate? get() = if (!budgetEdited && budgetStarts != null) budgetStarts else budgetWeek?.let { if (budgetCurrent) it else it.plusWeeks(1) }
+    val canSave: Boolean get() = name.isNotBlank() && loaded && !nameTaken && !done &&
+        (kind != CategoryKind.EXPENSE || !budgetEdited || (budgetWeek != null && (!budgetEnabled || budgetLimit != null)))
 }
 
 @HiltViewModel
@@ -138,6 +149,7 @@ class EditCategoryViewModel @Inject constructor(private val repo: BudgetReposito
     })
     val state: StateFlow<EditCategoryState> = _state
     private var original: Category? = null
+    private var expectedBudgets: List<WeeklyBudget> = emptyList()
     private var colorPicked = false
 
     /** A new category stays savable when this read fails; the repository still rejects duplicates. */
@@ -146,10 +158,17 @@ class EditCategoryViewModel @Inject constructor(private val repo: BudgetReposito
         val all = repo.categories.first()
         val c = if (id == null) null else requireNotNull(all.firstOrNull { it.id == id })
         val others = all.filter { it.id != id }
+        val week = weekStart(repo.today.first())
+        val schedule = repo.weeklyBudgets.first().filter { it.categoryId == id }
+        val budget = schedule.maxByOrNull { it.effectiveFrom }
+        expectedBudgets = schedule
         original = c
         _state.update { s ->
-            if (c == null) s.copy(others = others, color = if (colorPicked) s.color else unusedPaletteColor(others.map { it.color }))
+            val category = if (c == null) s.copy(others = others, color = if (colorPicked) s.color else unusedPaletteColor(others.map { it.color }))
             else s.copy(name = c.name, color = c.color, kind = c.kind, icon = c.icon, others = others, loaded = true, loadFailed = false)
+            category.copy(budgetWeek = week, budgetStarts = budget?.effectiveFrom,
+                budgetEnabled = if (s.budgetEdited) s.budgetEnabled else budget?.limit != null,
+                budgetAmount = if (s.budgetEdited) s.budgetAmount else budget?.limit?.amount?.stripTrailingZeros()?.toPlainString().orEmpty())
         }
     }
 
@@ -159,6 +178,11 @@ class EditCategoryViewModel @Inject constructor(private val repo: BudgetReposito
 
     fun setName(name: String) = _state.update { it.copy(name = name, duplicate = false) }
     fun setIcon(key: String) = _state.update { it.copy(icon = key) }
+    fun setBudgetEnabled(enabled: Boolean) = _state.update { it.copy(budgetEnabled = enabled, budgetEdited = true) }
+    fun setBudgetCurrent(current: Boolean) = _state.update { it.copy(budgetCurrent = current, budgetEdited = true) }
+    fun setBudgetAmount(amount: String) {
+        if (amount.length <= 15) _state.update { it.copy(budgetAmount = amount, budgetEdited = true) }
+    }
     fun setKind(kind: CategoryKind) = _state.update { if (it.editing) it else it.copy(kind = kind, duplicate = false) }
 
     fun setColor(color: String) {
@@ -171,8 +195,11 @@ class EditCategoryViewModel @Inject constructor(private val repo: BudgetReposito
         if (!s.canSave) return
         writes.run(finish = false) {
             try {
-                if (s.id == null) repo.addCategory(s.name, s.color, s.icon, s.kind)
-                else repo.updateCategory(requireNotNull(original).copy(name = s.name.trim(), color = s.color, icon = s.icon))
+                val category = original?.copy(name = s.name.trim(), color = s.color, icon = s.icon)
+                    ?: Category(newId(), s.name.trim(), s.color, kind = s.kind, icon = s.icon)
+                val budget = if (s.budgetEdited && s.kind == CategoryKind.EXPENSE)
+                    WeeklyBudget(category.id, requireNotNull(s.effectiveFrom), s.budgetLimit.takeIf { s.budgetEnabled }) else null
+                repo.saveCategoryWithBudget(category, s.id == null, budget, expectedBudgets)
                 _state.update { it.copy(done = true) }
             } catch (_: DuplicateCategoryName) {
                 _state.update { it.copy(duplicate = true) }

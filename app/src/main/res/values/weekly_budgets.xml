@@ -1,0 +1,16 @@
+<resources>
+    <string name="weekly_title">Weekly budgets</string>
+    <string name="weekly_unknown">Missing exchange rate</string>
+    <string name="weekly_over">Over by %1$s RSD</string>
+    <string name="weekly_left">%1$s RSD left</string>
+    <string name="weekly_reached">Limit reached</string>
+    <string name="weekly_scheduled">%1$s: %2$s from %3$s</string>
+    <string name="weekly_no_limit">no limit</string>
+    <string name="weekly_footer">Limits in RSD · selected categories only</string>
+    <string name="weekly_enabled">Set a weekly limit</string>
+    <string name="weekly_amount">Limit amount</string>
+    <string name="weekly_repeat">Repeats every Monday through Sunday. Unspent money does not carry over. Earlier weeks stay unchanged.</string>
+    <string name="weekly_apply_current">Apply this week too</string>
+    <string name="weekly_effective">Applies from %1$s.</string>
+    <string name="weekly_save_failed">Could not save. If the budget changed on another device, close and reopen this editor.</string>
+</resources>
