@@ -313,7 +313,7 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
             composable(Tab.HOME.route) {
                 TabPage(Tab.HOME, selectTab) {
                     HomeScreen(
-                        onAdd = { nav.navigate(Routes.add()) },
+                        onSyncSettings = { nav.navigate(Routes.FAMILY) },
                         onActivity = { nav.navigate(Routes.ACTIVITY) },
                         onGoal = { nav.navigate(Routes.editGoal(it)) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
