@@ -14,9 +14,9 @@ enum class Tab(val route: String, @StringRes val label: Int, val icon: ImageVect
     HOME("home", R.string.tab_home, Icons.Outlined.Home),
     INSIGHTS("insights", R.string.tab_insights, Icons.Outlined.BarChart),
     SCAN("scan", R.string.tab_scan, Icons.Outlined.QrCodeScanner),
-    ACCOUNTS("accounts", R.string.tab_accounts, Icons.Outlined.AccountBalanceWallet),
     /** Projects and savings goals share this tab; the route keeps its old name so saved back stacks still restore. */
     GOALS("goals", R.string.tab_projects, Icons.Outlined.Handyman),
+    ACCOUNTS("accounts", R.string.tab_accounts, Icons.Outlined.AccountBalanceWallet),
 }
 
 object Routes {
