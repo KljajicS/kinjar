@@ -20,11 +20,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -51,6 +57,8 @@ import app.kinjar.domain.CategoryKind
 import app.kinjar.ui.CategoryIconCatalog
 import app.kinjar.ui.CategoryPalette
 import app.kinjar.ui.categoryDisplayName
+import app.kinjar.ui.formatDate
+import app.kinjar.ui.theme.mono
 import app.kinjar.ui.categoryIcon
 import app.kinjar.ui.categoryIconKey
 import app.kinjar.ui.isDuplicateCategoryName
@@ -150,6 +158,8 @@ fun EditCategoryScreen(onClose: () -> Unit, vm: EditCategoryViewModel = hiltView
                 }
             }
 
+            if (s.kind == CategoryKind.EXPENSE) WeeklyLimitFields(s, vm, write.busy)
+
             Text(stringResource(R.string.category_icon), style = LabelStyle, color = c.muted)
             val selectedIcon = categoryIconKey(s.icon, s.id, s.kind)
             FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -190,7 +200,7 @@ fun EditCategoryScreen(onClose: () -> Unit, vm: EditCategoryViewModel = hiltView
                 DangerLink(stringResource(R.string.category_delete), enabled = !write.busy) { confirming = true }
             }
         }
-        WriteFeedback(vm.writes)
+        WriteFeedback(vm.writes, R.string.weekly_save_failed)
         PrimaryButton(stringResource(R.string.category_save), enabled = s.canSave && !nameTaken && !write.busy, onClick = vm::save)
     }
 
@@ -206,6 +216,32 @@ fun EditCategoryScreen(onClose: () -> Unit, vm: EditCategoryViewModel = hiltView
 internal fun kindLabel(kind: CategoryKind) = when (kind) {
     CategoryKind.EXPENSE -> R.string.category_kind_expense
     CategoryKind.INCOME -> R.string.category_kind_income
+}
+
+@Composable
+private fun WeeklyLimitFields(s: EditCategoryState, vm: EditCategoryViewModel, busy: Boolean) {
+    val c = LocalColors.current
+    val locale = LocalLocale.current.platformLocale
+    Column(Modifier.fillMaxWidth().background(c.surface2, RoundedCornerShape(16.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().toggleable(value = s.budgetEnabled, enabled = !busy && s.budgetWeek != null, role = Role.Checkbox, onValueChange = vm::setBudgetEnabled), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = s.budgetEnabled, onCheckedChange = null, enabled = !busy && s.budgetWeek != null)
+            Text(stringResource(R.string.weekly_enabled), style = BodyStyle, color = c.text)
+        }
+        if (s.budgetEnabled) {
+            OutlinedTextField(value = s.budgetAmount, onValueChange = vm::setBudgetAmount,
+                label = { Text(stringResource(R.string.weekly_amount)) }, suffix = { Text("RSD") },
+                singleLine = true, enabled = !busy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError = s.budgetAmount.isNotBlank() && s.budgetLimit == null, textStyle = mono(22), modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.weekly_repeat), style = LabelStyle, color = c.muted)
+        }
+        if (s.budgetEnabled || s.budgetStarts != null) {
+            Row(Modifier.fillMaxWidth().toggleable(value = s.budgetCurrent, enabled = !busy, role = Role.Checkbox, onValueChange = vm::setBudgetCurrent), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = s.budgetCurrent, onCheckedChange = null, enabled = !busy)
+                Text(stringResource(R.string.weekly_apply_current), style = BodyStyle, color = c.text)
+            }
+            s.effectiveFrom?.let { Text(stringResource(R.string.weekly_effective, formatDate(it, locale)), style = LabelStyle, color = c.muted) }
+        }
+    }
 }
 
 /** Spoken names for [CategoryPalette], in the same order. */

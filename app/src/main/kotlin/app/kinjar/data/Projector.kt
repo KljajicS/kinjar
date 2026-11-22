@@ -11,6 +11,7 @@ import app.kinjar.domain.BillSkipped
 import app.kinjar.domain.GoalsReordered
 import app.kinjar.domain.BudgetRemoved
 import app.kinjar.domain.BudgetSet
+import app.kinjar.domain.WeeklyBudgetSet
 import app.kinjar.domain.CategoryArchived
 import app.kinjar.domain.CategoryCreated
 import app.kinjar.domain.CategoryUpdated
@@ -133,6 +134,10 @@ class Projector(private val db: KinjarDb) {
                 db.receiptDeletionQueries.save(e.transactionId, record.id)
                 db.txQueries.delete(e.transactionId)
             }
+            is WeeklyBudgetSet -> with(e.budget) {
+                db.weeklyBudgetQueries.fromWeek(categoryId, effectiveFrom.toString())
+                db.weeklyBudgetQueries.upsert(categoryId, effectiveFrom.toString(), limit?.amount?.toPlainString())
+            }
             is BudgetSet -> db.budgetQueries.upsert(
                 e.budget.categoryId, e.budget.month.toString(), e.budget.money.amount.toPlainString(), e.budget.money.currency.name,
             )
@@ -178,6 +183,7 @@ class Projector(private val db: KinjarDb) {
         db.billSkipQueries.deleteAll()
         db.recurringRuleQueries.deleteAll()
         db.budgetQueries.deleteAll()
+        db.weeklyBudgetQueries.deleteAll()
         db.txQueries.deleteAll()
         db.accountQueries.deleteAll()
         db.categoryQueries.deleteAll()

@@ -315,7 +315,7 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                     HomeScreen(
                         onAdd = { nav.navigate(Routes.add()) },
                         onActivity = { nav.navigate(Routes.ACTIVITY) },
-                        onGoal = { nav.navigate(Routes.editGoal(it)) },
+                        onCategories = { nav.navigate(Routes.CATEGORIES) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
                         onEditTransaction = { nav.navigate(Routes.editTransaction(it)) },
                     )

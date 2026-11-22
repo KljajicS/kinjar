@@ -24,7 +24,11 @@ import app.kinjar.data.RecentTx
 import app.kinjar.domain.Account
 import app.kinjar.domain.HomeSummary
 import app.kinjar.domain.Money
-import app.kinjar.domain.GoalProgress
+import app.kinjar.domain.Category
+import app.kinjar.domain.WeeklyBudget
+import app.kinjar.domain.WeeklyBudgetProgress
+import app.kinjar.domain.WeeklyBudgetCalculator
+import app.kinjar.domain.weekStart
 import app.kinjar.ui.RateStatus
 import java.time.LocalDate
 import javax.inject.Inject
@@ -41,7 +45,9 @@ data class HomeState(
     val memberName: String = "",
     val rateStatus: RateStatus = RateStatus(),
     val hasOlder: Boolean = false,
-    val topGoal: GoalProgress? = null,
+    val budgets: List<WeeklyBudgetProgress> = emptyList(),
+    val upcomingBudgets: List<WeeklyBudget> = emptyList(),
+    val categories: Map<String, Category> = emptyMap(),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -62,7 +68,10 @@ class HomeViewModel @Inject constructor(repo: BudgetRepository, clock: Clock, pr
             recent,
             flow { emit(repo.currentMember()?.id) },
             repo.members,
-        ) { financial, (rows, hasOlder), member, members ->
+            combine(repo.weeklyBudgets, repo.expenseCategories) { schedule, categories -> schedule to categories },
+        ) { financial, (rows, hasOlder), member, members, (schedule, categories) ->
+            val activeIds = categories.map { it.id }.toSet()
+            val budgets = schedule.filter { it.categoryId in activeIds }
             HomeState(
                 financial.home,
                 financial.activeAccounts.mapNotNull { a -> financial.home.balances[a.id]?.let { AccountBalance(a, it) } },
@@ -73,7 +82,9 @@ class HomeViewModel @Inject constructor(repo: BudgetRepository, clock: Clock, pr
                 memberName = members.firstOrNull { it.id == member }?.displayName ?: "",
                 rateStatus = RateStatus.from(financial),
                 hasOlder = hasOlder,
-                topGoal = financial.goals.firstOrNull(),
+                budgets = WeeklyBudgetCalculator.progress(financial.day, financial.day, budgets, financial.transactions, financial.exchange.rates),
+                upcomingBudgets = budgets.filter { it.effectiveFrom > weekStart(financial.day) },
+                categories = categories.associateBy { it.id },
             )
         }
             .onEach { failure.value = false }

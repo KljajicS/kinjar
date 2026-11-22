@@ -1,0 +1,16 @@
+<resources>
+    <string name="weekly_title">Nedeljni budžeti</string>
+    <string name="weekly_unknown">Nedostaje kurs</string>
+    <string name="weekly_over">Preko limita %1$s RSD</string>
+    <string name="weekly_left">Preostalo %1$s RSD</string>
+    <string name="weekly_reached">Limit dostignut</string>
+    <string name="weekly_scheduled">%1$s: %2$s od %3$s</string>
+    <string name="weekly_no_limit">bez limita</string>
+    <string name="weekly_footer">Limiti u RSD · samo izabrane kategorije</string>
+    <string name="weekly_enabled">Postavi nedeljni limit</string>
+    <string name="weekly_amount">Iznos limita</string>
+    <string name="weekly_repeat">Ponavlja se od ponedeljka do nedelje. Nepotrošen iznos se ne prenosi. Prethodne nedelje ostaju nepromenjene.</string>
+    <string name="weekly_apply_current">Primeni i ove nedelje</string>
+    <string name="weekly_effective">Važi od %1$s.</string>
+    <string name="weekly_save_failed">Čuvanje nije uspelo. Ako je budžet promenjen na drugom uređaju, zatvori i ponovo otvori ovaj obrazac.</string>
+</resources>

@@ -31,6 +31,9 @@ import app.kinjar.data.testDb
 import app.kinjar.domain.Account
 import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Currency
+import app.kinjar.domain.Money
+import app.kinjar.domain.WeeklyBudget
+import app.kinjar.domain.weekStart
 import app.kinjar.ui.CategoryIconCatalog
 import app.kinjar.ui.CategoryPalette
 import app.kinjar.ui.IncomeStarterNames
@@ -62,6 +65,84 @@ class CategorySettingsTest {
     private suspend fun setUpFamily() = repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD)))
     private fun editor(id: String? = null, kind: CategoryKind = CategoryKind.EXPENSE) =
         EditCategoryViewModel(repo, SavedStateHandle(listOfNotNull(id?.let { "id" to it }, "kind" to kind.name).toMap())).also { models += it }
+
+    @Test
+    fun `new expense saves optional weekly limit with category and income ignores limit`() = runTest(dispatcher) {
+        setUpFamily()
+        val vm = editor()
+        vm.state.first { it.budgetWeek != null }
+        assertFalse(vm.state.value.budgetEnabled)
+        vm.setName("Pets")
+        vm.setBudgetEnabled(true)
+        for (amount in listOf("", "0", "-10", "oops")) {
+            vm.setBudgetAmount(amount)
+            assertFalse(vm.state.value.canSave)
+        }
+        vm.setBudgetAmount("1500")
+        vm.save()
+        vm.state.first { it.done }
+        val category = repo.categories.first().single { it.name == "Pets" }
+        assertEquals(WeeklyBudget(category.id, weekStart(clock.today()).plusWeeks(1), Money.of("1500", Currency.RSD)), repo.weeklyBudgets.first().single())
+
+        val income = editor()
+        income.state.first { it.budgetWeek != null }
+        income.setName("Side work")
+        income.setBudgetEnabled(true)
+        income.setBudgetAmount("0")
+        income.setKind(CategoryKind.INCOME)
+        assertTrue(income.state.value.canSave)
+        income.save()
+        income.state.first { it.done }
+        assertEquals(1, repo.weeklyBudgets.first().size)
+    }
+
+    @Test
+    fun `renaming preserves schedule and disabling starts next week unless current is selected`() = runTest(dispatcher) {
+        setUpFamily()
+        val budget = WeeklyBudget("cat-groceries", weekStart(clock.today()), Money.of("5000", Currency.RSD))
+        repo.setWeeklyBudget(budget, emptyList())
+        val vm = editor(budget.categoryId)
+        vm.state.first { it.loaded }
+        assertTrue(vm.state.value.budgetEnabled)
+        assertEquals("5000", vm.state.value.budgetAmount)
+        vm.setName("Food")
+        vm.save()
+        vm.state.first { it.done }
+        assertEquals(listOf(budget), repo.weeklyBudgets.first())
+
+        val disable = editor(budget.categoryId)
+        disable.state.first { it.loaded }
+        disable.setBudgetEnabled(false)
+        disable.save()
+        disable.state.first { it.done }
+        assertEquals(listOf(budget, budget.copy(effectiveFrom = budget.effectiveFrom.plusWeeks(1), limit = null)), repo.weeklyBudgets.first())
+
+        val restore = editor(budget.categoryId)
+        restore.state.first { it.loaded }
+        assertFalse(restore.state.value.budgetEnabled)
+        restore.setBudgetEnabled(true)
+        restore.setBudgetAmount("6000")
+        restore.setBudgetCurrent(true)
+        restore.save()
+        restore.state.first { it.done }
+        assertEquals(listOf(budget.copy(limit = Money.of("6000", Currency.RSD))), repo.weeklyBudgets.first())
+    }
+
+    @Test
+    fun `stale limit prevents category rename and shows write failure`() = runTest(dispatcher) {
+        setUpFamily()
+        val vm = editor("cat-groceries")
+        vm.state.first { it.loaded }
+        repo.setWeeklyBudget(WeeklyBudget("cat-groceries", weekStart(clock.today()), Money.of("5000", Currency.RSD)), emptyList())
+        vm.setName("Food")
+        vm.setBudgetEnabled(true)
+        vm.setBudgetAmount("6000")
+        vm.save()
+        vm.writes.state.first { it.failed }
+        assertFalse(vm.state.value.done)
+        assertEquals("Groceries", repo.categories.first().single { it.id == "cat-groceries" }.name)
+        assertEquals(Money.of("5000", Currency.RSD), repo.weeklyBudgets.first().single().limit)
+    }
 
     @Test
     fun `palette has twenty unique swatches each with its own spoken name`() {
