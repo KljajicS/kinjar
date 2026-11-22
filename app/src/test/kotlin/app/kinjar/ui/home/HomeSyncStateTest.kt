@@ -9,7 +9,7 @@ import org.junit.Test
 class HomeSyncStateTest {
     private val ready = SyncStatus(SyncPhase.READY, lastSuccess = Instant.EPOCH)
 
-    @Test fun `successful sync is disabled until local changes arrive`() {
+    @Test fun `successful sync stays synced until local changes arrive`() {
         assertEquals(HomeSyncState.SYNCED, homeSyncState(ready, false, false))
         assertEquals(HomeSyncState.SYNC, homeSyncState(ready, false, true))
         assertEquals(HomeSyncState.SYNC, homeSyncState(ready.copy(lastSuccess = null), false, false))
