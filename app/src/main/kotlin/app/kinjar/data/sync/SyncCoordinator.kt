@@ -72,6 +72,8 @@ class SyncCoordinator @Inject constructor(
     private val mutex = Mutex()
     private val mutableStatus = MutableStateFlow(SyncStatus())
     val status = mutableStatus.asStateFlow()
+    private val mutableBusy = MutableStateFlow(false)
+    val busy = mutableBusy.asStateFlow()
     private val mutableObservedFamily = MutableStateFlow<FamilyInfo?>(null)
     /** Family metadata last confirmed by synchronization for this installation's session; null when none applies. */
     val observedFamily = mutableObservedFamily.asStateFlow()
@@ -617,6 +619,7 @@ class SyncCoordinator @Inject constructor(
 
     private suspend fun <T> action(operation: DiagnosticOperation = DiagnosticOperation.SYNC, block: suspend () -> T): T = withContext(Dispatchers.IO) {
         mutex.withLock {
+            mutableBusy.value = true
             try { block() } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Diagnostics.report(operation, e)
@@ -628,6 +631,8 @@ class SyncCoordinator @Inject constructor(
                     else -> SyncPhase.ERROR
                 })
                 throw e
+            } finally {
+                mutableBusy.value = false
             }
         }
     }

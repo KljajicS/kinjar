@@ -42,6 +42,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -134,6 +136,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     @Inject lateinit var appLock: AppLock
+    @Inject lateinit var accountAppearances: app.kinjar.data.AccountAppearanceStore
     @Inject lateinit var sync: dagger.Lazy<app.kinjar.data.sync.SyncCoordinator>
     private lateinit var prompter: LockPrompter
     private val screenOff = object : BroadcastReceiver() {
@@ -169,11 +172,14 @@ class MainActivity : AppCompatActivity() {
             // Observe lock changes without waiting for the lifecycle-aware collector to restart.
             val lock by appLock.state.collectAsState()
             val screens = rememberSaveableStateHolder()
+            val appearances by accountAppearances.state.collectAsStateWithLifecycle()
             KinjarTheme(dark) {
+                androidx.compose.runtime.CompositionLocalProvider(app.kinjar.ui.LocalAccountAppearances provides appearances) {
                 if (lock.locked) LockScreen(lock) { appLock.request(LockPurpose.UNLOCK) }
                 else screens.SaveableStateProvider("kinjar") {
                     KinjarRoot(root, updates)
                     UpdateHost(updates, ::installUpdate)
+                }
                 }
             }
         }
@@ -289,7 +295,8 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
     }
     val selectTab = remember(nav) {
         { tab: Tab ->
-            nav.navigate(tab.route) {
+            if (tab == Tab.SCAN) nav.navigate(Routes.add()) { launchSingleTop = true }
+            else nav.navigate(tab.route) {
                 popUpTo(Tab.HOME.route) { saveState = true }
                 launchSingleTop = true
                 restoreState = true
@@ -313,7 +320,7 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
             composable(Tab.HOME.route) {
                 TabPage(Tab.HOME, selectTab) {
                     HomeScreen(
-                        onAdd = { nav.navigate(Routes.add()) },
+                        onSyncSettings = { nav.navigate(Routes.FAMILY) },
                         onActivity = { nav.navigate(Routes.ACTIVITY) },
                         onCategories = { nav.navigate(Routes.CATEGORIES) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
@@ -385,11 +392,14 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
             page(Routes.EDIT_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
             composable(Tab.INSIGHTS.route) { TabPage(Tab.INSIGHTS, selectTab) { InsightsScreen() } }
             composable(Tab.SCAN.route) {
+                val source = remember { nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.ADD } }
+                val draft = source?.let { hiltViewModel<app.kinjar.ui.add.AddViewModel>(it) }
                 ScanScreen(
                     onEditingChanged = { scanEditing = it },
                     onClose = { nav.popBackStack() },
                     onSaved = { nav.navigate(Tab.HOME.route) { popUpTo(Tab.HOME.route) { inclusive = false }; launchSingleTop = true } },
-                    onManual = { nav.navigate(Routes.add()) },
+                    onManual = { if (draft != null) nav.popBackStack() else nav.navigate(Routes.add()) },
+                    onReviewed = draft?.let { vm -> { receipt, slip, category -> vm.applyScan(receipt, slip, category); nav.popBackStack(); Unit } },
                 )
             }
             composable(Tab.GOALS.route) {
@@ -416,7 +426,7 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                     navArgument("rule") { nullable = true; defaultValue = null },
                     navArgument("due") { nullable = true; defaultValue = null },
                 ),
-            ) { AddScreen(onClose = { nav.popBackStack() }) }
+            ) { AddScreen(onClose = { nav.popBackStack() }, onScan = { nav.navigate(Tab.SCAN.route) }) }
         }
     }
 }
@@ -438,25 +448,24 @@ private fun TabPage(tab: Tab, onSelect: (Tab) -> Unit, content: @Composable () -
 private fun BottomBar(route: String?, onSelect: (Tab) -> Unit) {
     val c = LocalColors.current
     Box(Modifier.fillMaxWidth()) {
-        Column(Modifier.matchParentSize().padding(top = 24.dp).background(c.bg)) {
+        Column(Modifier.matchParentSize().padding(top = 12.dp).background(c.bg)) {
             HorizontalDivider(color = c.border, thickness = 1.dp)
         }
-        Row(Modifier.fillMaxWidth().height(104.dp).padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
+        Row(Modifier.fillMaxWidth().height(84.dp).padding(bottom = 6.dp), verticalAlignment = Alignment.Bottom) {
             Tab.entries.forEach { tab ->
                 val active = route == tab.route
                 val tint = if (active) c.primary else c.muted
                 Column(
                     Modifier.weight(1f).fillMaxHeight().semantics { selected = active }
-                        .clickable(interactionSource = null, indication = null, role = Role.Tab) { onSelect(tab) },
+                        .clickable(interactionSource = null, indication = null, role = if (tab == Tab.SCAN) Role.Button else Role.Tab) { onSelect(tab) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.Bottom),
                 ) {
                     if (tab == Tab.SCAN) {
                         Box(
-                            Modifier.size(72.dp).background(c.primary, CircleShape),
+                            Modifier.padding(bottom = 4.dp).size(72.dp).background(c.primary, CircleShape),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(tab.icon, contentDescription = null, tint = c.onPrimary, modifier = Modifier.size(26.dp)) }
-                        Text(stringResource(tab.label), style = sans(11, FontWeight.Medium), color = tint)
+                        ) { Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.home_add), tint = c.onPrimary, modifier = Modifier.size(32.dp)) }
                     } else {
                         Icon(tab.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
                         Text(stringResource(tab.label), style = sans(11, FontWeight.Medium), color = tint)

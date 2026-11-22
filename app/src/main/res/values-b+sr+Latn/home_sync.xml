@@ -1,0 +1,8 @@
+<resources>
+    <string name="home_sync">Sinhronizuj</string>
+    <string name="home_syncing">Sinhronizacija…</string>
+    <string name="home_synced">Ažurirano</string>
+    <string name="home_sync_retry">Pokušaj ponovo</string>
+    <string name="home_sync_setup">Podesi sync</string>
+    <string name="home_force_sync">Prinudna sinhronizacija</string>
+</resources>

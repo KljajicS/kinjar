@@ -56,7 +56,9 @@ import app.kinjar.ui.theme.PrimaryButton
 import app.kinjar.ui.theme.sans
 
 @Composable
-fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, onEditingChanged: (Boolean) -> Unit, vm: ScanViewModel = hiltViewModel(), add: AddViewModel = hiltViewModel()) {
+fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, onEditingChanged: (Boolean) -> Unit, vm: ScanViewModel = hiltViewModel(), add: AddViewModel = hiltViewModel(),
+    onReviewed: ((app.kinjar.domain.Receipt?, app.kinjar.data.receipt.PaymentSlip?, String?) -> Unit)? = null,
+) {
     val s by vm.state.collectAsStateWithLifecycle()
     val draft by add.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -76,6 +78,9 @@ fun ScanScreen(onClose: () -> Unit, onSaved: () -> Unit, onManual: () -> Unit, o
     }
     var scanNext by rememberSaveable { mutableStateOf(false) }
     val c = LocalColors.current
+    LaunchedEffect(s.receipt?.id, s.paymentSlip) {
+        if (onReviewed != null && (s.receipt != null || s.paymentSlip != null)) onReviewed(s.receipt, s.paymentSlip, s.categoryId)
+    }
 
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) granted = cameraGranted() }

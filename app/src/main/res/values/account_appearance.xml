@@ -1,0 +1,37 @@
+<resources>
+    <string name="account_appearance">Account appearance</string>
+    <string name="account_icon">Icon</string>
+    <string name="account_color">Color</string>
+    <string name="account_quick_favorite">Show in quick selection</string>
+    <string name="account_favorite_hint">Choose up to 3 accounts. Uses your Accounts order.</string>
+    <string name="account_favorite_limit">3 favorites selected. Turn one off in its account settings first.</string>
+    <string name="account_appearance_local">Icons, colors and favorites apply on this device.</string>
+    <string name="account_favorite_badge">Favorite</string>
+    <string name="account_selected">Selected</string>
+    <string name="account_search">Search name or currency</string>
+    <string name="account_search_empty">No matching accounts</string>
+    <string name="account_all">All accounts (%1$d)</string>
+    <string name="account_icon_wallet">Wallet</string>
+    <string name="account_icon_card">Card</string>
+    <string name="account_icon_bank">Bank</string>
+    <string name="account_icon_savings">Savings</string>
+    <string name="account_icon_business">Business</string>
+    <string name="account_icon_travel">Travel</string>
+    <string name="account_icon_home">Home</string>
+    <string name="account_color_purple">Purple</string>
+    <string name="account_color_green">Green</string>
+    <string name="account_color_blue">Blue</string>
+    <string name="account_color_orange">Orange</string>
+    <string name="account_color_pink">Pink</string>
+    <string name="account_color_gray">Gray</string>
+    <string name="account_color_red">Red</string>
+    <string name="account_color_teal">Teal</string>
+    <string name="account_color_cyan">Cyan</string>
+    <string name="account_color_yellow">Yellow</string>
+    <string name="account_color_lime">Lime</string>
+    <string name="account_color_indigo">Indigo</string>
+    <string name="account_show_in_add">Show on Add screen</string>
+    <string name="account_show_in_add_hint">Only on this phone. Accounts, balances and family activity stay unchanged.</string>
+    <string name="account_favorite_hidden">Enable on Add screen to choose as a favorite.</string>
+    <string name="account_add_empty">No accounts enabled for Add. Enable them in Accounts → account → Show on Add screen.</string>
+</resources>

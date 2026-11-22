@@ -83,6 +83,10 @@ object DataModule {
     fun transactionAccountStore(@ApplicationContext context: Context): TransactionAccountStore = TransactionAccountStore.fromPreferences(context)
 
     @Provides @Singleton
+    fun accountAppearanceStore(@ApplicationContext context: Context): app.kinjar.data.AccountAppearanceStore =
+        app.kinjar.data.AccountAppearanceStore.fromPreferences(context)
+
+    @Provides @Singleton
     fun eventStore(@ApplicationContext context: Context, db: KinjarDb, clock: Clock): EventStore {
         val store = EventStore(db, deviceId(context), clock, Projector(db))
         val prefs = context.getSharedPreferences("projection", Context.MODE_PRIVATE)

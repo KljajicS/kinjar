@@ -1,0 +1,37 @@
+<resources>
+    <string name="account_appearance">Izgled računa</string>
+    <string name="account_icon">Ikonica</string>
+    <string name="account_color">Boja</string>
+    <string name="account_quick_favorite">Prikaži u brzom izboru</string>
+    <string name="account_favorite_hint">Izaberite do 3 računa. Koristi redosled sa liste računa.</string>
+    <string name="account_favorite_limit">Izabrana su 3 omiljena računa. Prvo isključite jedan u njegovim podešavanjima.</string>
+    <string name="account_appearance_local">Ikonice, boje i omiljeni računi važe na ovom uređaju.</string>
+    <string name="account_favorite_badge">Omiljeni</string>
+    <string name="account_selected">Izabrano</string>
+    <string name="account_search">Pretraži naziv ili valutu</string>
+    <string name="account_search_empty">Nema odgovarajućih računa</string>
+    <string name="account_all">Svi računi (%1$d)</string>
+    <string name="account_icon_wallet">Novčanik</string>
+    <string name="account_icon_card">Kartica</string>
+    <string name="account_icon_bank">Banka</string>
+    <string name="account_icon_savings">Štednja</string>
+    <string name="account_icon_business">Posao</string>
+    <string name="account_icon_travel">Putovanja</string>
+    <string name="account_icon_home">Dom</string>
+    <string name="account_color_purple">Ljubičasta</string>
+    <string name="account_color_green">Zelena</string>
+    <string name="account_color_blue">Plava</string>
+    <string name="account_color_orange">Narandžasta</string>
+    <string name="account_color_pink">Roze</string>
+    <string name="account_color_gray">Siva</string>
+    <string name="account_color_red">Crvena</string>
+    <string name="account_color_teal">Tirkizna</string>
+    <string name="account_color_cyan">Cijan</string>
+    <string name="account_color_yellow">Žuta</string>
+    <string name="account_color_lime">Limeta</string>
+    <string name="account_color_indigo">Indigo</string>
+    <string name="account_show_in_add">Prikaži na ekranu za unos</string>
+    <string name="account_show_in_add_hint">Samo na ovom telefonu. Računi, stanja i porodične transakcije ostaju nepromenjeni.</string>
+    <string name="account_favorite_hidden">Uključite prikaz na ekranu za unos da biste izabrali kao omiljeni.</string>
+    <string name="account_add_empty">Nema računa za unos. Uključite ih u Računi → račun → Prikaži na ekranu za unos.</string>
+</resources>

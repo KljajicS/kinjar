@@ -75,6 +75,27 @@ class SyncCoordinatorTest {
 
     @After fun close() = driver.close()
 
+    @Test fun `busy covers downloads and clears after success failure and cancellation`() = runTest {
+        enroll()
+        val sync = coordinator()
+        doAnswer {
+            assertTrue(sync.busy.value)
+            CloudPage(emptyList(), null, false)
+        }.`when`(transport).download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+        sync.synchronize()
+        assertFalse(sync.busy.value)
+        listOf(IllegalStateException("Offline"), CancellationException("Cancelled")).forEach { failure ->
+            doAnswer {
+                assertTrue(sync.busy.value)
+                throw failure
+            }.`when`(transport).download(anyString(), anyString(), anyString(), nullable(CloudCursor::class.java), anyBoolean())
+            val caught = runCatching { sync.synchronize() }.exceptionOrNull()
+            assertEquals(failure.javaClass, caught?.javaClass)
+            assertEquals(failure.message, caught?.message)
+            assertFalse(sync.busy.value)
+        }
+    }
+
     @Test fun `leaving retains local history and pending writes only after server removal`() = runTest {
         enroll()
         store.append(AccountCreated(Account("pending", "Pending", Currency.RSD)))
