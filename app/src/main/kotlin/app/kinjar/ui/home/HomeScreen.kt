@@ -1,7 +1,5 @@
 package app.kinjar.ui.home
 
-import app.kinjar.ui.theme.AddButton
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -79,14 +77,16 @@ import java.util.Locale
 
 @Composable
 fun HomeScreen(
-    onAdd: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
+    onSyncSettings: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
     onCategories: () -> Unit,
     onEditTransaction: (String) -> Unit = {}, vm: HomeViewModel = hiltViewModel(),
     conflicts: TransactionConflictViewModel = hiltViewModel(),
+    sync: HomeSyncViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val held by conflicts.held.collectAsStateWithLifecycle()
     val failed by vm.failed.collectAsStateWithLifecycle()
+    val syncState by sync.state.collectAsStateWithLifecycle()
     val c = LocalColors.current
     val s = state
     if (s == null) {
@@ -116,7 +116,7 @@ fun HomeScreen(
                     Text(monthName(YearMonth.from(s.today), locale), style = TitleStyle, color = c.text)
                     Text(s.today.year.toString(), style = LabelStyle, color = c.muted)
                 }
-                AddButton(stringResource(R.string.home_add), onAdd)
+                HomeSyncButton(syncState, { sync.synchronize() }, { sync.synchronize(force = true) }, onSyncSettings)
             }
         }
         if (failed) item { LoadFailed(vm::retry) }

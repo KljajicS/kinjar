@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -38,11 +41,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
+import app.kinjar.data.AccountSymbol
+import app.kinjar.data.AccountTint
+import app.kinjar.ui.AccountBadge
+import app.kinjar.ui.icon
+import app.kinjar.ui.label
+import app.kinjar.ui.tint
 import app.kinjar.domain.Currency
 import app.kinjar.domain.Money
 import app.kinjar.ui.DragHandle
@@ -102,10 +113,7 @@ fun AccountsScreen(onNew: () -> Unit, onEdit: (String) -> Unit, onNewLoan: () ->
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 DragHandle(handle)
-                                val tint = accountColor(index)
-                                Box(Modifier.size(40.dp).background(tint.copy(alpha = c.tintAlpha), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Outlined.AccountBalance, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
-                                }
+                                AccountBadge(account.id)
                                 Text(account.name, style = sans(15, FontWeight.Medium), color = c.text, maxLines = 1, modifier = Modifier.weight(1f))
                                 Text("${formatAmount(balance, locale = locale)} ${balance.currency}", style = mono(14), color = if (balance.isNegative) c.orange else c.text)
                                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = c.muted)
@@ -138,6 +146,49 @@ fun EditAccountScreen(onClose: () -> Unit, vm: EditAccountViewModel = hiltViewMo
         if (s.loadFailed) LoadFailedBanner(vm::retryLoad)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             FieldBox(stringResource(R.string.account_name), s.name, vm::setName)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AccountBadge(s.appearance)
+                Text(stringResource(R.string.account_appearance), style = BodyStyle, color = c.text)
+            }
+            Text(stringResource(R.string.account_icon), style = LabelStyle, color = c.muted)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountSymbol.entries.forEach { symbol ->
+                    val label = stringResource(symbol.label())
+                    Box(Modifier.size(44.dp).border(1.dp, if (s.appearance.icon == symbol) c.primary else c.border, RoundedCornerShape(12.dp))
+                        .selectable(s.appearance.icon == symbol, enabled = !write.busy, role = Role.RadioButton) { vm.setIcon(symbol) }
+                        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                        Icon(symbol.icon(), null, tint = s.appearance.color.tint(), modifier = Modifier.size(24.dp))
+                    }
+                }
+            }
+            Text(stringResource(R.string.account_color), style = LabelStyle, color = c.muted)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountTint.entries.forEach { color ->
+                    val label = stringResource(color.label())
+                    Box(Modifier.size(44.dp).border(if (s.appearance.color == color) 2.dp else 1.dp, if (s.appearance.color == color) c.text else c.border, RoundedCornerShape(12.dp))
+                        .selectable(s.appearance.color == color, enabled = !write.busy, role = Role.RadioButton) { vm.setColor(color) }
+                        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(24.dp).background(color.tint(), RoundedCornerShape(8.dp)))
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().toggleable(s.appearance.showInAdd, enabled = !write.busy,
+                role = Role.Switch, onValueChange = vm::setShowInAdd), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.account_show_in_add), style = BodyStyle, color = c.text)
+                    Text(stringResource(R.string.account_show_in_add_hint), style = LabelStyle, color = c.muted)
+                }
+                Switch(s.appearance.showInAdd, onCheckedChange = null, enabled = !write.busy)
+            }
+            Row(Modifier.fillMaxWidth().toggleable(s.appearance.favorite, enabled = !write.busy && s.appearance.showInAdd && (s.appearance.favorite || s.canFavorite),
+                role = Role.Switch, onValueChange = vm::setFavorite), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.account_quick_favorite), style = BodyStyle, color = c.text)
+                    Text(stringResource(if (!s.appearance.showInAdd) R.string.account_favorite_hidden else if (s.canFavorite || s.appearance.favorite) R.string.account_favorite_hint else R.string.account_favorite_limit), style = LabelStyle, color = c.muted)
+                }
+                Switch(s.appearance.favorite, onCheckedChange = null, enabled = !write.busy && s.appearance.showInAdd && (s.appearance.favorite || s.canFavorite))
+            }
+            Text(stringResource(R.string.account_appearance_local), style = LabelStyle, color = c.muted)
             Text(stringResource(R.string.account_currency), style = LabelStyle, color = c.muted)
             if (s.currencyLocked) {
                 Text(s.currency.name, style = mono(15), color = c.text)

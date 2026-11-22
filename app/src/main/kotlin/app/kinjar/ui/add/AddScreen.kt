@@ -29,6 +29,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +49,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -89,7 +98,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts: TransactionConflictViewModel = hiltViewModel()) {
+fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts: TransactionConflictViewModel = hiltViewModel(), onScan: (() -> Unit)? = null) {
     val s by vm.state.collectAsStateWithLifecycle()
     val review by conflicts.review.collectAsStateWithLifecycle()
     var reviewed by rememberSaveable { mutableStateOf(false) }
@@ -107,7 +116,7 @@ fun AddScreen(onClose: () -> Unit, vm: AddViewModel = hiltViewModel(), conflicts
         s.editing != null && !s.loading && !s.loadFailed && !editing -> TransactionDetails(s, onClose, onEdit = { editing = true })
         else -> AddContent(s, { if (editing) editing = false else onClose() }, vm::setType, vm::setAmount, vm::setCategory, vm::setAccount,
             vm::setToAccount, vm::setDate, vm::setMerchant, vm::skip, vm::save, vm::delete, vm::retryLoad, vm::reload,
-            vm::setReceived, vm::useSuggestedReceived)
+            vm::setReceived, vm::useSuggestedReceived, onScan)
     }
 }
 
@@ -118,12 +127,15 @@ fun AddContent(
     onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit, onSave: () -> Unit,
     onDelete: () -> Unit = {}, onRetry: () -> Unit = {}, onReload: () -> Unit = {},
     onReceived: (String) -> Unit = {}, onUseSuggested: () -> Unit = {},
+    onScan: (() -> Unit)? = null,
 ) {
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
     val separator = DecimalFormatSymbols(locale).decimalSeparator
     val readOnly = s.missing || s.loanLocked || s.loading || s.loadFailed
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var focusedAmount by rememberSaveable { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
 
     Column(
         Modifier.fillMaxSize().background(c.bg).imePadding().padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 24.dp),
@@ -139,7 +151,10 @@ fun AddContent(
                 else -> null
             }
             if (title != null) Text(stringResource(title), style = sans(15, FontWeight.Medium), color = c.text)
-            else TypeSwitch(s.type, onType, Modifier.padding(start = 12.dp).weight(1f, fill = false))
+            else TypeSwitch(s.type, onType, Modifier.padding(horizontal = 6.dp).weight(1f))
+            if (onScan != null && s.editing == null && s.bill == null && !s.scanned && s.type != TransactionType.TRANSFER && !s.saving) {
+                RoundIconButton(Icons.Outlined.QrCodeScanner, stringResource(R.string.tab_scan), { keyboard?.hide(); onScan() })
+            }
         }
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -152,7 +167,8 @@ fun AddContent(
                 s.loadFailed -> Unit
                 s.missing -> Text(stringResource(R.string.audit_finance_missing), style = sans(15), color = c.orange)
                 s.loanLocked -> Text(stringResource(R.string.audit_finance_loan_locked), style = sans(15), color = c.orange)
-                else -> Fields(s, locale, separator, onAmount, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip, onReceived, onUseSuggested) {
+                else -> Fields(s, locale, separator, onAmount, onCategory, onAccount, onToAccount, onDate, onMerchant, onSkip, onReceived, onUseSuggested,
+                    autoFocus = !focusedAmount && s.editing == null && !s.scanned, onFocused = { focusedAmount = true }) {
                     confirmDelete = true
                 }
             }
@@ -182,23 +198,33 @@ private fun Fields(
     s: AddState, locale: Locale, separator: Char, onAmount: (String) -> Unit,
     onCategory: (String?) -> Unit, onAccount: (String) -> Unit, onToAccount: (String) -> Unit,
     onDate: (LocalDate) -> Unit, onMerchant: (String) -> Unit, onSkip: () -> Unit,
-    onReceived: (String) -> Unit, onUseSuggested: () -> Unit, onDelete: () -> Unit,
+    onReceived: (String) -> Unit, onUseSuggested: () -> Unit, autoFocus: Boolean, onFocused: () -> Unit, onDelete: () -> Unit,
 ) {
     val c = LocalColors.current
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val transformation = remember(locale) { AmountVisualTransformation(locale) }
+    val amountLength = transformation.filter(androidx.compose.ui.text.AnnotatedString(s.amount.text)).text.length
+    LaunchedEffect(autoFocus) {
+        if (autoFocus) { focus.requestFocus(); keyboard?.show(); onFocused() }
+    }
     Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val amountLabel = stringResource(R.string.recurring_amount)
             BasicTextField(
-                value = s.amount.text.replace('.', separator),
-                onValueChange = { onAmount(it.replace(separator, '.')) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                value = s.amount.text,
+                onValueChange = onAmount,
+                visualTransformation = transformation,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus() }),
                 singleLine = true,
-                textStyle = mono(48, FontWeight.SemiBold, (-0.03).em).copy(color = c.text, textAlign = TextAlign.End),
+                textStyle = mono(when { amountLength > 15 -> 24; amountLength > 9 -> 32; else -> 48 }, FontWeight.SemiBold, (-0.03).em).copy(color = c.text, textAlign = TextAlign.End),
                 cursorBrush = SolidColor(c.primary),
-                modifier = Modifier.weight(1f).semantics { contentDescription = amountLabel },
+                modifier = Modifier.weight(1f).focusRequester(focus).semantics { contentDescription = amountLabel },
                 decorationBox = { field ->
                     Box(contentAlignment = Alignment.CenterEnd) {
-                        if (s.amount.text.isEmpty()) Text("0", style = mono(48, FontWeight.SemiBold, (-0.03).em), color = c.muted)
+                        if (s.amount.text.isEmpty()) Text("0${separator}00", style = mono(48, FontWeight.SemiBold, (-0.03).em), color = c.muted)
                         field()
                     }
                 },
@@ -207,23 +233,22 @@ private fun Fields(
         }
     }
 
+    Column(Modifier.fillMaxWidth()) {
+        if (s.type == TransactionType.TRANSFER) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountBox(stringResource(R.string.add_account), s.accounts, s.accountId, onAccount, Modifier.weight(1f), s.balances)
+                AccountBox(stringResource(R.string.add_to_account), s.accounts.filter { it.id != s.accountId }, s.toAccountId, onToAccount, Modifier.weight(1f), s.balances)
+            }
+            if (s.crossCurrency) ReceivedField(s, locale, separator, onReceived, onUseSuggested)
+        } else {
+            QuickAccounts(s, onAccount)
+        }
+    }
     if (s.type.categoryKind != null) {
+        androidx.compose.material3.HorizontalDivider(Modifier.padding(top = 4.dp), color = c.border)
+        if (s.editing == null) Text(stringResource(R.string.scan_category), style = sans(12), color = c.muted)
         if (s.editing != null) CategoryBox(s.pickableCategories, s.allCategories, s.categoryId, onCategory)
         else CategoryGrid(s.pickableCategories, s.categoryId, onCategory)
-    }
-
-    if (s.type == TransactionType.TRANSFER) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AccountBox(stringResource(R.string.add_account), s.accounts, s.accountId, onAccount, Modifier.weight(1f))
-            AccountBox(stringResource(R.string.add_to_account), s.accounts, s.toAccountId, onToAccount, Modifier.weight(1f))
-        }
-        if (s.crossCurrency) ReceivedField(s, locale, separator, onReceived, onUseSuggested)
-    } else {
-        AccountBox(
-            stringResource(if (s.type == TransactionType.INCOME) R.string.add_deposit_into else R.string.add_pay_from),
-            s.accounts.filter { !it.archived && (!s.rsdOnly || it.currency == Currency.RSD) },
-            s.accountId, onAccount, Modifier.fillMaxWidth(),
-        )
     }
     DateBox(s.date, onDate, Modifier.fillMaxWidth(), enabled = s.bill == null)
     if (s.billInFuture) Text(stringResource(R.string.audit_finance_bill_future), style = sans(13), color = c.orange)
@@ -403,10 +428,12 @@ private fun CategoryGrid(categories: List<Category>, selectedId: String?, onSele
 }
 
 @Composable
-fun AccountBox(label: String, accounts: List<Account>, selectedId: String?, onSelect: (String) -> Unit, modifier: Modifier) {
+fun AccountBox(label: String, accounts: List<Account>, selectedId: String?, onSelect: (String) -> Unit, modifier: Modifier,
+    balances: Map<String, app.kinjar.domain.Money> = emptyMap(), selectedAccount: Account? = null,
+) {
     val c = LocalColors.current
     var open by remember { mutableStateOf(false) }
-    val selected = accounts.firstOrNull { it.id == selectedId }
+    val selected = selectedAccount ?: accounts.firstOrNull { it.id == selectedId }
     val value = selected?.let { "${it.name} · ${it.currency}" } ?: stringResource(R.string.add_choose_account)
     Box(modifier) {
         OutlinedBox(
@@ -414,6 +441,7 @@ fun AccountBox(label: String, accounts: List<Account>, selectedId: String?, onSe
             radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp), onClick = { open = true },
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                selected?.let { app.kinjar.ui.AccountBadge(it.id); Spacer(Modifier.size(10.dp)) }
                 Column(Modifier.weight(1f)) {
                     Text(label, style = CaptionStyle, color = c.muted)
                     Text(value, style = sans(14, FontWeight.Medium), color = c.text, modifier = Modifier.padding(top = 2.dp))
@@ -421,17 +449,15 @@ fun AccountBox(label: String, accounts: List<Account>, selectedId: String?, onSe
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = c.muted)
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            accounts.forEach { a ->
-                DropdownMenuItem(text = { Text("${a.name} · ${a.currency}", style = sans(14)) }, onClick = { onSelect(a.id); open = false })
-            }
-        }
+        if (open) AccountPicker(accounts, selectedId, balances, onSelect) { open = false }
     }
 }
 
 @Composable
 fun DateBox(date: LocalDate, onPick: (LocalDate) -> Unit, modifier: Modifier, label: String = stringResource(R.string.add_date), enabled: Boolean = true) {
     val c = LocalColors.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
     val locale = monthLocale(LocalLocale.current.platformLocale)
     val today = LocalDate.now()
     val formatted = date.format(DateTimeFormatter.ofPattern("d MMM", locale))
@@ -444,10 +470,16 @@ fun DateBox(date: LocalDate, onPick: (LocalDate) -> Unit, modifier: Modifier, la
 
     OutlinedBox(
         modifier.semantics(mergeDescendants = true) { contentDescription = "$label, $value" },
-        radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp), onClick = if (enabled) ({ open = true }) else null,
+        radius = 14, padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp), onClick = if (enabled) ({ keyboard?.hide(); focus.clearFocus(); open = true }) else null,
     ) {
-        Text(label, style = CaptionStyle, color = c.muted)
-        Text(value, style = sans(14, FontWeight.Medium), color = c.text, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Outlined.CalendarMonth, null, tint = c.muted, modifier = Modifier.size(22.dp))
+            Column(Modifier.weight(1f)) {
+                Text(label, style = CaptionStyle, color = c.muted)
+                Text(value, style = sans(14, FontWeight.Medium), color = c.text, modifier = Modifier.padding(top = 2.dp))
+            }
+            if (enabled) Icon(Icons.Outlined.ChevronRight, null, tint = c.muted, modifier = Modifier.size(20.dp))
+        }
     }
 
     if (open) KinjarDatePickerDialog(date, onDismiss = { open = false }, onPick = { onPick(it); open = false })

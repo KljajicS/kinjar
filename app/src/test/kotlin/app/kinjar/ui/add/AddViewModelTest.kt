@@ -56,6 +56,66 @@ class AddViewModelTest {
     private val accountStore = TransactionAccountStore(remembered::get) { type, id -> remembered[type] = id }
     private val models = mutableListOf<AddViewModel>()
 
+    @Test fun `add visibility filters selectors and remembered defaults without changing family accounts`() = runTest(dispatcher) {
+        seeded()
+        val accounts = repo.accounts.first()
+        val events = db.eventQueries.count().executeAsOne()
+        remembered[TransactionType.EXPENSE] = "cash"
+        val preferences = app.kinjar.data.AccountAppearanceStore()
+        preferences.save("cash", app.kinjar.data.AccountAppearance(showInAdd = false), accounts)
+        val vm = AddViewModel(repo, clock, SavedStateHandle(), accountStore, preferences).also { models += it }
+        vm.state.first { !it.loading }
+        assertEquals(listOf("card", "eur"), vm.state.value.accounts.map { it.id })
+        assertEquals("card", vm.state.value.accountId)
+        vm.setType(TransactionType.TRANSFER)
+        assertEquals(listOf("card", "eur"), vm.state.value.accounts.map { it.id })
+        preferences.save("card", app.kinjar.data.AccountAppearance(showInAdd = false), accounts)
+        preferences.save("eur", app.kinjar.data.AccountAppearance(showInAdd = false), accounts)
+        vm.state.first { it.accounts.isEmpty() }
+        assertNull(vm.state.value.accountId)
+        assertFalse(vm.state.value.canSave)
+        assertEquals(accounts, repo.accounts.first())
+        assertEquals(events, db.eventQueries.count().executeAsOne())
+    }
+
+    @Test fun `hidden add accounts remain available for existing transactions and bills`() = runTest(dispatcher) {
+        val create = seeded()
+        create.setAmount("12")
+        create.save()
+        create.state.first { it.saved }
+        val transaction = repo.transactions.first().single()
+        val preferences = app.kinjar.data.AccountAppearanceStore()
+        preferences.save("cash", app.kinjar.data.AccountAppearance(showInAdd = false), repo.accounts.first())
+        val edit = AddViewModel(repo, clock, SavedStateHandle(mapOf("id" to transaction.id)), accountStore, preferences).also { models += it }
+        edit.state.first { !it.loading }
+        assertEquals("cash", edit.state.value.accountId)
+        assertEquals(3, edit.state.value.accounts.size)
+        repo.setRule(RecurringRule("rent", "Rent", Money.of("100", Currency.RSD), "cash", "cat-bills", Cadence.MONTHLY, clock.today()))
+        val bill = AddViewModel(repo, clock, SavedStateHandle(mapOf("rule" to "rent", "due" to clock.today().toString())), accountStore, preferences).also { models += it }
+        bill.state.first { !it.loading }
+        assertEquals("cash", bill.state.value.accountId)
+        assertEquals(3, bill.state.value.accounts.size)
+    }
+
+    @Test fun `scan returns to draft without silently changing foreign account or saving`() = runTest(dispatcher) {
+        val vm = seeded()
+        vm.setAccount("eur")
+        vm.setAmount("55.50")
+        val receipt = Receipt("https://suf.purs.gov.rs/v/?vl=preview", "1", "INV-preview", "Market", clock.today(),
+            Money.of("1280.50", Currency.RSD), emptyList())
+        vm.applyScan(receipt, null, "cat-groceries")
+        assertEquals("eur", vm.state.value.accountId)
+        assertEquals(Currency.RSD, vm.state.value.currency)
+        assertEquals("1280.50", vm.state.value.amount.text)
+        assertFalse(vm.state.value.canSave)
+        repo.addAccount(Account("extra", "Extra", Currency.RSD))
+        vm.state.first { it.accounts.size == 4 }
+        assertEquals("eur", vm.state.value.accountId)
+        vm.setAccount("cash")
+        assertTrue(vm.state.value.canSave)
+        assertTrue(repo.transactions.first().isEmpty())
+    }
+
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() {
         try {

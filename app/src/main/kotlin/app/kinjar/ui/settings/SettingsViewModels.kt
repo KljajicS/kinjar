@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -271,29 +272,46 @@ data class EditAccountState(
     val bills: List<String> = emptyList(),
     val loadFailed: Boolean = false,
     val done: Boolean = false,
+    val appearance: app.kinjar.data.AccountAppearance = app.kinjar.data.AccountAppearance(),
+    val canFavorite: Boolean = true,
 ) {
     val canSave: Boolean get() = name.isNotBlank() && !loadFailed
 }
 
 @HiltViewModel
-class EditAccountViewModel @Inject constructor(private val repo: BudgetRepository, savedState: SavedStateHandle) : ViewModel() {
+class EditAccountViewModel @Inject constructor(
+    private val repo: BudgetRepository,
+    savedState: SavedStateHandle,
+    private val appearances: app.kinjar.data.AccountAppearanceStore = app.kinjar.data.AccountAppearanceStore(),
+) : ViewModel() {
     val writes = WriteOperation(viewModelScope)
     private val _state = MutableStateFlow(EditAccountState(editing = savedState.get<String>("id") != null, id = savedState.get<String>("id")))
     val state: StateFlow<EditAccountState> = _state
+    private val accountId = savedState.get<String>("id") ?: newId()
+    private var originalAccount: Account? = null
 
     private var loading: Job? = null
     private var initialized = false
     init { retryLoad() }
 
     fun retryLoad() {
-        val id = _state.value.id ?: return
+        val id = _state.value.id
         loading?.cancel()
         loading = viewModelScope.launch {
-            try {
+            try { coroutineScope {
+                launch {
+                    combine(repo.accounts, appearances.state) { accounts, preferences -> accounts to preferences.withDefaults(accounts) }
+                        .collect { (accounts, preferences) ->
+                            _state.update { it.copy(canFavorite = preferences.visibleInAdd(accounts).count { a -> a.id != accountId && preferences.appearance(a.id).favorite } < 3) }
+                        }
+                }
+                if (id == null) return@coroutineScope
                 if (!initialized) {
                     val used = repo.accountInUse(id)
                     val a = requireNotNull(repo.accounts.first().firstOrNull { it.id == id })
-                    _state.update { it.copy(name = a.name, currency = a.currency, kind = a.kind, currencyLocked = used, excludedFromGoals = a.excludedFromGoals) }
+                    originalAccount = a
+                    val appearance = appearances.state.value.withDefaults(repo.accounts.first()).appearance(id)
+                    _state.update { it.copy(name = a.name, currency = a.currency, kind = a.kind, currencyLocked = used, excludedFromGoals = a.excludedFromGoals, appearance = appearance) }
                     initialized = true
                 }
                 combine(repo.financial, repo.rules) { financial, rules -> financial to rules }.collect { (f, rules) ->
@@ -301,6 +319,7 @@ class EditAccountViewModel @Inject constructor(private val repo: BudgetRepositor
                     _state.update { it.copy(balance = balance, balanceRsd = balance?.let { f.exchange.rates.convert(it) },
                         bills = rules.filter { it.accountId == id }.map { it.name }, loadFailed = false) }
                 }
+            }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -312,13 +331,23 @@ class EditAccountViewModel @Inject constructor(private val repo: BudgetRepositor
     fun setName(name: String) = _state.update { it.copy(name = name) }
     fun setCurrency(currency: Currency) = _state.update { if (it.currencyLocked) it else it.copy(currency = currency) }
     fun setExcludedFromGoals(excluded: Boolean) = _state.update { it.copy(excludedFromGoals = excluded) }
+    fun setIcon(icon: app.kinjar.data.AccountSymbol) = _state.update { it.copy(appearance = it.appearance.copy(icon = icon)) }
+    fun setColor(color: app.kinjar.data.AccountTint) = _state.update { it.copy(appearance = it.appearance.copy(color = color)) }
+    fun setFavorite(favorite: Boolean) = _state.update {
+        if (favorite && (!it.canFavorite || !it.appearance.showInAdd)) it else it.copy(appearance = it.appearance.copy(favorite = favorite))
+    }
+    fun setShowInAdd(show: Boolean) = _state.update {
+        it.copy(appearance = it.appearance.copy(showInAdd = show, favorite = show && it.appearance.favorite))
+    }
 
     fun save() {
         val s = _state.value
         if (!s.canSave) return
         writes.run {
-            val account = Account(s.id ?: newId(), s.name.trim(), s.currency, s.kind, excludedFromGoals = s.excludedFromGoals)
-            if (s.id == null) repo.addAccount(account) else repo.updateAccount(account)
+            val active = repo.accounts.first()
+            kotlinx.coroutines.withContext(Dispatchers.IO) { appearances.save(accountId, s.appearance, active) }
+            val account = Account(accountId, s.name.trim(), s.currency, s.kind, excludedFromGoals = s.excludedFromGoals)
+            if (s.id == null) repo.addAccount(account) else if (account != originalAccount) repo.updateAccount(account)
             _state.update { it.copy(done = true) }
         }
     }

@@ -68,7 +68,10 @@ internal fun TransactionDetails(s: AddState, onClose: () -> Unit, onEdit: () -> 
                     DetailRow(stringResource(R.string.add_date), formatDate(transaction.date, locale))
                     HorizontalDivider(color = c.border)
                     val account = s.accounts.firstOrNull { it.id == transaction.accountId }
-                    DetailRow(stringResource(R.string.add_account), account?.name ?: stringResource(R.string.transaction_unavailable))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        app.kinjar.ui.AccountBadge(transaction.accountId)
+                        DetailRow(stringResource(R.string.add_account), account?.name ?: stringResource(R.string.transaction_unavailable))
+                    }
                     if (transaction.type == TransactionType.TRANSFER) {
                         val destination = s.accounts.firstOrNull { it.id == transaction.toAccountId }
                         DetailRow(stringResource(R.string.add_to_account), destination?.name ?: stringResource(R.string.transaction_unavailable))

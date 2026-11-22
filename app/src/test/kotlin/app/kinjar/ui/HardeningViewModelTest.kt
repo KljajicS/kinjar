@@ -1,9 +1,13 @@
 package app.kinjar.ui
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
 import org.junit.After
@@ -31,7 +35,11 @@ class HardeningViewModelTest {
     private val repo = BudgetRepository(db, EventStore(db, "device", clock, Projector(db)), clock)
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
-    @After fun tearDown() = Dispatchers.resetMain()
+    private val models = mutableListOf<ViewModel>()
+    @After fun tearDown() {
+        runTest(dispatcher) { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
+        Dispatchers.resetMain()
+    }
 
     @Test fun `money inputs reject exponents excess precision and unbounded values`() {
         for (text in listOf("1e2147483647", "1e-2147483647", "0.001", "12.345", "9".repeat(1000), "-5", "NaN")) {
@@ -44,7 +52,7 @@ class HardeningViewModelTest {
     }
 
     @Test fun `double tap creates one goal and completed form cannot resubmit`() = runTest(dispatcher) {
-        val vm = EditGoalViewModel(repo, SavedStateHandle())
+        val vm = EditGoalViewModel(repo, SavedStateHandle()).also { models += it }
         vm.setName("Trip")
         vm.setTarget("1000")
         vm.save()
@@ -59,7 +67,7 @@ class HardeningViewModelTest {
     @Test fun `failed account archive keeps the account and retry archives it once`() = runTest(dispatcher) {
         repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD), Account("card", "Card", Currency.RSD)))
         repo.add(Transaction("t", TransactionType.INCOME, Money.of("500", Currency.RSD), "card", null, null, clock.today(), "", "", "m", TransactionSource.MANUAL))
-        val vm = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "card")))
+        val vm = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "card"))).also { models += it }
         vm.state.first { it.name == "Card" && it.balance != null }
         assertEquals(Money.of("500", Currency.RSD), vm.state.value.balanceRsd)
         driver.execute(null, "CREATE TRIGGER fail_archive BEFORE UPDATE ON account BEGIN SELECT RAISE(ABORT, 'disk full'); END", 0)
@@ -84,7 +92,7 @@ class HardeningViewModelTest {
             worker.set(Thread.currentThread())
             if (fail) error("Cannot open database")
             repo
-        }, ThemeStore({ null }, {}), dagger.Lazy { error("Refresh must not block startup") })
+        }, ThemeStore({ null }, {}), dagger.Lazy { error("Refresh must not block startup") }).also { models += it }
         assertNull(vm.hasMember.value)
         vm.failed.first { it }
         assertNotEquals(caller, worker.get())
@@ -97,7 +105,7 @@ class HardeningViewModelTest {
     @Test fun `failed bill skip retains sheet and retries without duplicate events`() = runTest(dispatcher) {
         repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD, AccountKind.SPENDING)))
         repo.setRule(RecurringRule("rent", "Rent", Money.of("100", Currency.RSD), "cash", "cat-bills", Cadence.MONTHLY, clock.today()))
-        val vm = AddViewModel(repo, clock, SavedStateHandle(mapOf("rule" to "rent", "due" to clock.today().toString())))
+        val vm = AddViewModel(repo, clock, SavedStateHandle(mapOf("rule" to "rent", "due" to clock.today().toString()))).also { models += it }
         vm.state.first { it.bill != null && it.accounts.isNotEmpty() }
         driver.execute(null, "CREATE TRIGGER fail_skip BEFORE INSERT ON bill_skip BEGIN SELECT RAISE(ABORT, 'disk full'); END", 0)
         vm.skip()

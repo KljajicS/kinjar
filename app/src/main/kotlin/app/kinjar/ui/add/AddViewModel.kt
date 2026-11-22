@@ -8,6 +8,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -83,6 +84,7 @@ data class AddState(
     val receivedPair: Pair<Currency, Currency>? = null,
     /** A typed received amount was dropped because the currencies changed. */
     val receivedReset: Boolean = false,
+    val balances: Map<String, Money> = emptyMap(),
 ) {
     val scanned: Boolean get() = receipt != null || paymentSlip != null
     val typeLocked: Boolean get() = bill != null || scanned || (editing != null && editing.source != TransactionSource.MANUAL)
@@ -124,7 +126,7 @@ data class AddState(
 
 enum class ReceivedSource { NBS, OVERRIDE, MANUAL, SAVED, MISSING }
 
-private data class Inputs(val accounts: List<Account>, val categories: List<Category>, val all: List<Category>, val rates: ExchangeRateSnapshot)
+private data class Inputs(val accounts: List<Account>, val categories: List<Category>, val all: List<Category>, val rates: ExchangeRateSnapshot, val balances: Map<String, Money>)
 
 /** [nbsDate] is null when a saved rate override took part in the conversion. */
 data class ReceivedSuggestion(val money: Money, val nbsDate: LocalDate?)
@@ -150,6 +152,7 @@ class AddViewModel @Inject constructor(
     private val clock: Clock,
     private val savedState: SavedStateHandle,
     private val transactionAccounts: TransactionAccountStore = TransactionAccountStore({ null }, { _, _ -> }),
+    private val appearances: app.kinjar.data.AccountAppearanceStore = app.kinjar.data.AccountAppearanceStore(),
 ) : ViewModel() {
     private val _state = MutableStateFlow(AddState(date = clock.today(), loading = true))
     val state: StateFlow<AddState> = _state
@@ -157,6 +160,7 @@ class AddViewModel @Inject constructor(
     /** The category last picked per type in this form; a remembered null means uncategorized was chosen. */
     private val categoryChoices = mutableMapOf<TransactionType, String?>()
     private var prefilled = false
+    private var preservedScanAccount: String? = null
 
     init {
         viewModelScope.launch { _state.collect { if (prefilled) persist(it) } }
@@ -176,7 +180,11 @@ class AddViewModel @Inject constructor(
                 _state.update { restoreDraft(it) }
                 prefilled = true
             }
-            combine(repo.accounts, repo.categories, repo.allCategories, repo.exchangeRates.snapshots, ::Inputs).collect { (accounts, categories, all, rates) ->
+            val selectableAccounts = combine(repo.accounts, appearances.state) { accounts, preferences ->
+                if (_state.value.editing != null || _state.value.bill != null) accounts else preferences.visibleInAdd(accounts)
+            }
+            combine(selectableAccounts, repo.categories, repo.allCategories, repo.exchangeRates.snapshots,
+                repo.financial.map { it.home.balances }, ::Inputs).collect { (accounts, categories, all, rates, balances) ->
                 val memberName = repo.currentMember()?.displayName.orEmpty()
                 val sortedCategories = categories.sortedBy { c -> StarterCategories.all.indexOfFirst { it.id == c.id }.let { if (it < 0) Int.MAX_VALUE else it } }
                 _state.update { s ->
@@ -184,7 +192,7 @@ class AddViewModel @Inject constructor(
                     val keepCategory = s.scanned || s.bill != null || s.editing != null || s.categoryId == null || pickable.any { it.id == s.categoryId }
                     val replacement = if (s.type == TransactionType.EXPENSE) pickable.firstOrNull()?.id else null
                     selectAccount(s.copy(categoryId = if (keepCategory) s.categoryId else replacement,
-                        paidByName = memberName, accounts = accounts, categories = sortedCategories, allCategories = all, rates = rates, loading = false))
+                        paidByName = memberName, accounts = accounts, categories = sortedCategories, allCategories = all, rates = rates, balances = balances, loading = false))
                 }
             }
         } catch (e: CancellationException) {
@@ -390,9 +398,16 @@ class AddViewModel @Inject constructor(
         }
     }
 
+    fun applyScan(receipt: Receipt?, slip: PaymentSlip?, categoryId: String?) {
+        preservedScanAccount = _state.value.accountId
+        if (receipt != null) prefillReceipt(receipt, categoryId)
+        else if (slip != null) prefillPaymentSlip(slip)
+    }
+
     fun resetReceipt() {
         if (_state.value.saving) return
         accountChoices.clear()
+        preservedScanAccount = null
         categoryChoices.clear()
         _state.update { s ->
             selectAccount(AddState(date = clock.today(), accounts = s.accounts, categories = s.categories, allCategories = s.allCategories,
@@ -422,6 +437,7 @@ class AddViewModel @Inject constructor(
     fun setMerchant(text: String) = _state.update { it.copy(merchant = text) }
 
     fun setAccount(id: String) {
+        preservedScanAccount = null
         accountChoices[_state.value.type] = id
         _state.update { s ->
             validate(s.copy(accountId = id, currency = s.accounts.firstOrNull { it.id == id }?.currency ?: s.currency))
@@ -523,6 +539,9 @@ class AddViewModel @Inject constructor(
     }
 
     private fun selectAccount(s: AddState, preferredId: String? = s.accountId): AddState {
+        if (s.scanned && preservedScanAccount != null && s.accounts.any { it.id == preservedScanAccount && !it.archived }) {
+            return validate(s.copy(accountId = preservedScanAccount, currency = Currency.RSD))
+        }
         val eligible = s.accounts.filter { !it.archived && (!s.rsdOnly || it.currency == Currency.RSD) }
         val account = eligible.firstOrNull { it.id == preferredId }
             // Bills and corrections name their account; silently moving them to another one would misstate a balance.

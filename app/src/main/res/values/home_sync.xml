@@ -1,0 +1,8 @@
+<resources>
+    <string name="home_sync">Sync</string>
+    <string name="home_syncing">Syncing…</string>
+    <string name="home_synced">Synced</string>
+    <string name="home_sync_retry">Retry sync</string>
+    <string name="home_sync_setup">Sync setup</string>
+    <string name="home_force_sync">Force sync</string>
+</resources>

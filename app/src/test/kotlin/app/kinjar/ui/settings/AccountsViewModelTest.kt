@@ -44,6 +44,46 @@ class AccountsViewModelTest {
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     private val models = mutableListOf<ViewModel>()
+
+    @Test fun `changing add visibility writes only local preferences`() = runTest(dispatcher) {
+        repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD)))
+        val before = repo.accounts.first()
+        val events = db.eventQueries.count().executeAsOne()
+        val preferences = app.kinjar.data.AccountAppearanceStore()
+        val vm = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "cash")), preferences).also { models += it }
+        vm.state.first { it.balance != null }
+        vm.setShowInAdd(false)
+        vm.setFavorite(true)
+        assertEquals(false, vm.state.value.appearance.favorite)
+        vm.save()
+        vm.state.first { it.done }
+        assertEquals(false, preferences.state.value.appearance("cash").showInAdd)
+        assertEquals(before, repo.accounts.first())
+        assertEquals(events, db.eventQueries.count().executeAsOne())
+    }
+
+    @Test fun `favorite icon and color save in account settings and reload`() = runTest(dispatcher) {
+        repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD), Account("card", "Card", Currency.RSD),
+            Account("eur", "Euro", Currency.EUR), Account("extra", "Extra", Currency.RSD)))
+        val preferences = app.kinjar.data.AccountAppearanceStore()
+        val vm = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "cash")), preferences).also { models += it }
+        vm.state.first { it.balance != null }
+        assertEquals(true, vm.state.value.appearance.favorite)
+        vm.setFavorite(false)
+        vm.setIcon(app.kinjar.data.AccountSymbol.WALLET)
+        vm.setColor(app.kinjar.data.AccountTint.GREEN)
+        vm.save()
+        vm.state.first { it.done }
+        val reloaded = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "cash")), preferences).also { models += it }
+        reloaded.state.first { it.balance != null }
+        assertEquals(app.kinjar.data.AccountAppearance(app.kinjar.data.AccountSymbol.WALLET, app.kinjar.data.AccountTint.GREEN, false), reloaded.state.value.appearance)
+        val extra = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "extra")), preferences).also { models += it }
+        extra.state.first { it.balance != null && it.canFavorite }
+        extra.setFavorite(true)
+        extra.save()
+        extra.state.first { it.done }
+        assertEquals(listOf("card", "eur", "extra"), preferences.state.value.favorites(repo.accounts.first()).map { it.id })
+    }
     @After fun tearDown() {
         runTest(dispatcher) { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
         Dispatchers.resetMain()
