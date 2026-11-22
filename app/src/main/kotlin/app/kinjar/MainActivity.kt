@@ -42,6 +42,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -289,7 +291,8 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
     }
     val selectTab = remember(nav) {
         { tab: Tab ->
-            nav.navigate(tab.route) {
+            if (tab == Tab.SCAN) nav.navigate(Routes.add()) { launchSingleTop = true }
+            else nav.navigate(tab.route) {
                 popUpTo(Tab.HOME.route) { saveState = true }
                 launchSingleTop = true
                 restoreState = true
@@ -438,25 +441,24 @@ private fun TabPage(tab: Tab, onSelect: (Tab) -> Unit, content: @Composable () -
 private fun BottomBar(route: String?, onSelect: (Tab) -> Unit) {
     val c = LocalColors.current
     Box(Modifier.fillMaxWidth()) {
-        Column(Modifier.matchParentSize().padding(top = 24.dp).background(c.bg)) {
+        Column(Modifier.matchParentSize().padding(top = 12.dp).background(c.bg)) {
             HorizontalDivider(color = c.border, thickness = 1.dp)
         }
-        Row(Modifier.fillMaxWidth().height(104.dp).padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
+        Row(Modifier.fillMaxWidth().height(84.dp).padding(bottom = 6.dp), verticalAlignment = Alignment.Bottom) {
             Tab.entries.forEach { tab ->
                 val active = route == tab.route
                 val tint = if (active) c.primary else c.muted
                 Column(
                     Modifier.weight(1f).fillMaxHeight().semantics { selected = active }
-                        .clickable(interactionSource = null, indication = null, role = Role.Tab) { onSelect(tab) },
+                        .clickable(interactionSource = null, indication = null, role = if (tab == Tab.SCAN) Role.Button else Role.Tab) { onSelect(tab) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.Bottom),
                 ) {
                     if (tab == Tab.SCAN) {
                         Box(
-                            Modifier.size(72.dp).background(c.primary, CircleShape),
+                            Modifier.padding(bottom = 4.dp).size(72.dp).background(c.primary, CircleShape),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(tab.icon, contentDescription = null, tint = c.onPrimary, modifier = Modifier.size(26.dp)) }
-                        Text(stringResource(tab.label), style = sans(11, FontWeight.Medium), color = tint)
+                        ) { Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.home_add), tint = c.onPrimary, modifier = Modifier.size(32.dp)) }
                     } else {
                         Icon(tab.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
                         Text(stringResource(tab.label), style = sans(11, FontWeight.Medium), color = tint)
