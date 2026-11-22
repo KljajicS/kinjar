@@ -22,6 +22,45 @@ class HomeSummaryTest {
     private fun rsd(s: String) = Money.of(s, Currency.RSD)
 
     @Test
+    fun `native balances sum each currency without rates or foreign amounts`() {
+        val otherEur = Account("other-eur", "EUR card", Currency.EUR)
+        val usd = Account("usd", "USD", Currency.USD)
+        val accounts = listOf(cash, card, eurSavings, otherEur, usd)
+        val transactions = listOf(
+            tx("rsd-in", TransactionType.INCOME, "200000", cash),
+            tx("rsd-out", TransactionType.EXPENSE, "14000", card),
+            tx("eur-in", TransactionType.INCOME, "8500", eurSavings, currency = Currency.EUR),
+            tx("eur-out", TransactionType.EXPENSE, "50", otherEur, currency = Currency.EUR),
+            tx("usd-in", TransactionType.INCOME, "100", usd, currency = Currency.USD),
+        )
+        val withoutRates = HomeCalculator.summarize(today, accounts, transactions, Rates.EMPTY)
+        assertEquals(Money.of("8450", Currency.EUR), withoutRates.nativeBalance(Currency.EUR))
+        assertEquals(rsd("186000"), withoutRates.nativeBalance(Currency.RSD))
+        assertNull(withoutRates.savingsEur)
+        assertNull(withoutRates.savingsRsd)
+        val withRates = HomeCalculator.summarize(today, accounts, transactions,
+            Rates(mapOf(Currency.EUR to BigDecimal("117.5"), Currency.USD to BigDecimal("100"))))
+        assertEquals(withoutRates.nativeBalance(Currency.EUR), withRates.nativeBalance(Currency.EUR))
+        assertEquals(withoutRates.nativeBalance(Currency.RSD), withRates.nativeBalance(Currency.RSD))
+        assertEquals(rsd("1188875"), withRates.savingsRsd)
+    }
+
+    @Test
+    fun `native balances exclude archived and future amounts while retaining negative balances and transfers`() {
+        val oldEur = eurSavings.copy(archived = true)
+        val transactions = listOf(
+            tx("old", TransactionType.INCOME, "100", oldEur, currency = Currency.EUR),
+            tx("future", TransactionType.INCOME, "2000", cash, date = today.plusDays(1)),
+            tx("expense", TransactionType.EXPENSE, "100", cash),
+            tx("transfer", TransactionType.TRANSFER, "50", cash, to = card),
+        )
+        val summary = HomeCalculator.summarize(today, listOf(cash, card, oldEur), transactions, rates)
+        assertEquals(Money.zero(Currency.EUR), summary.nativeBalance(Currency.EUR))
+        assertEquals(rsd("-100"), summary.nativeBalance(Currency.RSD))
+        assertEquals(Money.zero(Currency.USD), summary.nativeBalance(Currency.USD))
+    }
+
+    @Test
     fun `excluded foreign balance without a rate does not block goals`() {
         val excluded = eurSavings.copy(excludedFromGoals = true)
         val home = HomeCalculator.summarize(today, listOf(cash, excluded), listOf(

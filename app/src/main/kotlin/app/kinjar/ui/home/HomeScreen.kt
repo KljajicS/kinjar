@@ -38,14 +38,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kinjar.R
@@ -59,25 +61,20 @@ import app.kinjar.domain.Transaction
 import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.ui.formatTransactionDate
-import app.kinjar.ui.RateStatus
 import app.kinjar.ui.categoryDisplayName
 import app.kinjar.ui.categoryIcon
 import app.kinjar.ui.formatAmount
-import app.kinjar.ui.monthLocale
 import app.kinjar.ui.monthName
-import app.kinjar.ui.theme.BigAmountStyle
 import app.kinjar.ui.theme.BodyStyle
 import app.kinjar.ui.theme.CaptionStyle
 import app.kinjar.ui.theme.LabelStyle
 import app.kinjar.ui.theme.LocalColors
-import app.kinjar.ui.theme.OutlinedBox
 import app.kinjar.ui.theme.SectionStyle
 import app.kinjar.ui.theme.TitleStyle
 import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
@@ -124,8 +121,7 @@ fun HomeScreen(
         }
         if (failed) item { LoadFailed(vm::retry) }
         if (held.failed) item { ConflictCheckFailed(R.string.audit_conflict_list_failed, conflicts::retry) }
-        item { SavingsCard(s, locale) }
-        item { MonthSection(s, locale) }
+        item { OverviewCard(s, locale) }
         if (s.budgets.isNotEmpty() || s.upcomingBudgets.isNotEmpty()) item { WeeklyBudgetsCard(s, onCategories) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -166,103 +162,83 @@ fun AccountTile(name: String, color: Color) {
 }
 
 @Composable
-private fun SavingsCard(s: HomeState, locale: Locale) {
+private fun OverviewCard(s: HomeState, locale: Locale) {
     val c = LocalColors.current
-    val eur = s.summary.savingsEur
-    val rsd = s.summary.savingsRsd
-    val primary = eur ?: rsd
     Column(
         Modifier.fillMaxWidth().background(c.surface2, RoundedCornerShape(24.dp)).padding(horizontal = 20.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(stringResource(R.string.home_total_savings).uppercase(locale), style = sans(13, FontWeight.Medium, 0.06.em), color = c.muted)
-        if (primary == null) {
-            Text("-", style = BigAmountStyle, color = c.muted)
-            Text(stringResource(R.string.home_savings_unavailable), style = LabelStyle, color = c.orange)
+        OverviewColumns(
+            first = { CurrencyBalance(s.summary.nativeBalance(Currency.EUR), locale, it) },
+            second = { CurrencyBalance(s.summary.nativeBalance(Currency.RSD), locale, it) },
+        )
+        val totals = listOfNotNull(s.summary.savingsEur, s.summary.savingsRsd)
+        if (totals.isNotEmpty()) {
+            Text(totals.joinToString(" · ") { "≈ ${formatAmount(it, locale = locale)} ${it.currency.name}" },
+                style = mono(11), color = c.muted, modifier = Modifier.padding(top = 12.dp))
+        }
+        if (totals.size < 2) {
+            Text(stringResource(R.string.home_savings_unavailable), style = CaptionStyle, color = c.orange, modifier = Modifier.padding(top = 8.dp))
+        }
+        HorizontalDivider(Modifier.padding(vertical = 18.dp), color = c.border)
+        Text(monthName(YearMonth.from(s.today), locale), style = sans(13, FontWeight.SemiBold), color = c.text)
+        Spacer(Modifier.size(14.dp))
+        OverviewColumns(
+            first = { MonthlyAmount(s.summary.income, income = true, locale, it) },
+            second = { MonthlyAmount(s.summary.spent, income = false, locale, it) },
+        )
+        if (s.summary.monthPartial) {
+            Text(stringResource(R.string.home_partial), style = CaptionStyle, color = c.orange, modifier = Modifier.padding(top = 10.dp))
+        }
+    }
+}
+
+@Composable
+private fun OverviewColumns(first: @Composable (Modifier) -> Unit, second: @Composable (Modifier) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (LocalDensity.current.fontScale > 1.3f || maxWidth < 280.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                first(Modifier.fillMaxWidth())
+                second(Modifier.fillMaxWidth())
+            }
         } else {
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(formatAmount(primary, locale = locale), style = BigAmountStyle, color = c.text)
-                Text(primary.currency.name, style = mono(22, FontWeight.SemiBold), color = c.text, modifier = Modifier.padding(bottom = 5.dp))
-            }
-            if (eur != null && rsd != null) Text("≈ ${formatAmount(rsd, locale = locale)} RSD", style = mono(17), color = c.muted)
-            if (eur == null) Text(stringResource(R.string.home_eur_unavailable), style = LabelStyle, color = c.orange)
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.home_all_balances), style = LabelStyle, color = c.muted, modifier = Modifier.weight(1f))
-            rateSource(s.rateStatus, locale)?.let { Text(it, style = LabelStyle, color = c.muted) }
-        }
-    }
-}
-
-@Composable
-private fun rateSource(status: RateStatus, locale: Locale): String? {
-    val snapshot = status.snapshot
-    if (Currency.EUR in snapshot.overrides) return stringResource(R.string.home_rate_manual)
-    val quote = snapshot.cached[Currency.EUR] ?: return null
-    return stringResource(R.string.home_rate_nbs, quote.effectiveDate.format(DateTimeFormatter.ofPattern("d MMM", monthLocale(locale))))
-}
-
-@Composable
-private fun MonthSection(s: HomeState, locale: Locale) {
-    val c = LocalColors.current
-    val month = YearMonth.from(s.today)
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column {
-            Text(stringResource(R.string.home_this_month), style = SectionStyle, color = c.text)
-            Text(stringResource(R.string.home_month_range, month.lengthOfMonth(), monthName(month, locale)), style = LabelStyle, color = c.muted)
-        }
-        MonthCard(s.summary.income, s.summary.spent, s.summary.difference, locale)
-        if (s.summary.monthPartial) Text(stringResource(R.string.home_partial), style = CaptionStyle, color = c.orange)
-    }
-}
-
-@Composable
-private fun MonthCard(income: Money, spent: Money, difference: Money, locale: Locale) {
-    val c = LocalColors.current
-    OutlinedBox(Modifier.fillMaxWidth(), radius = 18, padding = PaddingValues(16.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val stacked = LocalDensity.current.fontScale > 1.3f || maxWidth < 280.dp
-            val incomeStat = @Composable { m: Modifier -> MonthStat(stringResource(R.string.home_income), income, sign = true, c.green, m, locale) }
-            val spentStat = @Composable { m: Modifier -> MonthStat(stringResource(R.string.home_spent), spent, sign = false, c.red, m, locale) }
-            if (stacked) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    incomeStat(Modifier.fillMaxWidth())
-                    spentStat(Modifier.fillMaxWidth())
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    incomeStat(Modifier.weight(1f))
-                    spentStat(Modifier.weight(1f))
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                first(Modifier.weight(1f))
+                second(Modifier.weight(1f))
             }
         }
-        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = c.border)
-        val tone = when {
-            difference.isZero -> c.text
-            difference.isNegative -> c.red
-            else -> c.green
-        }
-        MonthStat(stringResource(R.string.home_difference), difference, sign = true, tone, Modifier.fillMaxWidth(), locale)
     }
 }
 
-/** Amount and currency share one wrapping Text so a large font or narrow screen breaks the line instead of clipping digits. */
 @Composable
-private fun MonthStat(title: String, value: Money, sign: Boolean, color: Color, modifier: Modifier, locale: Locale) {
+private fun CurrencyBalance(value: Money, locale: Locale, modifier: Modifier) {
     val c = LocalColors.current
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = LabelStyle, color = c.muted)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(value.currency.name, style = LabelStyle, color = c.muted)
+        Text(formatAmount(value, locale = locale), style = mono(28, FontWeight.SemiBold), color = c.text)
+    }
+}
+
+@Composable
+private fun MonthlyAmount(value: Money, income: Boolean, locale: Locale, modifier: Modifier) {
+    val c = LocalColors.current
+    val color = if (income) c.green else c.red
+    val label = stringResource(if (income) R.string.home_income else R.string.home_spent)
+    val amount = formatAmount(value, locale = locale)
+    Column(
+        modifier.clearAndSetSemantics { contentDescription = "$label: $amount ${value.currency.name}" },
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
         Text(
             buildAnnotatedString {
-                append(formatAmount(value, sign = sign, locale = locale))
-                append(' ')
-                withStyle(sans(13).toSpanStyle()) { append(value.currency.name) }
+                append(if (income) "+" else "−")
+                withStyle(SpanStyle(fontSize = 4.sp)) { append('\u00A0') }
+                append(amount)
             },
-            style = mono(20, FontWeight.SemiBold), color = color,
+            style = mono(20, FontWeight.Medium), color = color,
         )
+        Text(value.currency.name, style = sans(11), color = color)
     }
 }
-
 
 @Composable
 internal fun RecentRow(r: RecentTx, accountNames: Map<String, String>, me: String?, today: LocalDate, onEdit: (String) -> Unit, held: Boolean = false) {

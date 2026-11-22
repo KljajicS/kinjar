@@ -21,6 +21,9 @@ data class HomeSummary(
     val goalPoolRsd: BigDecimal? = savingsPoolRsd,
 ) {
     val difference: Money get() = income - spent
+
+    fun nativeBalance(currency: Currency): Money = balances.values
+        .filter { it.currency == currency }.fold(Money.zero(currency), Money::plus)
 }
 
 object HomeCalculator {
