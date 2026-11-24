@@ -4,6 +4,10 @@ Status: rules and indexes deployed to the owner's private project on 8 November 
 
 ## Owner-controlled project setup
 
+Account appearance sync uses operation version 13 and history stream version 11. Deploy the updated rules before releasing this client, then update both phones. Older clients request an update when receiving these formats. Existing account events retain their original bytes; older account edits preserve the shared icon and color.
+
+At startup, existing device preferences fill unset account icons and colors through normal synchronized events. Existing shared values win. Migration retains the local preferences, is safe to retry, and waits until a later startup if recovery, a paused session, or unresolved conflicts prevent writing. Favorites and visibility remain device-local. Different offline choices on two phones use the existing conflict-resolution flow. Rolling back to an older APK cannot read the new history; keep an exported pre-upgrade backup if rollback is needed.
+
 1. Create a project in the [Firebase console](https://console.firebase.google.com/). Keep Spark, with no linked billing account. Do not enable Functions, Cloud Storage, paid backups or automatic billing upgrades.
 2. Register Android app `app.kinjar`. Add SHA-1 and SHA-256 fingerprints for the actual signing certificate used by each test/release build. Register debug fingerprints only for development.
 3. Enable Google only under Authentication, Sign-in method. Configure support email and OAuth consent/test users in [Google Auth Platform](https://console.cloud.google.com/auth/overview). Use the Web OAuth client ID for Credential Manager, not the Android client ID.

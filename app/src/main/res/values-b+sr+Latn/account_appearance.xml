@@ -5,7 +5,7 @@
     <string name="account_quick_favorite">Prikaži u brzom izboru</string>
     <string name="account_favorite_hint">Izaberite do 3 računa. Koristi redosled sa liste računa.</string>
     <string name="account_favorite_limit">Izabrana su 3 omiljena računa. Prvo isključite jedan u njegovim podešavanjima.</string>
-    <string name="account_appearance_local">Ikonice, boje i omiljeni računi važe na ovom uređaju.</string>
+    <string name="account_appearance_local">Ikonice i boje se sinhronizuju sa porodicom. Omiljeni računi i vidljivost važe na ovom uređaju.</string>
     <string name="account_favorite_badge">Omiljeni</string>
     <string name="account_selected">Izabrano</string>
     <string name="account_search">Pretraži naziv ili valutu</string>

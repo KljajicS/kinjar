@@ -28,6 +28,16 @@ data class AccountAppearances(
 ) {
     fun appearance(id: String) = accounts[id] ?: AccountAppearance()
 
+    fun withSharedAppearance(shared: List<Account>): AccountAppearances = copy(
+        accounts = accounts + shared.associate { account ->
+            val local = appearance(account.id)
+            account.id to local.copy(
+                icon = account.icon?.let { key -> AccountSymbol.entries.find { it.name == key } ?: AccountSymbol.BANK } ?: local.icon,
+                color = account.color?.let { key -> AccountTint.entries.find { it.name == key } ?: AccountTint.PURPLE } ?: local.color,
+            )
+        },
+    )
+
     fun visibleInAdd(active: List<Account>): List<Account> = active.filter { !it.archived && appearance(it.id).showInAdd }
 
     fun favorites(active: List<Account>): List<Account> = visibleInAdd(active).let { eligible ->

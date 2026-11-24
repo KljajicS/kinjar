@@ -112,7 +112,9 @@ class FinancialIntegrity private constructor(
     private fun apply(event: Event, strict: Boolean, id: String? = null) {
         when (event) {
             is AccountCreated -> accounts.putIfAbsent(event.account.id, event.account)
-            is AccountUpdated -> accounts[event.account.id]?.let { accounts[it.id] = event.account.copy(archived = it.archived) }
+            is AccountUpdated -> accounts[event.account.id]?.let {
+                accounts[it.id] = event.account.copy(archived = it.archived, icon = event.account.icon ?: it.icon, color = event.account.color ?: it.color)
+            }
             is AccountArchived -> accounts[event.accountId]?.let { accounts[it.id] = it.copy(archived = true) }
             is TransactionAdded -> {
                 if (strict) require(transactions[event.transaction.id]?.let { it == event.transaction } != false) { "Conflicting duplicate transaction" }

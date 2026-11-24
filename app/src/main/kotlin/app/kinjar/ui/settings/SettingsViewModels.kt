@@ -289,6 +289,7 @@ class EditAccountViewModel @Inject constructor(
     val state: StateFlow<EditAccountState> = _state
     private val accountId = savedState.get<String>("id") ?: newId()
     private var originalAccount: Account? = null
+    private var originalAppearance: app.kinjar.data.AccountAppearance? = null
 
     private var loading: Job? = null
     private var initialized = false
@@ -310,7 +311,8 @@ class EditAccountViewModel @Inject constructor(
                     val used = repo.accountInUse(id)
                     val a = requireNotNull(repo.accounts.first().firstOrNull { it.id == id })
                     originalAccount = a
-                    val appearance = appearances.state.value.withDefaults(repo.accounts.first()).appearance(id)
+                    val appearance = appearances.state.value.withDefaults(repo.accounts.first()).withSharedAppearance(listOf(a)).appearance(id)
+                    originalAppearance = appearance
                     _state.update { it.copy(name = a.name, currency = a.currency, kind = a.kind, currencyLocked = used, excludedFromGoals = a.excludedFromGoals, appearance = appearance) }
                     initialized = true
                 }
@@ -346,7 +348,10 @@ class EditAccountViewModel @Inject constructor(
         writes.run {
             val active = repo.accounts.first()
             kotlinx.coroutines.withContext(Dispatchers.IO) { appearances.save(accountId, s.appearance, active) }
-            val account = Account(accountId, s.name.trim(), s.currency, s.kind, excludedFromGoals = s.excludedFromGoals)
+            val appearanceChanged = s.id == null || s.appearance.icon != originalAppearance?.icon || s.appearance.color != originalAppearance?.color
+            val account = Account(accountId, s.name.trim(), s.currency, s.kind, excludedFromGoals = s.excludedFromGoals,
+                icon = if (appearanceChanged) s.appearance.icon.name else originalAccount?.icon,
+                color = if (appearanceChanged) s.appearance.color.name else originalAccount?.color)
             if (s.id == null) repo.addAccount(account) else if (account != originalAccount) repo.updateAccount(account)
             _state.update { it.copy(done = true) }
         }

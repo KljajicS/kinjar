@@ -62,6 +62,21 @@ class AccountsViewModelTest {
         assertEquals(events, db.eventQueries.count().executeAsOne())
     }
 
+    @Test fun `changing only color also publishes legacy local icon`() = runTest(dispatcher) {
+        val account = Account("cash", "Cash", Currency.RSD)
+        repo.setUp("S", listOf(account))
+        val preferences = app.kinjar.data.AccountAppearanceStore()
+        preferences.save("cash", app.kinjar.data.AccountAppearance(icon = app.kinjar.data.AccountSymbol.WALLET), listOf(account))
+        val vm = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "cash")), preferences).also { models += it }
+        vm.state.first { it.balance != null }
+        vm.setColor(app.kinjar.data.AccountTint.BLUE)
+        vm.save()
+        vm.state.first { it.done }
+        val saved = repo.accounts.first().single()
+        assertEquals("WALLET", saved.icon)
+        assertEquals("BLUE", saved.color)
+    }
+
     @Test fun `favorite icon and color save in account settings and reload`() = runTest(dispatcher) {
         repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD), Account("card", "Card", Currency.RSD),
             Account("eur", "Euro", Currency.EUR), Account("extra", "Extra", Currency.RSD)))
@@ -74,6 +89,8 @@ class AccountsViewModelTest {
         vm.setColor(app.kinjar.data.AccountTint.GREEN)
         vm.save()
         vm.state.first { it.done }
+        assertEquals("WALLET", repo.accounts.first().first { it.id == "cash" }.icon)
+        assertEquals("GREEN", repo.accounts.first().first { it.id == "cash" }.color)
         val reloaded = EditAccountViewModel(repo, SavedStateHandle(mapOf("id" to "cash")), preferences).also { models += it }
         reloaded.state.first { it.balance != null }
         assertEquals(app.kinjar.data.AccountAppearance(app.kinjar.data.AccountSymbol.WALLET, app.kinjar.data.AccountTint.GREEN, false), reloaded.state.value.appearance)

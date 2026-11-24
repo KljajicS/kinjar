@@ -136,7 +136,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     @Inject lateinit var appLock: AppLock
-    @Inject lateinit var accountAppearances: app.kinjar.data.AccountAppearanceStore
     @Inject lateinit var sync: dagger.Lazy<app.kinjar.data.sync.SyncCoordinator>
     private lateinit var prompter: LockPrompter
     private val screenOff = object : BroadcastReceiver() {
@@ -172,7 +171,7 @@ class MainActivity : AppCompatActivity() {
             // Observe lock changes without waiting for the lifecycle-aware collector to restart.
             val lock by appLock.state.collectAsState()
             val screens = rememberSaveableStateHolder()
-            val appearances by accountAppearances.state.collectAsStateWithLifecycle()
+            val appearances by root.appearances.collectAsStateWithLifecycle()
             KinjarTheme(dark) {
                 androidx.compose.runtime.CompositionLocalProvider(app.kinjar.ui.LocalAccountAppearances provides appearances) {
                 if (lock.locked) LockScreen(lock) { appLock.request(LockPurpose.UNLOCK) }
@@ -229,7 +228,11 @@ class MainActivity : AppCompatActivity() {
 }
 
 @HiltViewModel
-class RootViewModel @Inject constructor(private val repo: Lazy<BudgetRepository>, themeStore: ThemeStore, private val rateRefresh: Lazy<RateRefresh>) : ViewModel() {
+class RootViewModel @Inject constructor(private val repo: Lazy<BudgetRepository>, themeStore: ThemeStore, private val rateRefresh: Lazy<RateRefresh>,
+    private val accountAppearances: app.kinjar.data.AccountAppearanceStore = app.kinjar.data.AccountAppearanceStore(),
+) : ViewModel() {
+    private val sharedAppearances = MutableStateFlow(accountAppearances.state.value)
+    val appearances: StateFlow<app.kinjar.data.AccountAppearances> = sharedAppearances
     private val member = MutableStateFlow<Boolean?>(null)
     val hasMember: StateFlow<Boolean?> = member
     private val failure = MutableStateFlow(false)
@@ -249,7 +252,21 @@ class RootViewModel @Inject constructor(private val repo: Lazy<BudgetRepository>
         failure.value = false
         viewModelScope.launch {
             try {
-                member.value = withContext(Dispatchers.IO) { repo.get().members.first().isNotEmpty() }
+                val repository = withContext(Dispatchers.IO) { repo.get() }
+                repository.migrateAccountAppearances(accountAppearances.state.value)
+                member.value = repository.members.first().isNotEmpty()
+                viewModelScope.launch {
+                    try {
+                        kotlinx.coroutines.flow.combine(repository.allAccounts, accountAppearances.state) { accounts, local ->
+                            local.withSharedAppearance(accounts)
+                        }.collect { sharedAppearances.value = it }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        member.value = null
+                        failure.value = true
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
