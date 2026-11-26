@@ -26,7 +26,7 @@ data class WeeklyBudget(
 @Serializable @SerialName("WeeklyBudgetSet")
 data class WeeklyBudgetSet(val budget: WeeklyBudget) : Event
 
-data class WeeklyBudgetProgress(val budget: WeeklyBudget, val spent: Money?) {
+data class WeeklyBudgetProgress(val budget: WeeklyBudget, val spent: Money?, val expenses: List<Transaction>) {
     val remaining: Money? get() = spent?.let { requireNotNull(budget.limit) - it }
     val ratio: BigDecimal? get() = spent?.amount?.divide(requireNotNull(budget.limit).amount, 4, RoundingMode.HALF_UP)
 }
@@ -42,9 +42,10 @@ object WeeklyBudgetCalculator {
         val expenses = transactions.filter { it.type == TransactionType.EXPENSE && it.date in start..start.plusDays(6) && it.date <= today }
             .groupBy { it.categoryId }
         return active(schedule, start).map { budget ->
-            val amounts = expenses[budget.categoryId].orEmpty().map { rates.convert(it.money) }
+            val categoryExpenses = expenses[budget.categoryId].orEmpty()
+            val amounts = categoryExpenses.map { rates.convert(it.money) }
             val spent = if (amounts.any { it == null }) null else amounts.filterNotNull().fold(Money.zero(Currency.RSD), Money::plus)
-            WeeklyBudgetProgress(budget, spent)
+            WeeklyBudgetProgress(budget, spent, categoryExpenses.sortedWith(compareByDescending<Transaction> { it.date }.thenByDescending { it.id }))
         }
     }
 }

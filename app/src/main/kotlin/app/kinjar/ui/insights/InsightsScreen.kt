@@ -47,11 +47,11 @@ import app.kinjar.domain.InsightsSummary
 import app.kinjar.domain.Money
 import app.kinjar.domain.MonthTotals
 import app.kinjar.domain.Slice
+import app.kinjar.ui.ExpenseRows
 import app.kinjar.ui.RateNotice
 import app.kinjar.ui.categoryDisplayName
 import app.kinjar.ui.formatAmount
 import app.kinjar.ui.formatCompact
-import app.kinjar.ui.monthLocale
 import app.kinjar.ui.monthName
 import app.kinjar.ui.theme.BodyStyle
 import app.kinjar.ui.theme.CaptionStyle
@@ -63,7 +63,6 @@ import app.kinjar.ui.theme.mono
 import app.kinjar.ui.theme.sans
 import java.math.BigDecimal
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -188,23 +187,11 @@ private fun SpendingCard(sum: InsightsSummary, categories: Map<String, Category>
 private fun DrilldownCard(s: InsightsState, slice: Slice, onClose: () -> Unit) {
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
-    val dates = DateTimeFormatter.ofPattern("d MMM", monthLocale(locale))
     Card {
         CardTitle("${categoryName(slice.categoryId, s.categories)} · ${monthName(s.summary.month, locale)}") {
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, stringResource(R.string.add_close), tint = c.muted) }
         }
-        if (s.drilldown.isEmpty()) Text(stringResource(R.string.insights_drilldown_empty), style = LabelStyle, color = c.muted)
-        s.drilldown.forEachIndexed { i, t ->
-            if (i > 0) HorizontalDivider(color = c.border, thickness = 1.dp)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
-                    val title = t.merchant.ifBlank { t.note }.ifBlank { categoryName(t.categoryId, s.categories) }
-                    Text(title, style = sans(14, FontWeight.Medium), color = c.text, maxLines = 1)
-                    Text(listOfNotNull(t.date.format(dates), s.accountNames[t.accountId]).joinToString(" · "), style = CaptionStyle, color = c.muted)
-                }
-                Text("-${formatAmount(t.money, locale = locale)} ${t.money.currency}", style = mono(14), color = c.text)
-            }
-        }
+        ExpenseRows(s.drilldown, s.categories, s.accountNames)
     }
 }
 
