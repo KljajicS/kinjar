@@ -1,5 +1,7 @@
 package app.kinjar.data
 
+import app.kinjar.domain.bankMovement
+
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import kotlinx.coroutines.CoroutineScope
@@ -195,12 +197,14 @@ class BudgetRepository(
     suspend fun archiveRule(id: String) { store.append(RecurringRuleArchived(id)) }
     suspend fun skipBill(ruleId: String, period: String) { store.append(BillSkipped(ruleId, period)) }
 
-    suspend fun currentMember(): Member? = withContext(Dispatchers.IO) {
+    suspend fun currentMember(): Member? = withContext(Dispatchers.IO) { currentMemberRow()?.toDomain() }
+
+    private fun currentMemberRow(): app.kinjar.data.db.Member? {
         db.syncSessionQueries.current().executeAsOneOrNull()?.let { session ->
-            return@withContext db.memberQueries.all().executeAsList().find { it.id == session.member_id }?.toDomain()
+            return db.memberQueries.all().executeAsList().find { it.id == session.member_id }
         }
-        db.memberQueries.byDevice(deviceId).executeAsOneOrNull()?.toDomain()
-            ?: db.memberQueries.all().executeAsList().firstOrNull()?.toDomain()
+        return db.memberQueries.byDevice(deviceId).executeAsOneOrNull()
+            ?: db.memberQueries.all().executeAsList().firstOrNull()
     }
 
     suspend fun setUp(displayName: String, accounts: List<Account>, incomeCategories: List<Category> = StarterCategories.income) {
@@ -298,6 +302,27 @@ class BudgetRepository(
             require(t.type != TransactionType.LOAN_RECEIPT)
             storedTransaction(t.id)?.let { requireUnchanged(t, it) }
             validateTransaction(t)
+        }
+    }
+
+    suspend fun saveBankDraft(alertId: String, t: Transaction) {
+        store.append(TransactionAdded(t)) {
+            db.requirePendingBankAlert(alertId)
+            require(t.type in setOf(TransactionType.EXPENSE, TransactionType.INCOME, TransactionType.TRANSFER))
+            require(t.source == TransactionSource.MANUAL && t.paidBy == currentMemberRow()?.id)
+            require(t.type == TransactionType.TRANSFER || t.categoryId != null)
+            require(storedTransaction(t.id) == null)
+            validateTransaction(t)
+            db.bankInboxQueries.resolve("LINKED", t.id, alertId)
+        }
+    }
+
+    suspend fun linkBankDraft(alertId: String, transactionId: String, accountId: String, movement: Money) = withContext(Dispatchers.IO) {
+        store.read {
+            db.requirePendingBankAlert(alertId)
+            val t = requireNotNull(storedTransaction(transactionId))
+            require(t.bankMovement(accountId) == movement) { "Transaction does not match the reviewed movement" }
+            db.bankInboxQueries.resolve("LINKED", transactionId, alertId)
         }
     }
 

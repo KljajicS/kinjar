@@ -79,6 +79,7 @@ import java.util.Locale
 fun HomeScreen(
     onSyncSettings: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
     onCategories: () -> Unit,
+    onOpenBankInbox: () -> Unit,
     onEditTransaction: (String) -> Unit = {}, vm: HomeViewModel = hiltViewModel(),
     conflicts: TransactionConflictViewModel = hiltViewModel(),
     sync: HomeSyncViewModel = hiltViewModel(),
@@ -118,6 +119,7 @@ fun HomeScreen(
                 }
                 HomeSyncButton(syncState, { sync.synchronize() }, { sync.synchronize(force = true) }, onSyncSettings)
             }
+            app.kinjar.ui.bank.BankInboxEntry(onOpenBankInbox)
         }
         if (failed) item { LoadFailed(vm::retry) }
         if (held.failed) item { ConflictCheckFailed(R.string.audit_conflict_list_failed, conflicts::retry) }

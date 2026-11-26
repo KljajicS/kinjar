@@ -26,6 +26,13 @@ data class BankNotification(
     val cashWithdrawal: Boolean = false,
 )
 
+fun Transaction.bankMovement(accountId: String): Money? = when {
+    type == TransactionType.LOAN_RECEIPT -> null
+    this.accountId == accountId -> if (type == TransactionType.INCOME) money else -money
+    toAccountId == accountId -> received ?: money
+    else -> null
+}
+
 object BankNotificationParser {
     private val datePattern = Regex("""\b(\d{2}\.\d{2}\.\d{4})(?:\s+(\d{2}:\d{2}:\d{2}))?""")
     private val dateFormat = DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.ROOT).withResolverStyle(ResolverStyle.STRICT)

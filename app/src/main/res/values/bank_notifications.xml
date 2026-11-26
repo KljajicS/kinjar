@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bank_notifications">Bank notifications</string>
+    <string name="bank_app">Bank app</string>
+    <string name="bank_off">Off</string>
+    <string name="bank_raiffeisen">Raiffeisen · Moja mBanka</string>
+    <string name="bank_yettel">Yettel Bank</string>
+    <string name="bank_grant_access">Allow notification access</string>
+    <string name="bank_review_before_save">Review each notification before saving.</string>
+    <string name="bank_empty">No bank notifications to review.</string>
+    <string name="bank_review">Review transaction</string>
+    <string name="bank_unavailable">This notification is no longer pending.</string>
+    <string name="bank_expense">Expense</string>
+    <string name="bank_income">Income</string>
+    <string name="bank_transfer">Transfer</string>
+    <string name="bank_amount">Amount %1$s</string>
+    <string name="bank_counterparty">Merchant or payer</string>
+    <string name="bank_account">Bank account</string>
+    <string name="bank_choose">Choose</string>
+    <string name="bank_money_out">Money out</string>
+    <string name="bank_money_in">Money in</string>
+    <string name="bank_from">From account</string>
+    <string name="bank_to">To account</string>
+    <string name="bank_category">Category</string>
+    <string name="bank_date">Date</string>
+    <string name="bank_available">Bank available balance: %1$s</string>
+    <string name="bank_reported">Reported balance: %1$s</string>
+    <string name="bank_link">Link existing transaction</string>
+    <string name="bank_original">Original notification</string>
+    <string name="bank_save">Save transaction</string>
+    <string name="bank_skip">Skip</string>
+    <plurals name="bank_pending">
+        <item quantity="one">%d bank notification to review</item>
+        <item quantity="other">%d bank notifications to review</item>
+    </plurals>
+</resources>

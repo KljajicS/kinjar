@@ -17,7 +17,7 @@ enum class PageKind { TAB, DETAIL, FORM }
 enum class Motion { NONE, PUSH, RISE }
 
 internal val formRoutes = setOf(
-    Routes.ADD, Routes.EDIT_TRANSACTION, Routes.CLOUD_SETUP,
+    Routes.ADD, Routes.EDIT_TRANSACTION, Routes.CLOUD_SETUP, Routes.BANK_REVIEW,
     Routes.NEW_CATEGORY, Routes.EDIT_CATEGORY, Routes.NEW_RECURRING, Routes.EDIT_RECURRING,
     Routes.NEW_ACCOUNT, Routes.EDIT_ACCOUNT, Routes.NEW_LOAN, Routes.EDIT_LOAN,
     Routes.NEW_GOAL, Routes.EDIT_GOAL,
@@ -27,7 +27,7 @@ internal val formRoutes = setOf(
 
 internal val detailRoutes = setOf(
     Routes.SETUP, Routes.ACTIVITY, Routes.SETTINGS, Routes.PROFILE, Routes.FAMILY, Routes.BACKUP,
-    Routes.EXCHANGE_RATES, Routes.CATEGORIES, Routes.RECURRING, Routes.LOAN,
+    Routes.EXCHANGE_RATES, Routes.CATEGORIES, Routes.RECURRING, Routes.LOAN, Routes.BANK_INBOX,
     Routes.PROJECT, Routes.PROJECT_COSTS, Routes.PROJECT_SETTINGS,
 )
 
