@@ -13,6 +13,7 @@ data class FinancialSnapshot(
     val home: HomeSummary,
     val exchange: ExchangeRateSnapshot,
     val missingCurrencies: Set<Currency>,
+    val bankCheckpoints: Map<String, BankBalanceCheckpoint> = emptyMap(),
 ) {
     val activeAccounts: List<Account> get() = accounts.filterNot { it.archived }
 }

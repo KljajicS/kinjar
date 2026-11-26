@@ -27,8 +27,7 @@ data class BankNotification(
 )
 
 fun Transaction.bankMovement(accountId: String): Money? = when {
-    type == TransactionType.LOAN_RECEIPT -> null
-    this.accountId == accountId -> if (type == TransactionType.INCOME) money else -money
+    this.accountId == accountId -> if (type == TransactionType.INCOME || type == TransactionType.LOAN_RECEIPT) money else -money
     toAccountId == accountId -> received ?: money
     else -> null
 }

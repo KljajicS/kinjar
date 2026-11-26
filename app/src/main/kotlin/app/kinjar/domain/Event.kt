@@ -11,6 +11,14 @@ import java.time.YearMonth
 @Serializable
 sealed interface Event
 
+@Serializable @SerialName("BankBalanceCheckpointSet")
+data class BankBalanceCheckpointSet(val accountId: String, val checkpoint: BankBalanceCheckpoint?) : Event {
+    init { require(accountId.length in 1..128 && (checkpoint == null || checkpoint.accountId == accountId)) }
+}
+
+@Serializable @SerialName("BankMovementVerified")
+data class BankMovementVerified(val evidence: BankMovementEvidence) : Event
+
 @Serializable @SerialName("ExchangeRateOverrideSet")
 data class ExchangeRateOverrideSet(val currency: Currency, val rate: String?) : Event {
     init {

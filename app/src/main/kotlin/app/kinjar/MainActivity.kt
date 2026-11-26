@@ -342,6 +342,7 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                         onCategories = { nav.navigate(Routes.CATEGORIES) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
                         onOpenBankInbox = { nav.navigate(Routes.bankInbox()) },
+                        onReviewBankAccount = { nav.navigate(Routes.editAccount(it)) },
                         onEditTransaction = { nav.navigate(Routes.editTransaction(it)) },
                     )
                 }

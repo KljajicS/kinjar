@@ -41,11 +41,14 @@ class EventStore(
 
     suspend fun append(event: Event, validate: () -> Unit = {}): EventRecord = appendAll(listOf(event), validate = validate).single()
 
-    suspend fun appendAll(events: List<Event>, skipIf: () -> Boolean = { false }, validate: () -> Unit = {}): List<EventRecord> = withContext(Dispatchers.IO) {
+    suspend fun appendAll(events: List<Event>, skipIf: () -> Boolean = { false }, validate: () -> Unit = {}): List<EventRecord> =
+        appendBuilt(skipIf) { validate(); events }
+
+    internal suspend fun appendBuilt(skipIf: () -> Boolean = { false }, build: () -> List<Event>): List<EventRecord> = withContext(Dispatchers.IO) {
         synchronized(writeLock) {
             db.transactionWithResult {
                 if (skipIf()) return@transactionWithResult emptyList()
-                validate()
+                val events = build()
                 check(db.restoreJournalQueries.journalInfo().executeAsOneOrNull()?.phase !in setOf("CREATE", "RESTORE", "SWITCH")) { "Finish family setup or restore before editing finances" }
                 val session = db.syncSessionQueries.current().executeAsOneOrNull()
                 if (session != null) {

@@ -1,6 +1,10 @@
 package app.kinjar.data
 
 import app.kinjar.domain.bankMovement
+import app.kinjar.domain.BankBalanceAction
+import app.kinjar.domain.BankBalanceCheckpoint
+import app.kinjar.domain.BankBalanceCheckpointSet
+import app.kinjar.domain.EventJson
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
@@ -151,23 +155,33 @@ class BudgetRepository(
     val goals: Flow<List<Goal>> =
         db.goalQueries.active().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
-    private val financialInputs = combine(today, allAccounts, transactions, exchangeRates.snapshots) { day, accs, txs, rates ->
-        FinancialInputs(day, accs, txs, rates)
+    private val bankLedger = db.bankReconciliationQueries.balanceInputs().asFlow().map {
+        withContext(Dispatchers.IO) {
+            store.read {
+                Triple(db.accountQueries.all().executeAsList().map { it.toDomain() },
+                    db.txQueries.all().executeAsList().map { it.toDomain() },
+                    db.bankReconciliationQueries.checkpoints().executeAsList().associate { it.account_id to EventJson.decodeFromString<BankBalanceCheckpoint>(it.payload) })
+            }
+        }
+    }
+
+    private val financialInputs = combine(today, bankLedger, exchangeRates.snapshots) { day, (accs, txs, checkpoints), rates ->
+        FinancialInputs(day, accs, txs, rates, checkpoints)
     }
     private val commitments = combine(rules, skips, goals) { rs, ss, gs -> Commitments(rs, ss, gs) }
 
     val financial: Flow<FinancialSnapshot> = financialInputs.combine(commitments) { input, commitments ->
-        val (day, allAccs, txs, exchange) = input
+        val (day, allAccs, txs, exchange, checkpoints) = input
         val rates = exchange.rates
         val active = allAccs.filterNot { it.archived }
         val bills = BillCalculator.upcoming(day, commitments.rules, active.map { it.id }.toSet(), txs, commitments.skips)
-        val home = HomeCalculator.summarize(day, allAccs, txs, rates)
+        val home = HomeCalculator.summarize(day, allAccs, txs, rates, checkpoints)
         val goals = GoalCalculator.progress(commitments.goals, home, rates)
         val balanceCurrencies = home.balances.values.groupBy { it.currency }
             .filterValues { amounts -> amounts.sumOf { it.amount }.signum() != 0 }.keys
         val missing = (balanceCurrencies + txs.map { it.money.currency } + bills.map { it.rule.money.currency } +
             commitments.goals.map { it.target.currency }).filter { rates.rate(it) == null }.toSet()
-        FinancialSnapshot(day, allAccs, txs, bills, goals, home, exchange, missing)
+        FinancialSnapshot(day, allAccs, txs, bills, goals, home, exchange, missing, checkpoints)
     }.flowOn(Dispatchers.Default).let { source ->
         if (sharingScope == null) source else source.shareReads(sharingScope)
     }
@@ -175,7 +189,8 @@ class BudgetRepository(
     val home: Flow<HomeSummary> = financial.map { it.home }
     val upcomingBills: Flow<List<Bill>> = financial.map { it.bills }
 
-    private data class FinancialInputs(val day: LocalDate, val accounts: List<Account>, val transactions: List<Transaction>, val rates: ExchangeRateSnapshot)
+    private data class FinancialInputs(val day: LocalDate, val accounts: List<Account>, val transactions: List<Transaction>,
+        val rates: ExchangeRateSnapshot, val checkpoints: Map<String, BankBalanceCheckpoint>)
     private data class Commitments(val rules: List<RecurringRule>, val skips: Set<Pair<String, String>>, val goals: List<Goal>)
 
     suspend fun goal(id: String): Goal? = withContext(Dispatchers.IO) { db.goalQueries.byId(id).executeAsOneOrNull()?.toDomain() }
@@ -278,7 +293,7 @@ class BudgetRepository(
     suspend fun accountInUse(id: String): Boolean = withContext(Dispatchers.IO) { hasAccountReferences(id) }
 
     private fun hasAccountReferences(id: String): Boolean =
-        db.txQueries.all().executeAsList().any { it.account_id == id || it.to_account_id == id } ||
+        db.bankCheckpoint(id) != null || db.txQueries.all().executeAsList().any { it.account_id == id || it.to_account_id == id } ||
             db.recurringRuleQueries.active().executeAsList().any { it.account_id == id }
 
     suspend fun updateAccount(account: Account) {
@@ -305,24 +320,36 @@ class BudgetRepository(
         }
     }
 
-    suspend fun saveBankDraft(alertId: String, t: Transaction) {
-        store.append(TransactionAdded(t)) {
-            db.requirePendingBankAlert(alertId)
+    suspend fun saveBankDraft(alertId: String, t: Transaction, bankAccountId: String? = null, action: BankBalanceAction? = null) {
+        store.appendBuilt {
+            val alert = db.requirePendingBankAlert(alertId)
             require(t.type in setOf(TransactionType.EXPENSE, TransactionType.INCOME, TransactionType.TRANSFER))
             require(t.source == TransactionSource.MANUAL && t.paidBy == currentMemberRow()?.id)
             require(t.type == TransactionType.TRANSFER || t.categoryId != null)
             require(storedTransaction(t.id) == null)
             validateTransaction(t)
+            val reconciliation = db.bankReviewEvents(alert, t, bankAccountId, action)
             db.bankInboxQueries.resolve("LINKED", t.id, alertId)
+            listOf(TransactionAdded(t)) + reconciliation
         }
     }
 
-    suspend fun linkBankDraft(alertId: String, transactionId: String, accountId: String, movement: Money) = withContext(Dispatchers.IO) {
-        store.read {
-            db.requirePendingBankAlert(alertId)
+    suspend fun linkBankDraft(alertId: String, transactionId: String, accountId: String, movement: Money, action: BankBalanceAction? = null) {
+        store.appendBuilt {
+            val alert = db.requirePendingBankAlert(alertId)
             val t = requireNotNull(storedTransaction(transactionId))
-            require(t.bankMovement(accountId) == movement) { "Transaction does not match the reviewed movement" }
+            require(t.type != TransactionType.LOAN_RECEIPT && t.bankMovement(accountId) == movement) {
+                "Transaction does not match the reviewed movement"
+            }
+            val reconciliation = db.bankReviewEvents(alert, t, accountId, action)
             db.bankInboxQueries.resolve("LINKED", transactionId, alertId)
+            reconciliation
+        }
+    }
+
+    suspend fun clearBankCheckpoint(expected: BankBalanceCheckpoint) {
+        store.append(BankBalanceCheckpointSet(expected.accountId, null)) {
+            require(db.bankCheckpoint(expected.accountId) == expected) { "Bank balance changed; reopen the account" }
         }
     }
 

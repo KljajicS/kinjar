@@ -29,6 +29,16 @@
     <string name="bank_original">Original notification</string>
     <string name="bank_save">Save transaction</string>
     <string name="bank_skip">Skip</string>
+    <string name="bank_older_alert">Older than the verified balance. Was this transaction included?</string>
+    <string name="bank_included">Already included</string>
+    <string name="bank_count_separately">Count separately</string>
+    <string name="bank_verify">Use verified bank balance, including earlier entries</string>
+    <string name="bank_verified">Verified bank balance: %1$s</string>
+    <string name="bank_balance_alert">Review bank balance for %1$s</string>
+    <string name="bank_balance_changed">Review verified balance: %1$s. A covered transaction changed. Showing the transaction total.</string>
+    <string name="bank_remove_balance">Remove verified balance</string>
+    <string name="bank_remove_balance_detail">Use the total from transactions again. Recorded transactions stay in your history.</string>
+    <string name="bank_verify_failed">Bank balance could not be verified. Check other entries for this account and date.</string>
     <plurals name="bank_pending">
         <item quantity="one">%d bank notification to review</item>
         <item quantity="other">%d bank notifications to review</item>

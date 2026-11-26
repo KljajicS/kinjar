@@ -1,0 +1,38 @@
+CREATE TABLE bank_checkpoint (
+    account_id TEXT PRIMARY KEY NOT NULL,
+    payload TEXT NOT NULL
+);
+
+CREATE TABLE bank_movement_evidence (
+    account_id TEXT NOT NULL,
+    transaction_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (account_id, transaction_id)
+);
+
+checkpoints:
+SELECT * FROM bank_checkpoint;
+
+balanceInputs:
+SELECT (SELECT count(*) FROM account) + (SELECT count(*) FROM tx) + (SELECT count(*) FROM bank_checkpoint);
+
+checkpoint:
+SELECT payload FROM bank_checkpoint WHERE account_id = ?;
+
+saveCheckpoint:
+INSERT OR REPLACE INTO bank_checkpoint VALUES (?, ?);
+
+clearCheckpoint:
+DELETE FROM bank_checkpoint WHERE account_id = ?;
+
+evidenceForAccount:
+SELECT payload FROM bank_movement_evidence WHERE account_id = ?;
+
+saveEvidence:
+INSERT OR REPLACE INTO bank_movement_evidence VALUES (?, ?, ?);
+
+clearCheckpoints:
+DELETE FROM bank_checkpoint;
+
+clearEvidence:
+DELETE FROM bank_movement_evidence;

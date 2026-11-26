@@ -23,6 +23,11 @@ internal fun operationResources(events: List<Event>, db: KinjarDb): Map<String, 
     }
     events.forEach { event ->
         when (event) {
+            is BankBalanceCheckpointSet -> write("account:${event.accountId}")
+            is BankMovementVerified -> {
+                read("account:${event.evidence.accountId}")
+                read("transaction:${event.evidence.covered.transactionId}")
+            }
             is ProjectFinanceSaved -> {
                 write("project:${event.finance.projectId}")
                 val previous = db.projectFinanceQueries.byId(event.finance.projectId).executeAsOneOrNull()

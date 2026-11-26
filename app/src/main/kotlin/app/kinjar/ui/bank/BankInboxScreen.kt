@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,12 +55,15 @@ import app.kinjar.data.BankInbox
 import app.kinjar.data.BudgetRepository
 import app.kinjar.domain.Account
 import app.kinjar.domain.BankApp
+import app.kinjar.domain.BankBalanceAction
+import app.kinjar.domain.BankBalanceCheckpoint
 import app.kinjar.domain.CategoryKind
 import app.kinjar.domain.Money
 import app.kinjar.domain.Transaction
 import app.kinjar.domain.TransactionSource
 import app.kinjar.domain.TransactionType
 import app.kinjar.domain.bankMovement
+import app.kinjar.domain.bankTimestamp
 import app.kinjar.domain.newId
 import app.kinjar.ui.WriteFeedback
 import app.kinjar.ui.WriteOperation
@@ -72,6 +76,7 @@ import app.kinjar.ui.settings.LoadFailedBanner
 import app.kinjar.ui.settings.Loadable
 import app.kinjar.ui.settings.ScreenHeader
 import app.kinjar.ui.theme.BodyStyle
+import app.kinjar.ui.theme.ConfirmDialog
 import app.kinjar.ui.theme.FieldBox
 import app.kinjar.ui.theme.KinjarDatePickerDialog
 import app.kinjar.ui.theme.LabelStyle
@@ -83,6 +88,7 @@ import app.kinjar.ui.theme.mono
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 import kotlinx.coroutines.flow.combine
 
@@ -104,12 +110,13 @@ class BankInboxViewModel @Inject constructor(private val repo: BudgetRepository,
 
     fun bind(accountId: String, bank: BankApp?) = writes.run(finish = false) { inbox.bind(accountId, bank) }
     fun skip(id: String) = writes.run { inbox.skip(id) }
-    fun save(id: String, transaction: Transaction) = writes.run {
-        repo.saveBankDraft(id, transaction.copy(paidBy = requireNotNull(repo.currentMember()).id))
+    fun save(id: String, transaction: Transaction, accountId: String, action: BankBalanceAction?) = writes.run {
+        repo.saveBankDraft(id, transaction.copy(paidBy = requireNotNull(repo.currentMember()).id), accountId, action)
     }
-    fun link(id: String, transactionId: String, accountId: String, movement: Money) = writes.run {
-        repo.linkBankDraft(id, transactionId, accountId, movement)
+    fun link(id: String, transactionId: String, accountId: String, movement: Money, action: BankBalanceAction?) = writes.run {
+        repo.linkBankDraft(id, transactionId, accountId, movement, action)
     }
+    fun clear(checkpoint: BankBalanceCheckpoint) = writes.run(finish = false) { repo.clearBankCheckpoint(checkpoint) }
 }
 
 @StringRes
@@ -142,6 +149,8 @@ fun BankAccountSettings(accountId: String, onInbox: () -> Unit, vm: BankInboxVie
     val state by vm.load.state.collectAsStateWithLifecycle()
     val failed by vm.load.failed.collectAsStateWithLifecycle()
     val writes by vm.writes.state.collectAsStateWithLifecycle()
+    val financial by vm.reviewData.state.collectAsStateWithLifecycle()
+    var clear by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     fun hasAccess() = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
     var allowed by remember { mutableStateOf(hasAccess()) }
@@ -165,6 +174,19 @@ fun BankAccountSettings(accountId: String, onInbox: () -> Unit, vm: BankInboxVie
         Text(stringResource(R.string.bank_review_before_save), style = LabelStyle, color = LocalColors.current.muted)
         val count = s.forAccount(accountId).size
         TextButton(onClick = onInbox) { Text(pluralStringResource(R.plurals.bank_pending, count, count)) }
+    }
+    val checkpoint = financial?.second?.bankCheckpoints?.get(accountId)
+    if (checkpoint != null) {
+        val needsReview = accountId in financial?.second?.home?.bankReconciliationNeeded.orEmpty()
+        val locale = LocalLocale.current.platformLocale
+        val label = "${formatAmount(checkpoint.balance, locale = locale)} ${checkpoint.balance.currency}"
+        Text(stringResource(if (needsReview) R.string.bank_balance_changed else R.string.bank_verified, label),
+            style = LabelStyle, color = if (needsReview) LocalColors.current.orange else LocalColors.current.muted)
+        TextButton(onClick = { clear = true }, enabled = !writes.busy) { Text(stringResource(R.string.bank_remove_balance)) }
+        if (clear) ConfirmDialog(stringResource(R.string.bank_remove_balance), stringResource(R.string.bank_remove_balance), writes.busy,
+            onConfirm = { vm.clear(checkpoint); clear = false }, onDismiss = { clear = false }) {
+            Text(stringResource(R.string.bank_remove_balance_detail))
+        }
     }
     WriteFeedback(vm.writes)
 }
@@ -232,6 +254,7 @@ fun BankReviewScreen(id: String, onBack: () -> Unit, vm: BankInboxViewModel = hi
         var accountPicker by rememberSaveable(id) { mutableStateOf<String?>(null) }
         var original by rememberSaveable(id) { mutableStateOf(false) }
         var linking by rememberSaveable(id) { mutableStateOf(false) }
+        var balanceChoice by rememberSaveable(id) { mutableStateOf<BankBalanceAction?>(null) }
         val date = LocalDate.parse(dateText)
         val account = s.accounts.find { it.id == accountId }
         val other = s.accounts.find { it.id == otherId }
@@ -244,8 +267,23 @@ fun BankReviewScreen(id: String, onBack: () -> Unit, vm: BankInboxViewModel = hi
         val canSave = account != null && movement != null && type != null && (if (transfer) other != null && other.id != account.id && (!fx || otherMoney != null) else category != null)
         val locale = LocalLocale.current.platformLocale
         val signed = if (type == TransactionType.INCOME || transfer && incoming) movement else movement?.let { -it }
+        val reported = parsed.balances.singleOrNull { !it.available && it.currency == account?.currency }
+        val bankTime = parsed.transactionTime?.bankTimestamp()
+        val anchor = accountId?.let { financial.bankCheckpoints[it] }
+        val expectedMovement = parsed.money?.let { if (parsed.direction == TransactionType.INCOME) it else -it }
+        val bankMatch = bankTime != null && account != null && s.bindings[account.id] == draft.bank &&
+            parsed.direction != null && expectedMovement != null && signed == expectedMovement
+        val isEarlier = bankMatch && bankTime != null && anchor != null && bankTime < anchor.asOf
+        val canVerify = bankMatch && bankTime != null && reported != null && (anchor == null || bankTime > anchor.asOf)
+        val action = when {
+            isEarlier -> balanceChoice?.takeIf { it != BankBalanceAction.VERIFY }
+            canVerify -> balanceChoice?.takeIf { it == BankBalanceAction.VERIFY }
+            else -> null
+        }
+        val balanceDecided = !isEarlier || action != null
         val matches = if (account == null || signed == null) emptyList() else financial.transactions.filter {
-            it.date == date && it.bankMovement(account.id) == signed && (type == null || it.type == type)
+            kotlin.math.abs(ChronoUnit.DAYS.between(date, it.date)) <= (if (transfer) 3L else 0L) &&
+                it.type != TransactionType.LOAN_RECEIPT && it.bankMovement(account.id) == signed && (type == null || it.type == type)
         }
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -256,17 +294,18 @@ fun BankReviewScreen(id: String, onBack: () -> Unit, vm: BankInboxViewModel = hi
                         type = value
                         categoryId = null
                         linking = false
+                        balanceChoice = null
                     })
                 }
             }
             FieldBox(stringResource(R.string.bank_amount, account?.currency?.name ?: parsed.money?.currency?.name.orEmpty()), amount,
-                { amount = it; linking = false }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                { amount = it; linking = false; balanceChoice = null }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             FieldBox(stringResource(R.string.bank_counterparty), merchant, { merchant = it })
             ReviewField(stringResource(R.string.bank_account), account?.name ?: stringResource(R.string.bank_choose), enabled = !writes.busy) { accountPicker = "bank" }
             if (transfer) {
                 if (!parsed.cashWithdrawal) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SelectPill(stringResource(R.string.bank_money_out), !incoming, { incoming = false; linking = false })
-                    SelectPill(stringResource(R.string.bank_money_in), incoming, { incoming = true; linking = false })
+                    SelectPill(stringResource(R.string.bank_money_out), !incoming, { incoming = false; linking = false; balanceChoice = null })
+                    SelectPill(stringResource(R.string.bank_money_in), incoming, { incoming = true; linking = false; balanceChoice = null })
                 }
                 ReviewField(stringResource(if (incoming) R.string.bank_from else R.string.bank_to), other?.name ?: stringResource(R.string.bank_choose),
                     enabled = !writes.busy) { accountPicker = "other" }
@@ -281,19 +320,35 @@ fun BankReviewScreen(id: String, onBack: () -> Unit, vm: BankInboxViewModel = hi
                 val amountLabel = "${formatAmount(Money.of(balance.amount, balance.currency), locale = locale)} ${balance.currency}"
                 Text(stringResource(if (balance.available) R.string.bank_available else R.string.bank_reported, amountLabel), style = LabelStyle, color = c.muted)
             }
+            if (isEarlier) {
+                Text(stringResource(R.string.bank_older_alert), style = LabelStyle, color = c.muted)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SelectPill(stringResource(R.string.bank_included), action == BankBalanceAction.ALREADY_INCLUDED,
+                        { balanceChoice = BankBalanceAction.ALREADY_INCLUDED })
+                    SelectPill(stringResource(R.string.bank_count_separately), action == BankBalanceAction.COUNT_SEPARATELY,
+                        { balanceChoice = BankBalanceAction.COUNT_SEPARATELY })
+                }
+            } else if (canVerify) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = action == BankBalanceAction.VERIFY, onCheckedChange = {
+                        balanceChoice = if (it) BankBalanceAction.VERIFY else null
+                    })
+                    Text(stringResource(R.string.bank_verify), style = LabelStyle, color = c.text)
+                }
+            }
             if (matches.isNotEmpty()) {
                 TextButton(onClick = { linking = !linking }, enabled = !writes.busy) { Text(stringResource(R.string.bank_link)) }
                 if (linking) matches.forEach { t ->
-                    ReviewField(stringResource(t.type.label()), t.merchant.ifBlank { formatDate(t.date, locale) }, enabled = !writes.busy) {
-                        vm.link(id, t.id, requireNotNull(account).id, requireNotNull(signed))
+                    ReviewField(stringResource(t.type.label()), t.merchant.ifBlank { formatDate(t.date, locale) }, enabled = !writes.busy && balanceDecided) {
+                        vm.link(id, t.id, requireNotNull(account).id, requireNotNull(signed), action)
                     }
                 }
             }
             TextButton(onClick = { original = !original }) { Text(stringResource(R.string.bank_original)) }
             if (original) Text(draft.alert.body, style = LabelStyle, color = c.muted)
         }
-        WriteFeedback(vm.writes)
-        PrimaryButton(stringResource(R.string.bank_save), enabled = canSave && !writes.busy) {
+        WriteFeedback(vm.writes, if (action == null) R.string.write_failed else R.string.bank_verify_failed)
+        PrimaryButton(stringResource(R.string.bank_save), enabled = canSave && !writes.busy && balanceDecided) {
             val bankAccount = requireNotNull(account)
             val bankMoney = requireNotNull(movement)
             val source = if (transfer && incoming) requireNotNull(other) else bankAccount
@@ -301,7 +356,7 @@ fun BankReviewScreen(id: String, onBack: () -> Unit, vm: BankInboxViewModel = hi
             val sent = if (transfer && incoming && fx) requireNotNull(otherMoney) else bankMoney
             val received = if (!fx) null else if (incoming) bankMoney else otherMoney
             vm.save(id, Transaction(newId(), requireNotNull(type), sent, source.id, destination?.id,
-                if (transfer) null else category?.id, date, "", merchant.trim(), "", TransactionSource.MANUAL, received))
+                if (transfer) null else category?.id, date, "", merchant.trim(), "", TransactionSource.MANUAL, received), bankAccount.id, action)
         }
         TextButton(onClick = { vm.skip(id) }, enabled = !writes.busy) { Text(stringResource(R.string.bank_skip)) }
         if (accountPicker != null) {
@@ -316,6 +371,7 @@ fun BankReviewScreen(id: String, onBack: () -> Unit, vm: BankInboxViewModel = hi
                         if (otherId == it) otherId = null
                     } else otherId = it
                     linking = false
+                    balanceChoice = null
                     accountPicker = null
                 }, onDismiss = { accountPicker = null })
         }
