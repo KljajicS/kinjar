@@ -201,37 +201,7 @@ private fun Fields(
     onReceived: (String) -> Unit, onUseSuggested: () -> Unit, autoFocus: Boolean, onFocused: () -> Unit, onDelete: () -> Unit,
 ) {
     val c = LocalColors.current
-    val focus = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-    val transformation = remember(locale) { AmountVisualTransformation(locale) }
-    val amountLength = transformation.filter(androidx.compose.ui.text.AnnotatedString(s.amount.text)).text.length
-    LaunchedEffect(autoFocus) {
-        if (autoFocus) { focus.requestFocus(); keyboard?.show(); onFocused() }
-    }
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val amountLabel = stringResource(R.string.recurring_amount)
-            BasicTextField(
-                value = s.amount.text,
-                onValueChange = onAmount,
-                visualTransformation = transformation,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus() }),
-                singleLine = true,
-                textStyle = mono(when { amountLength > 15 -> 24; amountLength > 9 -> 32; else -> 48 }, FontWeight.SemiBold, (-0.03).em).copy(color = c.text, textAlign = TextAlign.End),
-                cursorBrush = SolidColor(c.primary),
-                modifier = Modifier.weight(1f).focusRequester(focus).semantics { contentDescription = amountLabel },
-                decorationBox = { field ->
-                    Box(contentAlignment = Alignment.CenterEnd) {
-                        if (s.amount.text.isEmpty()) Text("0${separator}00", style = mono(48, FontWeight.SemiBold, (-0.03).em), color = c.muted)
-                        field()
-                    }
-                },
-            )
-            Text(s.currency.name, style = sans(18, FontWeight.Medium), color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
-        }
-    }
+    TransactionAmountField(s.amount.text, s.currency.name, onAmount, autoFocus, onFocused)
 
     Column(Modifier.fillMaxWidth()) {
         if (s.type == TransactionType.TRANSFER) {
@@ -281,6 +251,53 @@ private fun Fields(
     if (s.editing != null) {
         app.kinjar.ui.theme.DangerLink(stringResource(if (s.editing.source == TransactionSource.RECEIPT) R.string.receipt_delete else R.string.audit_finance_delete),
             enabled = !s.saving && !s.stale, onClick = onDelete)
+    }
+}
+
+@Composable
+internal fun TransactionAmountField(
+    amount: String,
+    currency: String,
+    onAmount: (String) -> Unit,
+    autoFocus: Boolean = false,
+    onFocused: () -> Unit = {},
+) {
+    val c = LocalColors.current
+    val locale = LocalLocale.current.platformLocale
+    val separator = DecimalFormatSymbols(locale).decimalSeparator
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val transformation = remember(locale) { AmountVisualTransformation(locale) }
+    val amountLength = transformation.filter(androidx.compose.ui.text.AnnotatedString(amount)).text.length
+    LaunchedEffect(autoFocus) {
+        if (autoFocus) { focus.requestFocus(); keyboard?.show(); onFocused() }
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val amountLabel = stringResource(R.string.recurring_amount)
+        BasicTextField(
+            value = amount,
+            onValueChange = onAmount,
+            visualTransformation = transformation,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus() }),
+            singleLine = true,
+            textStyle = mono(when { amountLength > 15 -> 24; amountLength > 9 -> 32; else -> 48 }, FontWeight.SemiBold, (-0.03).em)
+                .copy(color = c.text, textAlign = TextAlign.End),
+            cursorBrush = SolidColor(c.primary),
+            modifier = Modifier.weight(1f).focusRequester(focus).semantics { contentDescription = amountLabel },
+            decorationBox = { field ->
+                Box(contentAlignment = Alignment.CenterEnd) {
+                    if (amount.isEmpty()) Text("0${separator}00", style = mono(48, FontWeight.SemiBold, (-0.03).em), color = c.muted)
+                    field()
+                }
+            },
+        )
+        if (currency.isNotEmpty()) Text(currency, style = sans(18, FontWeight.Medium), color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
     }
 }
 
@@ -347,7 +364,7 @@ private fun DeleteDialog(source: TransactionSource, busy: Boolean, onDismiss: ()
 }
 
 @Composable
-private fun TypeSwitch(selected: TransactionType, onSelect: (TransactionType) -> Unit, modifier: Modifier) {
+internal fun TypeSwitch(selected: TransactionType?, onSelect: (TransactionType) -> Unit, modifier: Modifier) {
     val c = LocalColors.current
     Row(modifier.widthIn(max = 270.dp).background(c.surface2, RoundedCornerShape(14.dp)).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         listOf(TransactionType.EXPENSE, TransactionType.INCOME, TransactionType.TRANSFER).forEach { t ->
@@ -404,7 +421,8 @@ private fun CategoryBox(categories: List<Category>, known: List<Category>, selec
 }
 
 @Composable
-private fun CategoryGrid(categories: List<Category>, selectedId: String?, onSelect: (String?) -> Unit) {
+internal fun CategoryGrid(categories: List<Category>, selectedId: String?, onSelect: (String?) -> Unit) {
+    if (categories.isEmpty()) return
     val c = LocalColors.current
     val rows = (categories.size + 3) / 4
     LazyVerticalGrid(

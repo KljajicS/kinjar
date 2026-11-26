@@ -41,11 +41,14 @@ class EventStore(
 
     suspend fun append(event: Event, validate: () -> Unit = {}): EventRecord = appendAll(listOf(event), validate = validate).single()
 
-    suspend fun appendAll(events: List<Event>, skipIf: () -> Boolean = { false }, validate: () -> Unit = {}): List<EventRecord> = withContext(Dispatchers.IO) {
+    suspend fun appendAll(events: List<Event>, skipIf: () -> Boolean = { false }, validate: () -> Unit = {}): List<EventRecord> =
+        appendBuilt(skipIf) { validate(); events }
+
+    internal suspend fun appendBuilt(skipIf: () -> Boolean = { false }, build: () -> List<Event>): List<EventRecord> = withContext(Dispatchers.IO) {
         synchronized(writeLock) {
             db.transactionWithResult {
                 if (skipIf()) return@transactionWithResult emptyList()
-                validate()
+                val events = build()
                 check(db.restoreJournalQueries.journalInfo().executeAsOneOrNull()?.phase !in setOf("CREATE", "RESTORE", "SWITCH")) { "Finish family setup or restore before editing finances" }
                 val session = db.syncSessionQueries.current().executeAsOneOrNull()
                 if (session != null) {
@@ -293,6 +296,7 @@ class EventStore(
         val source = stored(history)
         db.syncDraftQueries.saveStored(newId(), "local", "", clock.now().toEpochMilli(), capture().id)
         synced.replace(source)
+        clearBankInbox()
         dropIfUnused(history.id)
     }
 
@@ -306,6 +310,7 @@ class EventStore(
             db.syncDraftQueries.saveStored(newId(), priorSession?.uid ?: uid, priorSession?.family_id ?: "", clock.now().toEpochMilli(), capture().id)
         }
         synced.replace(source)
+        clearBankInbox()
         db.syncSessionQueries.save(uid, familyId, datasetId, memberId, deviceId, generation, "ACTIVE")
         clearJournal()
         dropIfUnused(history.id)
@@ -318,6 +323,7 @@ class EventStore(
         val before = HistoryCodec.encode(synced.snapshot())
         db.syncDraftQueries.save(newId(), "local", "", clock.now().toEpochMilli(), before)
         synced.replace(history)
+        clearBankInbox()
     }
 
     fun activate(uid: String, familyId: String, datasetId: String, memberId: String, generation: Long,
@@ -329,6 +335,7 @@ class EventStore(
                 HistoryCodec.encode(synced.snapshot()))
         }
         synced.replace(history.source())
+        clearBankInbox()
         db.syncSessionQueries.save(uid, familyId, datasetId, memberId, deviceId, generation, "ACTIVE")
         clearJournal()
     }
@@ -413,7 +420,13 @@ class EventStore(
         clearJournal()
         db.eventQueries.deleteAll()
         db.syncSessionQueries.deleteAll()
+        clearBankInbox()
         dropIfUnused(baseline)
+    }
+
+    private fun clearBankInbox() {
+        db.bankInboxQueries.clearAlerts()
+        db.bankInboxQueries.clearBindings()
     }
 
     private fun rebuildInTransaction() {

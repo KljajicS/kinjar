@@ -19,6 +19,7 @@ Screenshots use demo data.
 ## Features
 
 - Income, expenses, transfers and recurring bills.
+- Review Raiffeisen and Yettel Bank notifications before saving expenses, income and transfers. See [bank notifications](docs/bank-notifications.md).
 - Multiple accounts and currencies, with total savings in EUR and RSD.
 - Drag-to-reorder accounts and goals. Savings fill goals in priority order.
 - Projects with configurable categories, expense linking, historical costs, charts, optional budgets and archive/restore. Project currency can switch between EUR and RSD using saved expense-date conversions.

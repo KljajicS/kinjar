@@ -138,6 +138,10 @@ internal val TransactionType.categoryKind: CategoryKind?
         TransactionType.TRANSFER, TransactionType.LOAN_RECEIPT -> null
     }
 
+internal fun List<Category>.inTransactionOrder(): List<Category> = sortedBy { category ->
+    StarterCategories.all.indexOfFirst { it.id == category.id }.takeIf { it >= 0 } ?: Int.MAX_VALUE
+}
+
 /** Converts through RSD with the same rates totals use; an override wins over the fetched NBS rate and is never labelled NBS. */
 internal fun suggestReceived(sent: Money, target: Currency, rates: ExchangeRateSnapshot): ReceivedSuggestion? {
     val money = rates.rates.convert(sent, target)?.takeIf { !it.isZero } ?: return null
@@ -186,7 +190,7 @@ class AddViewModel @Inject constructor(
             combine(selectableAccounts, repo.categories, repo.allCategories, repo.exchangeRates.snapshots,
                 repo.financial.map { it.home.balances }, ::Inputs).collect { (accounts, categories, all, rates, balances) ->
                 val memberName = repo.currentMember()?.displayName.orEmpty()
-                val sortedCategories = categories.sortedBy { c -> StarterCategories.all.indexOfFirst { it.id == c.id }.let { if (it < 0) Int.MAX_VALUE else it } }
+                val sortedCategories = categories.inTransactionOrder()
                 _state.update { s ->
                     val pickable = s.type.categoryKind?.let { kind -> sortedCategories.filter { it.kind == kind } }.orEmpty()
                     val keepCategory = s.scanned || s.bill != null || s.editing != null || s.categoryId == null || pickable.any { it.id == s.categoryId }

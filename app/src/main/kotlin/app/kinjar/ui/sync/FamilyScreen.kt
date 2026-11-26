@@ -344,6 +344,7 @@ internal fun displayTime(instant: java.time.Instant): String = DateTimeFormatter
 
 @Composable
 private fun eventDescription(event: Event): String = when (event) {
+    is app.kinjar.domain.BankBalanceCheckpointSet, is app.kinjar.domain.BankMovementVerified -> stringResource(R.string.bank_review)
     is TransactionAdded -> "${stringResource(R.string.fbs_transaction)}: ${event.transaction.money.amount.toPlainString()} ${event.transaction.money.currency} · ${event.transaction.date}"
     is TransactionEdited -> "${stringResource(R.string.fbs_transaction)}: ${event.transaction.money.amount.toPlainString()} ${event.transaction.money.currency} · ${event.transaction.date}"
     is TransactionDeleted -> stringResource(R.string.fbs_transaction_deleted)

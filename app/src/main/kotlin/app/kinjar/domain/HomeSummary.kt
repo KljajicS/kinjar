@@ -19,6 +19,7 @@ data class HomeSummary(
     val balances: Map<String, Money>,
     val savingsPoolRsd: BigDecimal? = savingsRsd?.amount,
     val goalPoolRsd: BigDecimal? = savingsPoolRsd,
+    val bankReconciliationNeeded: Set<String> = emptySet(),
 ) {
     val difference: Money get() = income - spent
 
@@ -29,9 +30,22 @@ data class HomeSummary(
 object HomeCalculator {
 
     /** Archived accounts drop out of savings but their transactions still count in the month they happened. */
-    fun summarize(today: LocalDate, accounts: List<Account>, transactions: List<Transaction>, rates: Rates): HomeSummary {
+    fun summarize(today: LocalDate, accounts: List<Account>, transactions: List<Transaction>, rates: Rates,
+        bankCheckpoints: Map<String, BankBalanceCheckpoint> = emptyMap()): HomeSummary {
         val posted = transactions.filter { it.date <= today }
-        val balances = balances(accounts.filterNot { it.archived }, posted)
+        val balances = balances(accounts.filterNot { it.archived }, posted).toMutableMap()
+        val reconciliationNeeded = mutableSetOf<String>()
+        if (bankCheckpoints.isNotEmpty()) {
+            val byId = posted.associateBy { it.id }
+            bankCheckpoints.forEach { (id, checkpoint) ->
+                val balance = balances[id] ?: return@forEach
+                if (balance.currency != checkpoint.balance.currency || checkpoint.covered.any { !it.matches(id, byId[it.transactionId]) }) {
+                    reconciliationNeeded += id
+                } else {
+                    balances[id] = balance + checkpoint.balanceOffset()
+                }
+            }
+        }
 
         fun total(currency: Currency, amounts: Collection<Money> = balances.values): BigDecimal? {
             val grouped = amounts.groupBy { it.currency }
@@ -62,7 +76,7 @@ object HomeCalculator {
         val goalBalances = accounts.filterNot { it.archived || it.excludedFromGoals }.mapNotNull { balances[it.id] }
         return HomeSummary(
             poolRsd?.let { Money.of(it, Currency.RSD) }, total(Currency.EUR)?.let { Money.of(it, Currency.EUR) },
-            income, spent, partial, balances, poolRsd, total(Currency.RSD, goalBalances),
+            income, spent, partial, balances, poolRsd, total(Currency.RSD, goalBalances), reconciliationNeeded,
         )
     }
 

@@ -79,6 +79,8 @@ import java.util.Locale
 fun HomeScreen(
     onSyncSettings: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
     onCategories: () -> Unit,
+    onOpenBankInbox: () -> Unit,
+    onReviewBankAccount: (String) -> Unit,
     onEditTransaction: (String) -> Unit = {}, vm: HomeViewModel = hiltViewModel(),
     conflicts: TransactionConflictViewModel = hiltViewModel(),
     sync: HomeSyncViewModel = hiltViewModel(),
@@ -117,6 +119,14 @@ fun HomeScreen(
                     Text(s.today.year.toString(), style = LabelStyle, color = c.muted)
                 }
                 HomeSyncButton(syncState, { sync.synchronize() }, { sync.synchronize(force = true) }, onSyncSettings)
+            }
+            app.kinjar.ui.bank.BankInboxEntry(onOpenBankInbox)
+        }
+        s.summary.bankReconciliationNeeded.forEach { id ->
+            item(key = "bank-reconciliation:$id") {
+                TextButton(onClick = { onReviewBankAccount(id) }) {
+                    Text(stringResource(R.string.bank_balance_alert, s.accountNames[id].orEmpty()), color = c.orange)
+                }
             }
         }
         if (failed) item { LoadFailed(vm::retry) }

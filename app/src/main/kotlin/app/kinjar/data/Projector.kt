@@ -1,5 +1,8 @@
 package app.kinjar.data
 
+import app.kinjar.domain.BankBalanceCheckpointSet
+import app.kinjar.domain.BankMovementVerified
+
 import app.kinjar.data.db.KinjarDb
 import kotlinx.serialization.encodeToString
 import app.kinjar.domain.EventJson
@@ -49,6 +52,15 @@ class Projector(private val db: KinjarDb) {
     fun apply(record: EventRecord) {
         val at = record.occurredAt.toEpochMilli()
         when (val e = record.event) {
+            is BankBalanceCheckpointSet -> {
+                if (e.checkpoint == null) db.bankReconciliationQueries.clearCheckpoint(e.accountId)
+                else if (e.checkpoint.canReplace(db.bankCheckpoint(e.accountId))) {
+                    db.bankReconciliationQueries.saveCheckpoint(e.accountId, EventJson.encodeToString(e.checkpoint))
+                }
+            }
+            is BankMovementVerified -> with(e.evidence) {
+                db.bankReconciliationQueries.saveEvidence(accountId, covered.transactionId, EventJson.encodeToString(this))
+            }
             is ProjectFinanceSaved -> db.projectFinanceQueries.save(e.finance.projectId, EventJson.encodeToString(e.finance))
             is ProjectSaved -> db.projectQueries.save(e.project.id, EventJson.encodeToString(e.project))
             is ProjectCategorySaved -> with(e.category) {
@@ -168,6 +180,8 @@ class Projector(private val db: KinjarDb) {
     }
 
     fun clear() {
+        db.bankReconciliationQueries.clearEvidence()
+        db.bankReconciliationQueries.clearCheckpoints()
         db.projectFinanceQueries.deleteAll()
         db.projectCostQueries.deleteAll()
         db.projectCategoryQueries.deleteAll()

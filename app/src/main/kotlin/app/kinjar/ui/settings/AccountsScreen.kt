@@ -129,7 +129,7 @@ fun AccountsScreen(onNew: () -> Unit, onEdit: (String) -> Unit, onNewLoan: () ->
 }
 
 @Composable
-fun EditAccountScreen(onClose: () -> Unit, vm: EditAccountViewModel = hiltViewModel()) {
+fun EditAccountScreen(onClose: () -> Unit, onBankInbox: (String) -> Unit = {}, vm: EditAccountViewModel = hiltViewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
     val write by vm.writes.state.collectAsStateWithLifecycle()
     val c = LocalColors.current
@@ -208,6 +208,7 @@ fun EditAccountScreen(onClose: () -> Unit, vm: EditAccountViewModel = hiltViewMo
                 Switch(checked = s.excludedFromGoals, onCheckedChange = null)
             }
             if (s.editing) {
+                s.id?.let { accountId -> app.kinjar.ui.bank.BankAccountSettings(accountId, { onBankInbox(accountId) }) }
                 Spacer(Modifier.size(6.dp))
                 Text(stringResource(R.string.account_delete_hint), style = LabelStyle, color = c.muted)
                 DangerLink(stringResource(R.string.account_delete), enabled = canRemove) { confirming = true }

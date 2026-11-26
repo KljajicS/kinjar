@@ -228,6 +228,11 @@ internal class SyncedHistory(private val db: KinjarDb, private val projector: Pr
         }
         operation.events.forEach { record ->
             when (val e = record.event) {
+                is BankBalanceCheckpointSet -> requireAccess("account:${e.accountId}")
+                is BankMovementVerified -> {
+                    requireAccess("account:${e.evidence.accountId}", false)
+                    requireAccess("transaction:${e.evidence.covered.transactionId}", false)
+                }
                 is ProjectFinanceSaved -> {
                     requireAccess("project:${e.finance.projectId}")
                     e.finance.payments().mapNotNull { it.transactionId }.forEach { requireAccess("transaction:$it") }

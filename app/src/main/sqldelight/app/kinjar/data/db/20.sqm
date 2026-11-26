@@ -1,0 +1,11 @@
+CREATE TABLE bank_checkpoint (
+    account_id TEXT PRIMARY KEY NOT NULL,
+    payload TEXT NOT NULL
+);
+
+CREATE TABLE bank_movement_evidence (
+    account_id TEXT NOT NULL,
+    transaction_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (account_id, transaction_id)
+);

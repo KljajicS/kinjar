@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bank_notifications">Bank notifications</string>
+    <string name="bank_app">Bank app</string>
+    <string name="bank_off">Off</string>
+    <string name="bank_raiffeisen">Raiffeisen · Moja mBanka</string>
+    <string name="bank_yettel">Yettel Bank</string>
+    <string name="bank_grant_access">Allow notification access</string>
+    <string name="bank_review_before_save">Review each notification before saving.</string>
+    <string name="bank_empty">No bank notifications to review.</string>
+    <string name="bank_review">Review transaction</string>
+    <string name="bank_unavailable">This notification is no longer pending.</string>
+    <string name="bank_expense">Expense</string>
+    <string name="bank_income">Income</string>
+    <string name="bank_transfer">Transfer</string>
+    <string name="bank_amount">Amount %1$s</string>
+    <string name="bank_money_out">Money out</string>
+    <string name="bank_money_in">Money in</string>
+    <string name="bank_from">From account</string>
+    <string name="bank_to">To account</string>
+    <string name="bank_available">Bank available balance: %1$s</string>
+    <string name="bank_reported">Reported balance: %1$s</string>
+    <string name="bank_link">Link existing transaction</string>
+    <string name="bank_original">Original notification</string>
+    <string name="bank_save">Save transaction</string>
+    <string name="bank_skip">Skip</string>
+    <string name="bank_older_alert">Older than the verified balance. Was this transaction included?</string>
+    <string name="bank_included">Already included</string>
+    <string name="bank_count_separately">Count separately</string>
+    <string name="bank_verify">Use verified bank balance, including earlier entries</string>
+    <string name="bank_verified">Verified bank balance: %1$s</string>
+    <string name="bank_balance_alert">Review bank balance for %1$s</string>
+    <string name="bank_balance_changed">Review verified balance: %1$s. A covered transaction changed. Showing the transaction total.</string>
+    <string name="bank_remove_balance">Remove verified balance</string>
+    <string name="bank_remove_balance_detail">Use the total from transactions again. Recorded transactions stay in your history.</string>
+    <string name="bank_verify_failed">Bank balance could not be verified. Check other entries for this account and date.</string>
+    <plurals name="bank_pending">
+        <item quantity="one">%d bank notification to review</item>
+        <item quantity="other">%d bank notifications to review</item>
+    </plurals>
+</resources>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bank_notifications">Obaveštenja banke</string>
+    <string name="bank_app">Aplikacija banke</string>
+    <string name="bank_off">Isključeno</string>
+    <string name="bank_raiffeisen">Raiffeisen · Moja mBanka</string>
+    <string name="bank_yettel">Yettel Bank</string>
+    <string name="bank_grant_access">Dozvoli pristup obaveštenjima</string>
+    <string name="bank_review_before_save">Pregledaj svako obaveštenje pre čuvanja.</string>
+    <string name="bank_empty">Nema obaveštenja banke za pregled.</string>
+    <string name="bank_review">Pregled transakcije</string>
+    <string name="bank_unavailable">Ovo obaveštenje više nije na čekanju.</string>
+    <string name="bank_expense">Trošak</string>
+    <string name="bank_income">Prihod</string>
+    <string name="bank_transfer">Prenos</string>
+    <string name="bank_amount">Iznos %1$s</string>
+    <string name="bank_money_out">Odliv</string>
+    <string name="bank_money_in">Priliv</string>
+    <string name="bank_from">Sa računa</string>
+    <string name="bank_to">Na račun</string>
+    <string name="bank_available">Raspoloživo u banci: %1$s</string>
+    <string name="bank_reported">Prijavljeno stanje: %1$s</string>
+    <string name="bank_link">Poveži postojeću transakciju</string>
+    <string name="bank_original">Originalno obaveštenje</string>
+    <string name="bank_save">Sačuvaj transakciju</string>
+    <string name="bank_skip">Preskoči</string>
+    <string name="bank_older_alert">Starije od potvrđenog stanja. Da li je transakcija već uračunata?</string>
+    <string name="bank_included">Već uračunato</string>
+    <string name="bank_count_separately">Računaj posebno</string>
+    <string name="bank_verify">Koristi potvrđeno stanje banke sa ranijim unosima</string>
+    <string name="bank_verified">Potvrđeno stanje banke: %1$s</string>
+    <string name="bank_balance_alert">Proveri stanje računa %1$s</string>
+    <string name="bank_balance_changed">Proveri potvrđeno stanje: %1$s. Uračunata transakcija je promenjena. Prikazan je zbir transakcija.</string>
+    <string name="bank_remove_balance">Ukloni potvrđeno stanje</string>
+    <string name="bank_remove_balance_detail">Ponovo koristi zbir transakcija. Sačuvane transakcije ostaju u istoriji.</string>
+    <string name="bank_verify_failed">Stanje banke nije potvrđeno. Proveri druge unose za taj račun i datum.</string>
+    <plurals name="bank_pending">
+        <item quantity="one">%d obaveštenje banke za pregled</item>
+        <item quantity="few">%d obaveštenja banke za pregled</item>
+        <item quantity="other">%d obaveštenja banke za pregled</item>
+    </plurals>
+</resources>

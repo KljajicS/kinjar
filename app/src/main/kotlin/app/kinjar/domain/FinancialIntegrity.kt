@@ -11,13 +11,15 @@ class FinancialIntegrity private constructor(
     private val receipts: MutableMap<String, Receipt>,
     private val removedPayments: MutableSet<String>,
     private val deletions: MutableMap<String, String>,
+    private val bankCheckpoints: MutableMap<String, BankBalanceCheckpoint> = mutableMapOf(),
     private var projectIntegrity: ProjectIntegrity = ProjectIntegrity(),
 ) {
     constructor() : this(mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableMapOf(), mutableSetOf(), mutableMapOf())
 
     fun applying(events: List<Event>, strict: Boolean): FinancialIntegrity {
         val next = FinancialIntegrity(accounts.toMutableMap(), transactions.toMutableMap(), loans.toMutableMap(), payments.toMutableMap(),
-            adjustments.toMutableMap(), receipts.toMutableMap(), removedPayments.toMutableSet(), deletions.toMutableMap(), projectIntegrity.copy())
+            adjustments.toMutableMap(), receipts.toMutableMap(), removedPayments.toMutableSet(), deletions.toMutableMap(),
+            bankCheckpoints.toMutableMap(), projectIntegrity.copy())
         events.forEach { next.apply(it, strict) }
         next.projectIntegrity.apply(events, strict, next.transactions)
         if (strict) next.validate()
@@ -46,6 +48,7 @@ class FinancialIntegrity private constructor(
                 is AccountCreated -> { remember(accounts, event.account.id); changedAccounts = true }
                 is AccountUpdated -> { remember(accounts, event.account.id); changedAccounts = true }
                 is AccountArchived -> { remember(accounts, event.accountId); changedAccounts = true }
+                is BankBalanceCheckpointSet -> remember(bankCheckpoints, event.accountId)
                 is TransactionAdded -> {
                     remember(transactions, event.transaction.id)
                     changedTransactions += event.transaction.id
@@ -95,6 +98,9 @@ class FinancialIntegrity private constructor(
     }
 
     private fun validateTransactions(values: Collection<Transaction>) {
+        require(bankCheckpoints.all { (id, checkpoint) -> accounts[id]?.currency == checkpoint.balance.currency }) {
+            "Bank checkpoint currency mismatch"
+        }
         values.forEach { tx ->
             require(accounts[tx.accountId]?.currency == tx.money.currency) { "Transaction account currency mismatch" }
             tx.toAccountId?.let { require(accounts[it]?.currency == (tx.received ?: tx.money).currency) { "Transfer account currency mismatch" } }
@@ -111,6 +117,22 @@ class FinancialIntegrity private constructor(
 
     private fun apply(event: Event, strict: Boolean, id: String? = null) {
         when (event) {
+            is BankBalanceCheckpointSet -> {
+                val checkpoint = event.checkpoint
+                if (checkpoint == null) bankCheckpoints.remove(event.accountId)
+                else {
+                    require(checkpoint.canReplace(bankCheckpoints[event.accountId])) { "Cannot replace newer bank balance or change its coverage" }
+                    if (strict) {
+                        require(accounts[event.accountId]?.archived == false)
+                        require(checkpoint.covered.all { it.matches(event.accountId, transactions[it.transactionId]) })
+                    }
+                    bankCheckpoints[event.accountId] = checkpoint
+                }
+            }
+            is BankMovementVerified -> if (strict) {
+                val evidence = event.evidence
+                require(evidence.covered.matches(evidence.accountId, transactions[evidence.covered.transactionId]))
+            }
             is AccountCreated -> accounts.putIfAbsent(event.account.id, event.account)
             is AccountUpdated -> accounts[event.account.id]?.let {
                 accounts[it.id] = event.account.copy(archived = it.archived, icon = event.account.icon ?: it.icon, color = event.account.color ?: it.color)

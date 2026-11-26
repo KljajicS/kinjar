@@ -341,6 +341,8 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                         onActivity = { nav.navigate(Routes.ACTIVITY) },
                         onCategories = { nav.navigate(Routes.CATEGORIES) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
+                        onOpenBankInbox = { nav.navigate(Routes.bankInbox()) },
+                        onReviewBankAccount = { nav.navigate(Routes.editAccount(it)) },
                         onEditTransaction = { nav.navigate(Routes.editTransaction(it)) },
                     )
                 }
@@ -406,7 +408,21 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                 app.kinjar.ui.loans.LoanDetailScreen(onBack = { nav.popBackStack() }, onEdit = { nav.navigate(Routes.editLoan(it)) })
             }
             page(Routes.NEW_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
-            page(Routes.EDIT_ACCOUNT) { EditAccountScreen(onClose = { nav.popBackStack() }) }
+            page(Routes.EDIT_ACCOUNT) {
+                EditAccountScreen(onClose = { nav.popBackStack() }, onBankInbox = { nav.navigate(Routes.bankInbox(it)) })
+            }
+            page(Routes.BANK_INBOX, arguments = listOf(navArgument("accountId") {
+                type = androidx.navigation.NavType.StringType
+                nullable = true
+                defaultValue = null
+            })) { entry ->
+                app.kinjar.ui.bank.BankInboxScreen(entry.arguments?.getString("accountId"), { nav.popBackStack() }, onReview = {
+                    nav.navigate(Routes.bankReview(it))
+                })
+            }
+            page(Routes.BANK_REVIEW) { entry ->
+                app.kinjar.ui.bank.BankReviewScreen(requireNotNull(entry.arguments?.getString("alertId")), { nav.popBackStack() })
+            }
             composable(Tab.INSIGHTS.route) { TabPage(Tab.INSIGHTS, selectTab) { InsightsScreen() } }
             composable(Tab.SCAN.route) {
                 val source = remember { nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.ADD } }
