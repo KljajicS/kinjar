@@ -15,13 +15,17 @@ class WeeklyBudgetTest {
     @Test fun `Monday to Sunday includes year boundary and excludes future expenses income and transfers`() {
         val today = monday.plusDays(6)
         val txs = listOf(tx("before", monday.minusDays(1)), tx("mon", monday), tx("sun", today),
-            tx("future", today.plusDays(1)), tx("income", monday, TransactionType.INCOME), tx("transfer", monday, TransactionType.TRANSFER))
+            tx("future", today.plusDays(1)), tx("income", monday, TransactionType.INCOME), tx("transfer", monday, TransactionType.TRANSFER),
+            tx("other-category", monday).copy(categoryId = "transport"))
         val schedule = listOf(WeeklyBudget("food", monday, rsd("150")))
         val p = WeeklyBudgetCalculator.progress(today, today, schedule, txs, Rates.EMPTY).single()
         assertEquals(rsd("200"), p.spent)
+        assertEquals(listOf("sun", "mon"), p.expenses.map { it.id })
         assertEquals(rsd("-50"), p.remaining)
         assertTrue(p.ratio!! > BigDecimal.ONE)
-        assertEquals(rsd("100"), WeeklyBudgetCalculator.progress(monday, monday, schedule, txs, Rates.EMPTY).single().spent)
+        val mondayProgress = WeeklyBudgetCalculator.progress(monday, monday, schedule, txs, Rates.EMPTY).single()
+        assertEquals(rsd("100"), mondayProgress.spent)
+        assertEquals(listOf("mon"), mondayProgress.expenses.map { it.id })
         assertEquals(monday, weekStart(today))
         assertEquals(monday.plusWeeks(1), weekStart(today.plusDays(1)))
     }
@@ -44,6 +48,7 @@ class WeeklyBudgetTest {
         assertNull(missing.spent)
         assertNull(missing.remaining)
         assertNull(missing.ratio)
+        assertEquals(txs, missing.expenses)
         assertEquals(rsd("11700"), WeeklyBudgetCalculator.progress(monday, monday, schedule, txs, Rates(mapOf(Currency.EUR to BigDecimal("117")))).single().spent)
     }
 

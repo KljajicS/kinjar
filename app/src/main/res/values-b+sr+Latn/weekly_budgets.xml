@@ -1,5 +1,7 @@
 <resources>
     <string name="weekly_title">Nedeljni budžeti</string>
+    <string name="weekly_show_expenses">Prikaži troškove</string>
+    <string name="weekly_hide_expenses">Sakrij troškove</string>
     <string name="weekly_unknown">Nedostaje kurs</string>
     <string name="weekly_over">Preko limita %1$s RSD</string>
     <string name="weekly_left">Preostalo %1$s RSD</string>
