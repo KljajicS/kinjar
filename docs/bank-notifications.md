@@ -8,6 +8,8 @@
 
 ATM withdrawals are transfers to cash. An incoming payment from your own account can also be changed to a transfer. Kinjar suggests the configured account by bank and currency when the match is unique. For a card that draws from multiple currencies, check which account was actually charged.
 
+Android can hide notification text it classifies as sensitive, even after you grant access. If an alert stays visible in Android but Kinjar receives no readable transaction details, enter the transaction manually.
+
 ## Account balances
 
 For a recognized Raiffeisen card alert with an exact bank time, compare the reported balance with the bank app before choosing **Use verified bank balance**. The reported balance is rounded to the account's displayed precision. If the alert is older than the verified balance, choose whether it was already included. The app keeps the newer balance when a covered movement is recorded later. Each side of a transfer is reconciled independently.
