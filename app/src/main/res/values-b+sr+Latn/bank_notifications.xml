@@ -14,15 +14,10 @@
     <string name="bank_income">Prihod</string>
     <string name="bank_transfer">Prenos</string>
     <string name="bank_amount">Iznos %1$s</string>
-    <string name="bank_counterparty">Prodavac ili uplatilac</string>
-    <string name="bank_account">Bankovni račun</string>
-    <string name="bank_choose">Izaberi</string>
     <string name="bank_money_out">Odliv</string>
     <string name="bank_money_in">Priliv</string>
     <string name="bank_from">Sa računa</string>
     <string name="bank_to">Na račun</string>
-    <string name="bank_category">Kategorija</string>
-    <string name="bank_date">Datum</string>
     <string name="bank_available">Raspoloživo u banci: %1$s</string>
     <string name="bank_reported">Prijavljeno stanje: %1$s</string>
     <string name="bank_link">Poveži postojeću transakciju</string>

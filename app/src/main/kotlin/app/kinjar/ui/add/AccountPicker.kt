@@ -73,20 +73,27 @@ fun AccountPicker(accounts: List<Account>, selectedId: String?, balances: Map<St
 }
 
 @Composable
-fun QuickAccounts(s: AddState, onAccount: (String) -> Unit) {
+fun QuickAccounts(s: AddState, onAccount: (String) -> Unit) =
+    QuickAccounts(s.accounts, s.accountId, s.balances, s.type, s.rsdOnly, onAccount)
+
+@Composable
+internal fun QuickAccounts(
+    accounts: List<Account>, accountId: String?, balances: Map<String, Money>, type: app.kinjar.domain.TransactionType?,
+    rsdOnly: Boolean = false, onAccount: (String) -> Unit,
+) {
     val c = LocalColors.current
-    val available = s.accounts.filterNot { it.archived }.filter { !s.rsdOnly || it.currency == app.kinjar.domain.Currency.RSD }
-    val favorites = LocalAccountAppearances.current.favorites(s.accounts).filter { it in available }
+    val available = accounts.filterNot { it.archived }.filter { !rsdOnly || it.currency == app.kinjar.domain.Currency.RSD }
+    val favorites = LocalAccountAppearances.current.favorites(accounts).filter { it in available }
+    val label = stringResource(if (type == app.kinjar.domain.TransactionType.INCOME) R.string.add_deposit_into else R.string.add_pay_from)
     var open by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(if (s.type == app.kinjar.domain.TransactionType.INCOME) R.string.add_deposit_into else R.string.add_pay_from),
-                style = sans(12), color = c.muted, modifier = Modifier.weight(1f))
+            Text(label, style = sans(12), color = c.muted, modifier = Modifier.weight(1f))
             TextButton(onClick = { open = true }) { Text(stringResource(R.string.account_all, available.size)) }
         }
         if (favorites.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             favorites.forEach { account ->
-                val selected = account.id == s.accountId
+                val selected = account.id == accountId
                 val shape = RoundedCornerShape(28.dp)
                 Row(Modifier.weight(1f).heightIn(min = 56.dp).clip(shape)
                     .background(if (selected) c.primary.copy(alpha = c.tintAlpha) else c.surface2)
@@ -106,12 +113,11 @@ fun QuickAccounts(s: AddState, onAccount: (String) -> Unit) {
                 }
             }
         }
-        if (favorites.none { it.id == s.accountId }) {
-            AccountBox(stringResource(if (s.type == app.kinjar.domain.TransactionType.INCOME) R.string.add_deposit_into else R.string.add_pay_from),
-                available, s.accountId, onAccount, Modifier.fillMaxWidth(), s.balances,
-                selectedAccount = s.accounts.firstOrNull { it.id == s.accountId })
+        if (favorites.none { it.id == accountId }) {
+            AccountBox(label, available, accountId, onAccount, Modifier.fillMaxWidth(), balances,
+                selectedAccount = accounts.firstOrNull { it.id == accountId })
         }
         if (available.isEmpty()) Text(stringResource(R.string.account_add_empty), style = sans(12), color = c.muted)
     }
-    if (open) AccountPicker(available, s.accountId, s.balances, onAccount) { open = false }
+    if (open) AccountPicker(available, accountId, balances, onAccount) { open = false }
 }

@@ -14,15 +14,10 @@
     <string name="bank_income">Income</string>
     <string name="bank_transfer">Transfer</string>
     <string name="bank_amount">Amount %1$s</string>
-    <string name="bank_counterparty">Merchant or payer</string>
-    <string name="bank_account">Bank account</string>
-    <string name="bank_choose">Choose</string>
     <string name="bank_money_out">Money out</string>
     <string name="bank_money_in">Money in</string>
     <string name="bank_from">From account</string>
     <string name="bank_to">To account</string>
-    <string name="bank_category">Category</string>
-    <string name="bank_date">Date</string>
     <string name="bank_available">Bank available balance: %1$s</string>
     <string name="bank_reported">Reported balance: %1$s</string>
     <string name="bank_link">Link existing transaction</string>
