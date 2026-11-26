@@ -1,0 +1,16 @@
+CREATE TABLE bank_binding (
+    account_id TEXT NOT NULL PRIMARY KEY,
+    bank TEXT NOT NULL
+);
+
+CREATE TABLE bank_alert (
+    id TEXT NOT NULL PRIMARY KEY,
+    bank TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'LINKED', 'SKIPPED')),
+    transaction_id TEXT
+);
+
+CREATE INDEX bank_alert_inbox ON bank_alert(status, received_at);

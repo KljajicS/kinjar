@@ -1,0 +1,49 @@
+CREATE TABLE bank_binding (
+    account_id TEXT NOT NULL PRIMARY KEY,
+    bank TEXT NOT NULL
+);
+
+CREATE TABLE bank_alert (
+    id TEXT NOT NULL PRIMARY KEY,
+    bank TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'LINKED', 'SKIPPED')),
+    transaction_id TEXT
+);
+
+CREATE INDEX bank_alert_inbox ON bank_alert(status, received_at);
+
+bindings:
+SELECT bank_binding.* FROM bank_binding JOIN account ON account.id = bank_binding.account_id
+WHERE account.archived = 0;
+
+bindAccount:
+INSERT OR REPLACE INTO bank_binding(account_id, bank) VALUES (?, ?);
+
+unbindAccount:
+DELETE FROM bank_binding WHERE account_id = ?;
+
+enabledBank:
+SELECT count(*) FROM bank_binding JOIN account ON account.id = bank_binding.account_id
+WHERE bank_binding.bank = ? AND account.archived = 0;
+
+capture:
+INSERT OR IGNORE INTO bank_alert(id, bank, title, body, received_at) VALUES (?, ?, ?, ?, ?);
+
+pending:
+SELECT * FROM bank_alert WHERE status = 'PENDING' ORDER BY received_at DESC, id;
+
+pendingById:
+SELECT * FROM bank_alert WHERE id = ? AND status = 'PENDING';
+
+resolve:
+UPDATE bank_alert SET status = ?, transaction_id = ?, title = '', body = ''
+WHERE id = ? AND status = 'PENDING';
+
+clearBindings:
+DELETE FROM bank_binding;
+
+clearAlerts:
+DELETE FROM bank_alert;
