@@ -255,6 +255,22 @@ class BudgetRepository(
     suspend fun archiveCategory(id: String) { store.append(CategoryArchived(id)) }
 
     suspend fun addAccount(account: Account) { store.append(AccountCreated(account)) }
+
+    suspend fun migrateAccountAppearances(preferences: AccountAppearances) {
+        val accounts = withContext(Dispatchers.IO) { db.accountQueries.all().executeAsList().map { it.toDomain() } }
+        accounts.forEach { account ->
+            val local = preferences.accounts[account.id] ?: return@forEach
+            if (account.icon != null && account.color != null) return@forEach
+            store.appendAll(listOf(AccountUpdated(account.copy(
+                icon = account.icon ?: local.icon.name, color = account.color ?: local.color.name,
+            ))), skipIf = {
+                db.accountQueries.byId(account.id).executeAsOneOrNull()?.toDomain() != account ||
+                    db.restoreJournalQueries.journalInfo().executeAsOneOrNull() != null ||
+                    db.syncSessionQueries.current().executeAsOneOrNull()?.status?.let { it != "ACTIVE" } == true ||
+                    db.syncConflictQueries.all().executeAsList().isNotEmpty()
+            })
+        }
+    }
     suspend fun accountInUse(id: String): Boolean = withContext(Dispatchers.IO) { hasAccountReferences(id) }
 
     private fun hasAccountReferences(id: String): Boolean =
@@ -375,7 +391,7 @@ class BudgetRepository(
     private fun RuleRow.toDomain() = RecurringRule(
         id, name, Money.of(amount, Currency.valueOf(currency)), account_id, category_id, Cadence.valueOf(cadence), LocalDate.parse(first_due), archived == 1L,
     )
-    private fun AccountRow.toDomain() = Account(id, name, Currency.valueOf(currency), AccountKind.valueOf(kind), archived == 1L, excluded_from_goals == 1L)
+    private fun AccountRow.toDomain() = Account(id, name, Currency.valueOf(currency), AccountKind.valueOf(kind), archived == 1L, excluded_from_goals == 1L, icon, color)
     private fun CategoryRow.toDomain() = Category(id, name, color, archived == 1L, CategoryKind.valueOf(kind), icon)
     private fun MemberRow.toDomain() = Member(id, display_name, device_id)
     private fun Recent.toRecent() = RecentTx(

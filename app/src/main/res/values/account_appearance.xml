@@ -5,7 +5,7 @@
     <string name="account_quick_favorite">Show in quick selection</string>
     <string name="account_favorite_hint">Choose up to 3 accounts. Uses your Accounts order.</string>
     <string name="account_favorite_limit">3 favorites selected. Turn one off in its account settings first.</string>
-    <string name="account_appearance_local">Icons, colors and favorites apply on this device.</string>
+    <string name="account_appearance_local">Icons and colors sync with your family. Favorites and visibility apply on this device.</string>
     <string name="account_favorite_badge">Favorite</string>
     <string name="account_selected">Selected</string>
     <string name="account_search">Search name or currency</string>

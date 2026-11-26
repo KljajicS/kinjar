@@ -29,6 +29,8 @@ data class Account(
     val kind: AccountKind = AccountKind.SPENDING,
     val archived: Boolean = false,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val excludedFromGoals: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val icon: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val color: String? = null,
 )
 
 /** [kind] never changes after creation. New fields are omitted at their defaults so legacy events keep their exact bytes. */

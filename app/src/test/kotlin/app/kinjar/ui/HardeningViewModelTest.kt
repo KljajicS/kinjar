@@ -84,6 +84,21 @@ class HardeningViewModelTest {
         assertEquals(1, db.txQueries.all().executeAsList().size)
     }
 
+    @Test fun `startup migrates local appearance and observes subsequent shared changes`() = runTest(dispatcher) {
+        val account = Account("cash", "Cash", Currency.RSD)
+        repo.setUp("S", listOf(account))
+        val local = app.kinjar.data.AccountAppearanceStore()
+        local.save("cash", app.kinjar.data.AccountAppearance(app.kinjar.data.AccountSymbol.WALLET, app.kinjar.data.AccountTint.GREEN, showInAdd = false), listOf(account))
+        val vm = RootViewModel(dagger.Lazy { repo }, ThemeStore({ null }, {}), dagger.Lazy { error("Unexpected rates") }, local).also { models += it }
+        vm.hasMember.first { it == true }
+        assertEquals("GREEN", repo.accounts.first().single().color)
+        vm.appearances.first { it.appearance("cash").icon == app.kinjar.data.AccountSymbol.WALLET }
+        repo.updateAccount(account.copy(icon = "CARD", color = "BLUE"))
+        val shown = vm.appearances.first { it.appearance("cash").color == app.kinjar.data.AccountTint.BLUE }.appearance("cash")
+        assertEquals(app.kinjar.data.AccountSymbol.CARD, shown.icon)
+        assertFalse(shown.showInAdd)
+    }
+
     @Test fun `startup initializes off caller thread and supports retry`() = runTest(dispatcher) {
         val caller = Thread.currentThread()
         val worker = AtomicReference<Thread>()
