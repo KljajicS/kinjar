@@ -1,5 +1,7 @@
 <resources>
     <string name="weekly_title">Weekly budgets</string>
+    <string name="weekly_show_expenses">Show expenses</string>
+    <string name="weekly_hide_expenses">Hide expenses</string>
     <string name="weekly_unknown">Missing exchange rate</string>
     <string name="weekly_over">Over by %1$s RSD</string>
     <string name="weekly_left">%1$s RSD left</string>
