@@ -339,7 +339,6 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
                     HomeScreen(
                         onSyncSettings = { nav.navigate(Routes.FAMILY) },
                         onActivity = { nav.navigate(Routes.ACTIVITY) },
-                        onCategories = { nav.navigate(Routes.CATEGORIES) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
                         onOpenBankInbox = { nav.navigate(Routes.bankInbox()) },
                         onReviewBankAccount = { nav.navigate(Routes.editAccount(it)) },
@@ -423,7 +422,11 @@ fun KinjarRoot(root: RootViewModel, updates: UpdateViewModel) {
             page(Routes.BANK_REVIEW) { entry ->
                 app.kinjar.ui.bank.BankReviewScreen(requireNotNull(entry.arguments?.getString("alertId")), { nav.popBackStack() })
             }
-            composable(Tab.INSIGHTS.route) { TabPage(Tab.INSIGHTS, selectTab) { InsightsScreen() } }
+            composable(Tab.INSIGHTS.route) {
+                TabPage(Tab.INSIGHTS, selectTab) {
+                    InsightsScreen(onCategories = { nav.navigate(Routes.CATEGORIES) })
+                }
+            }
             composable(Tab.SCAN.route) {
                 val source = remember { nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.ADD } }
                 val draft = source?.let { hiltViewModel<app.kinjar.ui.add.AddViewModel>(it) }

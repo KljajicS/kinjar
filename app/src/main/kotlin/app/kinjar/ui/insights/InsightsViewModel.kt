@@ -18,19 +18,27 @@ import app.kinjar.domain.InsightsCalculator
 import app.kinjar.domain.InsightsSummary
 import app.kinjar.domain.Slice
 import app.kinjar.domain.Transaction
+import app.kinjar.domain.WeeklyBudget
+import app.kinjar.domain.WeeklyBudgetProgress
+import app.kinjar.domain.WeeklyBudgetCalculator
+import app.kinjar.domain.weekStart
 import app.kinjar.ui.RateStatus
 import app.kinjar.ui.settings.Loadable
 import java.time.YearMonth
+import java.time.LocalDate
 import javax.inject.Inject
 
 data class InsightsState(
     val summary: InsightsSummary,
     val categories: Map<String, Category>,
     val hasData: Boolean,
+    val today: LocalDate,
     val selected: Slice? = null,
     val drilldown: List<Transaction> = emptyList(),
     val accountNames: Map<String, String> = emptyMap(),
     val rateStatus: RateStatus = RateStatus(),
+    val budgets: List<WeeklyBudgetProgress> = emptyList(),
+    val upcomingBudgets: List<WeeklyBudget> = emptyList(),
 ) {
     val canGoBack: Boolean get() = summary.month > summary.range.start
     val canGoForward: Boolean get() = summary.month < summary.range.endInclusive
@@ -45,7 +53,11 @@ class InsightsViewModel @Inject constructor(repo: BudgetRepository, private val 
 
     private val load = Loadable(viewModelScope, combine(
         month, selection, repo.financial, repo.allCategories,
-    ) { m, chosen, financial, categories ->
+        combine(repo.weeklyBudgets, repo.expenseCategories) { schedule, categories ->
+            val activeIds = categories.map { it.id }.toSet()
+            schedule.filter { it.categoryId in activeIds }
+        },
+    ) { m, chosen, financial, categories, budgets ->
         val summary = InsightsCalculator.summarize(financial.day, m, financial.transactions, financial.exchange.rates)
         val slice = chosen?.let { s -> summary.slices.firstOrNull { it.categoryId == s.categoryId } }
         InsightsState(
@@ -56,6 +68,9 @@ class InsightsViewModel @Inject constructor(repo: BudgetRepository, private val 
             drilldown = slice?.let { InsightsCalculator.drilldown(financial.day, summary, it, financial.transactions) }.orEmpty(),
             accountNames = financial.accounts.associate { it.id to it.name },
             rateStatus = RateStatus.from(financial),
+            today = financial.day,
+            budgets = WeeklyBudgetCalculator.progress(financial.day, financial.day, budgets, financial.transactions, financial.exchange.rates),
+            upcomingBudgets = budgets.filter { it.effectiveFrom > weekStart(financial.day) },
         )
     }.flowOn(Dispatchers.Default))
     val state: StateFlow<InsightsState?> = load.state

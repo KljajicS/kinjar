@@ -55,7 +55,6 @@ class HomeViewModelTest {
         repo.add(Transaction("t2", TransactionType.EXPENSE, Money.of("250", Currency.RSD), "cash", null, "cat-fun", LocalDate.of(2026, 10, 14), "", "Cinema", m, TransactionSource.MANUAL))
         repo.reorderAccounts(listOf("card", "old", "cash"))
         repo.archiveAccount("old")
-        repo.setWeeklyBudget(app.kinjar.domain.WeeklyBudget("cat-fun", app.kinjar.domain.weekStart(clock.today()), Money.of("500", Currency.RSD)), emptyList())
         val vm = HomeViewModel(repo, clock).also { models += it }
         val s = vm.state.filterNotNull().first()
         assertEquals(Money.of("750", Currency.RSD), s.summary.savingsRsd)
@@ -64,8 +63,5 @@ class HomeViewModelTest {
         assertEquals("Old", s.accountNames["old"])
         assertEquals("Cinema", s.recent.first().transaction.merchant)
         assertEquals(m, s.currentMemberId)
-        assertEquals("cat-fun", s.budgets.single().budget.categoryId)
-        assertEquals(Money.of("250", Currency.RSD), s.budgets.single().spent)
-        assertEquals(Money.of("250", Currency.RSD), s.budgets.single().remaining)
     }
 }
