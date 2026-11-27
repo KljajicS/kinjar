@@ -18,6 +18,7 @@ import app.kinjar.data.Clock
 import app.kinjar.data.DuplicateReceipt
 import app.kinjar.data.InvalidReceiptAccount
 import app.kinjar.data.InvalidReceiptCategory
+import app.kinjar.data.RelatedSyncConflict
 import app.kinjar.data.StaleTransaction
 import app.kinjar.data.DiagnosticOperation
 import app.kinjar.data.Diagnostics
@@ -503,6 +504,7 @@ class AddViewModel @Inject constructor(
                     is DuplicateReceipt -> R.string.scan_duplicate
                     is InvalidReceiptAccount -> R.string.scan_rsd_account
                     is InvalidReceiptCategory -> R.string.scan_category_changed
+                    is RelatedSyncConflict -> R.string.write_sync_conflict
                     else -> R.string.add_save_failed
                 }
                 _state.update { it.copy(saving = false, saveError = message) }

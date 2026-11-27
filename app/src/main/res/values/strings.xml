@@ -302,6 +302,7 @@
     <string name="scan_save_next">Save &amp; scan next</string>
     <string name="scan_save">Save</string>
     <string name="write_failed">Could not save. Your changes are still here. Please try again.</string>
+    <string name="write_sync_conflict">Resolve the related changes in Family sync, then save again.</string>
     <string name="startup_failed">Could not open your budget. Please try again.</string>
     <string name="startup_retry">Try again</string>
     <string name="recurring_schedule_locked">To change this schedule, archive it and create a new one. Previous payments stay recorded.</string>

@@ -301,6 +301,7 @@
     <string name="scan_save_next">Sačuvaj i skeniraj</string>
     <string name="scan_save">Sačuvaj</string>
     <string name="write_failed">Čuvanje nije uspelo. Izmene su sačuvane u obrascu. Pokušajte ponovo.</string>
+    <string name="write_sync_conflict">Razreši povezane izmene u porodičnoj sinhronizaciji, pa ponovo sačuvaj unos.</string>
     <string name="startup_failed">Budžet nije moguće otvoriti. Pokušajte ponovo.</string>
     <string name="startup_retry">Pokušaj ponovo</string>
     <string name="recurring_schedule_locked">Za promenu rasporeda arhivirajte ovu obavezu i napravite novu. Prethodne uplate ostaju zabeležene.</string>

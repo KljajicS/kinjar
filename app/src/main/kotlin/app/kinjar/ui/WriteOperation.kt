@@ -14,9 +14,10 @@ import kotlinx.coroutines.launch
 import app.kinjar.R
 import app.kinjar.data.DiagnosticOperation
 import app.kinjar.data.Diagnostics
+import app.kinjar.data.RelatedSyncConflict
 import app.kinjar.ui.theme.LocalColors
 
-data class WriteState(val busy: Boolean = false, val failed: Boolean = false, val finished: Boolean = false)
+data class WriteState(val busy: Boolean = false, val failed: Boolean = false, val finished: Boolean = false, val syncConflict: Boolean = false)
 
 class WriteOperation(private val scope: CoroutineScope, private val diagnosticOperation: DiagnosticOperation = DiagnosticOperation.UI_WRITE) {
     private val mutableState = MutableStateFlow(WriteState())
@@ -43,7 +44,7 @@ class WriteOperation(private val scope: CoroutineScope, private val diagnosticOp
                 throw e
             } catch (e: Exception) {
                 Diagnostics.report(diagnosticOperation, e)
-                mutableState.value = WriteState(failed = true)
+                mutableState.value = WriteState(failed = true, syncConflict = e is RelatedSyncConflict)
             }
         }
     }
@@ -53,5 +54,5 @@ class WriteOperation(private val scope: CoroutineScope, private val diagnosticOp
 fun WriteFeedback(operation: WriteOperation, failureText: Int = R.string.write_failed) {
     val state by operation.state.collectAsStateWithLifecycle()
     if (state.busy) LinearProgressIndicator()
-    if (state.failed) Text(stringResource(failureText), color = LocalColors.current.orange)
+    if (state.failed) Text(stringResource(if (state.syncConflict) R.string.write_sync_conflict else failureText), color = LocalColors.current.orange)
 }
