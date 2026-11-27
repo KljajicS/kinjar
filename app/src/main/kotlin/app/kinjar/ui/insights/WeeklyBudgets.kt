@@ -1,4 +1,4 @@
-package app.kinjar.ui.home
+package app.kinjar.ui.insights
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,7 +36,7 @@ internal fun weeklyRange(start: LocalDate, locale: Locale, today: LocalDate): St
 }
 
 @Composable
-internal fun WeeklyBudgetsCard(s: HomeState, onEdit: () -> Unit) {
+internal fun WeeklyBudgetsCard(s: InsightsState, onEdit: () -> Unit) {
     val c = LocalColors.current
     val locale = LocalLocale.current.platformLocale
     val week = weekStart(s.today)

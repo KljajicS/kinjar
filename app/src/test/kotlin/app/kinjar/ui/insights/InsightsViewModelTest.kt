@@ -50,6 +50,24 @@ class InsightsViewModelTest {
     }
 
     @Test
+    fun `weekly budgets remain current when viewing a previous month`() = runTest(dispatcher) {
+        repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD, AccountKind.SPENDING)))
+        val member = repo.currentMember()!!.id
+        repo.add(Transaction("old", TransactionType.EXPENSE, Money.of("100", Currency.RSD), "cash", null, "cat-fun", LocalDate.of(2026, 9, 1), "", "", member, TransactionSource.MANUAL))
+        repo.add(Transaction("current", TransactionType.EXPENSE, Money.of("250", Currency.RSD), "cash", null, "cat-fun", clock.today(), "", "", member, TransactionSource.MANUAL))
+        repo.setWeeklyBudget(app.kinjar.domain.WeeklyBudget("cat-fun", app.kinjar.domain.weekStart(clock.today()), Money.of("500", Currency.RSD)), emptyList())
+        val vm = InsightsViewModel(repo, clock).also { models += it }
+        val current = vm.state.filterNotNull().first()
+        assertEquals("cat-fun", current.budgets.single().budget.categoryId)
+        assertEquals(Money.of("250", Currency.RSD), current.budgets.single().spent)
+        assertEquals(Money.of("250", Currency.RSD), current.budgets.single().remaining)
+        vm.previousMonth()
+        val previous = vm.state.filterNotNull().first { it.summary.month == YearMonth.of(2026, 9) }
+        assertEquals(current.budgets, previous.budgets)
+        assertEquals(clock.today(), previous.today)
+    }
+
+    @Test
     fun `month arrows stop at the first transaction and at today, archived categories keep their name`() = runTest(dispatcher) {
         repo.setUp("S", listOf(Account("cash", "Cash", Currency.RSD, AccountKind.SPENDING)))
         val m = repo.currentMember()!!.id

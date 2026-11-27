@@ -67,7 +67,7 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 @Composable
-fun InsightsScreen(vm: InsightsViewModel = hiltViewModel()) {
+fun InsightsScreen(onCategories: () -> Unit, vm: InsightsViewModel = hiltViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val failed by vm.loadFailed.collectAsStateWithLifecycle()
     val s = state ?: return app.kinjar.ui.theme.LoadingOrError(failed, vm::retryLoad)
@@ -102,9 +102,10 @@ fun InsightsScreen(vm: InsightsViewModel = hiltViewModel()) {
         item { RateNotice(s.rateStatus) }
         if (!s.hasData) {
             item { Text(stringResource(R.string.insights_empty), style = BodyStyle, color = c.muted) }
-            return@LazyColumn
         }
-        item { SpendingCard(sum, s.categories, s.selected, vm::select) }
+        if (s.hasData) item { SpendingCard(sum, s.categories, s.selected, vm::select) }
+        if (s.budgets.isNotEmpty() || s.upcomingBudgets.isNotEmpty()) item { WeeklyBudgetsCard(s, onCategories) }
+        if (!s.hasData) return@LazyColumn
         s.selected?.let { slice -> item { DrilldownCard(s, slice, vm::closeCategory) } }
         item { MonthsCard(sum) }
         item { ChangesCard(sum, s.categories) }

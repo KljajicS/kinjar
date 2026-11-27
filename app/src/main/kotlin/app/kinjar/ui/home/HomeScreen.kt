@@ -78,7 +78,6 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onSyncSettings: () -> Unit, onActivity: () -> Unit, onSettings: () -> Unit,
-    onCategories: () -> Unit,
     onOpenBankInbox: () -> Unit,
     onReviewBankAccount: (String) -> Unit,
     onEditTransaction: (String) -> Unit = {}, vm: HomeViewModel = hiltViewModel(),
@@ -132,7 +131,6 @@ fun HomeScreen(
         if (failed) item { LoadFailed(vm::retry) }
         if (held.failed) item { ConflictCheckFailed(R.string.audit_conflict_list_failed, conflicts::retry) }
         item { OverviewCard(s, locale) }
-        if (s.budgets.isNotEmpty() || s.upcomingBudgets.isNotEmpty()) item { WeeklyBudgetsCard(s, onCategories) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
