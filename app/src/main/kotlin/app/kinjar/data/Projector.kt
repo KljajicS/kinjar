@@ -207,7 +207,7 @@ class Projector(private val db: KinjarDb) {
 
     companion object {
         /** Bump when a projector change must reach existing installs; the app rebuilds once on mismatch. */
-        const val VERSION = 10
+        const val VERSION = 11
     }
 }
 

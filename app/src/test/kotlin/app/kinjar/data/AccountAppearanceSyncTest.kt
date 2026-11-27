@@ -14,6 +14,34 @@ class AccountAppearanceSyncTest {
     private val store = EventStore(db, "phone", clock, Projector(db))
     private val repo = BudgetRepository(db, store, clock, "phone")
 
+    @Test fun `matching offline appearance migrations allow expenses transfers and bank reviews after sync`() = runTest {
+        repo.setUp("Tester", listOf(Account("kdev", "Kdev RSD", Currency.RSD), Account("stek", "Stek", Currency.RSD)))
+        val member = requireNotNull(repo.currentMember()).id
+        val baseline = store.snapshot()
+        val peerDb = testDb()
+        val peer = EventStore(peerDb, "peer", clock, Projector(peerDb))
+        peer.activate("user", "family", "dataset", member, 1, baseline, peer.currentDigest(), false)
+        store.activate("user", "family", "dataset", member, 1, baseline, store.currentDigest(), false)
+        val local = AccountAppearances(accounts = mapOf("kdev" to AccountAppearance()))
+        repo.migrateAccountAppearances(local)
+        BudgetRepository(peerDb, peer, clock, "peer").migrateAccountAppearances(local)
+        store.receive(peerDb.syncOperationQueries.all().executeAsList().map { it.payload }, "user", "family", "dataset", 0, 0, "")
+        store.rebuild()
+
+        val expense = Transaction("control", TransactionType.EXPENSE, Money.of("12", Currency.RSD), "stek",
+            null, "cat-groceries", clock.today(), "", "", member, TransactionSource.MANUAL)
+        repo.add(expense)
+        val affected = expense.copy(id = "expense", accountId = "kdev")
+        repo.add(affected)
+        repo.add(affected.copy(id = "transfer", type = TransactionType.TRANSFER, categoryId = null, toAccountId = "stek"))
+        db.bankInboxQueries.capture("alert", "YETTEL", "Fixture", "", 1)
+        repo.saveBankDraft("alert", affected.copy(id = "bank"))
+        store.rebuild()
+        assertEquals(setOf("control", "expense", "transfer", "bank"), db.txQueries.all().executeAsList().map { it.id }.toSet())
+        assertNull(db.bankInboxQueries.pendingById("alert").executeAsOneOrNull())
+        assertTrue(db.syncConflictQueries.all().executeAsList().isEmpty())
+    }
+
     @Test fun `account and category appearance reaches another phone and survives legacy edits and replay`() = runTest {
         store.activate("user", "family", "dataset", "member", 1, store.snapshot(), store.currentDigest(), false)
         val account = Account("a", "Cash", Currency.RSD, icon = "WALLET", color = "GREEN")

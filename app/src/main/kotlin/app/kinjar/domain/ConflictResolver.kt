@@ -120,12 +120,28 @@ object ConflictResolver {
         if (a.events.size == 1 && b.events.size == 1) {
             val first = a.events.single().event
             val second = b.events.single().event
+            if (first is AccountUpdated && first == second) return false
             if (first is MemberCreated && second is MemberCreated && first.member.id == second.member.id) return false
             if (first is AccountsReordered && second is AccountsReordered) return false
             if (first is GoalsReordered && second is GoalsReordered) return false
         }
         return a.resources.any { (key, mode) ->
-            b.resources[key]?.let { mode == ResourceAccess.WRITE || it == ResourceAccess.WRITE } == true
+            val other = b.resources[key] ?: return@any false
+            when {
+                mode == ResourceAccess.WRITE && other == ResourceAccess.WRITE -> true
+                mode == ResourceAccess.WRITE -> !independentBankEntry(key, a, b)
+                other == ResourceAccess.WRITE -> !independentBankEntry(key, b, a)
+                else -> false
+            }
         }
+    }
+
+    private fun independentBankEntry(key: String, writer: SyncOperation, reader: SyncOperation): Boolean {
+        if (!key.startsWith("account:") || writer.version < 14) return false
+        val entry = (reader.events.singleOrNull()?.event as? TransactionAdded)?.transaction ?: return false
+        val checkpoint = (writer.events.lastOrNull()?.event as? BankBalanceCheckpointSet)?.checkpoint ?: return false
+        if (key != "account:${checkpoint.accountId}" || entry.date <= bankDate(checkpoint.asOf)) return false
+        if (checkpoint.covered.any { it.transactionId == entry.id }) return false
+        return writer.events.dropLast(1).all { it.event is TransactionAdded || it.event is BankMovementVerified }
     }
 }

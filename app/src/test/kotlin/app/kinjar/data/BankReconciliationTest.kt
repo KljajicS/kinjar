@@ -85,6 +85,35 @@ class BankReconciliationTest {
     }
 
     @Test
+    fun `offline expense after the verified day stays writable while same-day activity needs review`() = runTest {
+        for (daysAfter in listOf(0L, 1L)) checkConcurrentVerification(daysAfter)
+    }
+
+    private suspend fun checkConcurrentVerification(daysAfter: Long) {
+        val l = Ledger().apply { start() }
+        val peerDb = testDb()
+        val peer = EventStore(peerDb, "peer", l.clock, Projector(peerDb))
+        val peerRepo = BudgetRepository(peerDb, peer, l.clock, "peer")
+        val baseline = l.store.snapshot()
+        peer.activate("user", "family", "dataset", l.member, 1, baseline, peer.currentDigest(), false)
+        l.store.activate("user", "family", "dataset", l.member, 1, baseline, l.store.currentDigest(), false)
+        l.inbox.bind("card", BankApp.RAIFFEISEN)
+        val alert = l.capture("newer", "13:00:00", "200,00", "700,00")
+        assertEquals(Money.of("1500", Currency.RSD), l.balance())
+        l.repo.saveBankDraft(alert, l.expense("bank", "200"), "card", BankBalanceAction.VERIFY)
+        assertEquals(Money.of("700", Currency.RSD), l.balance())
+        peerRepo.add(l.expense("offline", "50").copy(date = l.day.plusDays(daysAfter)))
+        l.store.receive(peerDb.syncOperationQueries.all().executeAsList().map { it.payload }, "user", "family", "dataset", 1, 0, "")
+        l.repo.add(l.expense("control", "1").copy(accountId = "cash"))
+        if (daysAfter == 0L) {
+            assertTrue(runCatching { l.repo.add(l.expense("later", "10")) }.exceptionOrNull() is RelatedSyncConflict)
+            return
+        }
+        l.repo.add(l.expense("later", "10").copy(date = l.day.plusDays(1)))
+        assertEquals(Money.of("640", Currency.RSD), l.balance())
+    }
+
+    @Test
     fun `old withdrawal included by the bank still credits the cash account`() = runTest {
         val l = Ledger().apply { start() }
         val withdrawal = l.capture("withdrawal", "12:00:00", "100,00", "900,00")

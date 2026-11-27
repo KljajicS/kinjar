@@ -27,6 +27,8 @@ import app.kinjar.domain.QuarantinedOperation
 import app.kinjar.domain.source
 import java.time.Instant
 
+class RelatedSyncConflict : IllegalStateException("Resolve related changes first")
+
 class EventStore(
     private val db: KinjarDb,
     private val deviceId: String,
@@ -60,7 +62,7 @@ class EventStore(
                 val known = if (!tracked) emptyList() else synced.operationViews()
                 val parents = ConflictResolver.parentsFor(known, resources)
                 val blocked = db.syncConflictQueries.all().executeAsList().map { it.operation_id }.toSet()
-                check(parents.none { it in blocked }) { "Resolve related changes first" }
+                if (parents.any { it in blocked }) throw RelatedSyncConflict()
                 val records = events.map { event ->
                     val seq = (db.eventQueries.lastSeq(deviceId).executeAsOne().max_seq ?: 0L) + 1
                     // Logical clock preserves causality when a device clock moves backwards.
